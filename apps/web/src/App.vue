@@ -39,7 +39,9 @@ const currentStatus = computed(() => statusPresentation[health.availability])
 const lobby = computed(() => roomAccess.lobby)
 const game = computed(() => roomAccess.game)
 const isHost = computed(() => lobby.value?.participant.role === 'host')
-const isRestoringSession = computed(() => roomAccess.status === 'restoring')
+const isRestoringSession = computed(
+  () => roomAccess.status === 'restoring' && !lobby.value && !game.value,
+)
 const sessionNeedsRecovery = computed(
   () => roomAccess.sessionExpected && !lobby.value && !game.value,
 )
@@ -78,7 +80,9 @@ const canCompleteDarkArts = computed(
     game.value?.legal_actions.includes('complete_dark_arts') === true &&
     !gameCommand.pendingIntent &&
     gameCommand.status !== 'submitting' &&
-    gameCommand.status !== 'recovering',
+    gameCommand.status !== 'recovering' &&
+    gameCommand.status !== 'stale' &&
+    gameCommand.status !== 'resyncing',
 )
 const gamePhaseLabel = computed(() => {
   switch (game.value?.turn.phase) {
@@ -228,6 +232,10 @@ function lobbyIsBusy(): boolean {
   )
 }
 
+function gameCommandIsBusy(): boolean {
+  return ['submitting', 'recovering', 'resyncing'].includes(gameCommand.status)
+}
+
 function retry(): void {
   if (health.availability !== 'checking') {
     void health.check()
@@ -322,7 +330,23 @@ async function completeDarkArts(): Promise<void> {
     roomAccess.game = projection
     await nextTick()
     document.getElementById('game-heading')?.focus()
+  } else if (gameCommand.status === 'stale') {
+    await resyncStaleGame()
   }
+}
+
+async function resyncStaleGame(): Promise<void> {
+  const staleGameId = game.value?.game.id
+  if (!staleGameId || !gameCommand.beginStaleResync()) {
+    return
+  }
+
+  await roomAccess.refreshSession()
+  gameCommand.finishStaleResync(
+    roomAccess.status === 'ready' && roomAccess.game?.game.id === staleGameId,
+  )
+  await nextTick()
+  document.getElementById('game-heading')?.focus()
 }
 
 async function recoverGameCommand(): Promise<void> {
@@ -466,7 +490,7 @@ onMounted(async () => {
       v-else-if="game"
       class="room-success game-stage"
       aria-labelledby="game-heading"
-      :aria-busy="gameCommand.status === 'submitting' || gameCommand.status === 'recovering'"
+      :aria-busy="gameCommandIsBusy()"
     >
       <div class="cue-rail" aria-hidden="true">
         <span class="cue-number">4</span>
@@ -487,15 +511,19 @@ onMounted(async () => {
         </p>
 
         <div
-          v-if="gameCommand.status === 'submitting' || gameCommand.status === 'recovering'"
+          v-if="gameCommandIsBusy()"
           class="command-feedback command-feedback--pending"
           role="status"
           aria-live="polite"
         >
-          <strong>Intenção pendente</strong>
+          <strong>
+            {{ gameCommand.status === 'resyncing' ? 'Atualizando estado oficial' : 'Intenção pendente' }}
+          </strong>
           <p>
             {{
-              gameCommand.status === 'recovering'
+              gameCommand.status === 'resyncing'
+                ? 'O último Snapshot confirmado permanece visível até a nova projeção chegar.'
+                : gameCommand.status === 'recovering'
                 ? 'Consultando o recibo persistido. O estado abaixo continua sendo a última versão oficial.'
                 : 'A solicitação foi enviada. Nada muda na mesa até o servidor concluir o commit.'
             }}
@@ -509,6 +537,28 @@ onMounted(async () => {
           <strong>Confirmação ainda desconhecida</strong>
           <p>
             A conexão terminou sem resposta. Consulte o mesmo comando antes de tomar outra decisão.
+          </p>
+        </div>
+        <div
+          v-else-if="gameCommand.status === 'resynced'"
+          class="command-feedback command-feedback--accepted"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>Estado oficial atualizado</strong>
+          <p>
+            Outro comando avançou esta partida. Revise o Snapshot recebido antes de decidir uma
+            nova ação.
+          </p>
+        </div>
+        <div
+          v-else-if="gameCommand.status === 'stale'"
+          class="command-feedback command-feedback--warning"
+          role="alert"
+        >
+          <strong>Estado oficial desatualizado</strong>
+          <p>
+            Outro comando avançou esta partida, mas o Snapshot atualizado ainda não foi recebido.
           </p>
         </div>
         <div
@@ -1005,6 +1055,22 @@ onMounted(async () => {
         @click="recoverGameCommand()"
       >
         Verificar resultado da ação
+      </button>
+      <button
+        v-else-if="game && gameCommand.status === 'stale'"
+        class="primary-button"
+        type="button"
+        @click="resyncStaleGame()"
+      >
+        Atualizar estado da partida
+      </button>
+      <button
+        v-else-if="game && gameCommand.status === 'resyncing'"
+        class="primary-button"
+        :disabled="true"
+        type="button"
+      >
+        Atualizando estado da partida
       </button>
       <button
         v-else-if="game && (gameCommand.status === 'submitting' || gameCommand.status === 'recovering')"

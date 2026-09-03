@@ -435,8 +435,10 @@ pub(super) async fn persist_game_command(
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
         RETURNING
             command_id,
+            actor_participant_id,
             command_type,
             expected_state_version,
+            payload_digest,
             accepted_state_version,
             accepted_sequence,
             replace(
@@ -463,6 +465,38 @@ pub(super) async fn persist_game_command(
     .map_err(|_| ApiError::internal())
 }
 
+pub(super) async fn command_receipt_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    game_id: Uuid,
+    command_id: Uuid,
+) -> Result<Option<StoredCommandReceipt>, ApiError> {
+    sqlx::query_as::<_, StoredCommandReceipt>(
+        r"
+        SELECT
+            command_id,
+            actor_participant_id,
+            command_type,
+            expected_state_version,
+            payload_digest,
+            accepted_state_version,
+            accepted_sequence,
+            replace(
+                to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS expires_at
+        FROM game_command_receipts
+        WHERE game_id = $1
+          AND command_id = $2
+        ",
+    )
+    .bind(game_id)
+    .bind(command_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::internal())
+}
+
 pub(super) async fn command_receipt_for_actor(
     database: &PgPool,
     participant_id: Uuid,
@@ -472,8 +506,10 @@ pub(super) async fn command_receipt_for_actor(
         r"
         SELECT
             receipts.command_id,
+            receipts.actor_participant_id,
             receipts.command_type,
             receipts.expected_state_version,
+            receipts.payload_digest,
             receipts.accepted_state_version,
             receipts.accepted_sequence,
             replace(

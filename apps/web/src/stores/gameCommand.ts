@@ -14,6 +14,9 @@ type GameCommandStatus =
   | 'recovering'
   | 'accepted'
   | 'not_committed'
+  | 'stale'
+  | 'resyncing'
+  | 'resynced'
   | 'failed'
 
 interface PendingGameIntent {
@@ -141,7 +144,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
         if (response.status >= 500 || this.errorCode === 'UNEXPECTED_RESPONSE') {
           this.status = 'uncertain'
         } else {
-          this.status = 'failed'
+          this.status = this.errorCode === 'STALE_STATE_VERSION' ? 'stale' : 'failed'
           this.pendingIntent = null
           removePendingIntent()
         }
@@ -202,6 +205,19 @@ export const useGameCommandStore = defineStore('gameCommand', {
       this.status = 'idle'
       this.errorCode = null
       this.receipt = null
+    },
+    beginStaleResync(): boolean {
+      if (this.status !== 'stale' || this.errorCode !== 'STALE_STATE_VERSION') {
+        return false
+      }
+      this.status = 'resyncing'
+      return true
+    },
+    finishStaleResync(succeeded: boolean): void {
+      if (this.status !== 'resyncing') {
+        return
+      }
+      this.status = succeeded ? 'resynced' : 'stale'
     },
     accept(
       receipt: GameCommandReceipt,

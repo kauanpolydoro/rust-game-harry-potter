@@ -6,6 +6,8 @@ use game_content::{ContentManifest, import_base_bundle};
 use harry_potter_server::{AppState, build_router, initialize};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Barrier;
 use tower::ServiceExt;
 
 struct ReadyRoom {
@@ -249,6 +251,40 @@ fn start_request(
         Some(cookie),
         Some(key),
     )
+}
+
+fn command_request(
+    cookie: &str,
+    command_id: uuid::Uuid,
+    expected_state_version: u64,
+) -> Request<Body> {
+    json_request(
+        "POST",
+        "/api/games/current/commands",
+        &json!({
+            "command_id": command_id.to_string(),
+            "expected_state_version": expected_state_version,
+            "type": "complete_dark_arts"
+        }),
+        Some(cookie),
+        None,
+    )
+}
+
+async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
+    let response = room
+        .app
+        .clone()
+        .oneshot(start_request(
+            &room.host_cookie,
+            &unique_key(key_prefix),
+            &room.manifest,
+            "adventure:001",
+        ))
+        .await
+        .expect("game start must receive a response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    response_json(response).await
 }
 
 async fn ready_room() -> ReadyRoom {
@@ -758,6 +794,301 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
         recovered["projection"]["snapshot"],
         accepted["projection"]["snapshot"]
     );
+}
+
+#[tokio::test]
+async fn identical_command_retries_return_the_original_receipt_without_duplicate_effects() {
+    let room = ready_room().await;
+    start_ready_game(&room, "idempotent-command-start").await;
+    let command_id = uuid::Uuid::new_v4();
+
+    let first_response = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, command_id, 1))
+        .await
+        .expect("the original command must receive a response");
+    assert_eq!(first_response.status(), StatusCode::OK);
+    let first = response_json(first_response).await;
+
+    let retry_response = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, command_id, 1))
+        .await
+        .expect("the identical retry must receive a response");
+    assert_eq!(retry_response.status(), StatusCode::OK);
+    let retry = response_json(retry_response).await;
+
+    assert_eq!(retry["receipt"], first["receipt"]);
+    assert_eq!(retry["projection"]["snapshot"]["state_version"], 2);
+    assert_eq!(retry["projection"]["snapshot"]["sequence"], 1);
+
+    let artifacts = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            (SELECT count(*) FROM game_events WHERE game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the idempotent command artifacts must remain queryable");
+    assert_eq!(artifacts, (2, 1, 1, 1));
+}
+
+#[tokio::test]
+async fn concurrent_identical_commands_share_one_receipt_and_one_effect() {
+    let room = ready_room().await;
+    start_ready_game(&room, "concurrent-idempotent-command-start").await;
+    let command_id = uuid::Uuid::new_v4();
+    let barrier = Arc::new(Barrier::new(2));
+
+    let first_barrier = Arc::clone(&barrier);
+    let first_app = room.app.clone();
+    let first_cookie = room.host_cookie.clone();
+    let first = async move {
+        first_barrier.wait().await;
+        first_app
+            .oneshot(command_request(&first_cookie, command_id, 1))
+            .await
+            .expect("the first concurrent retry must receive a response")
+    };
+    let second_barrier = Arc::clone(&barrier);
+    let second_app = room.app.clone();
+    let second_cookie = room.host_cookie.clone();
+    let second = async move {
+        second_barrier.wait().await;
+        second_app
+            .oneshot(command_request(&second_cookie, command_id, 1))
+            .await
+            .expect("the second concurrent retry must receive a response")
+    };
+    let (first_response, second_response) = tokio::join!(first, second);
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    assert_eq!(second_response.status(), StatusCode::OK);
+    let first = response_json(first_response).await;
+    let second = response_json(second_response).await;
+    assert_eq!(first["receipt"], second["receipt"]);
+
+    let artifacts = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            (SELECT count(*) FROM game_events WHERE game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the concurrent idempotent artifacts must remain queryable");
+    assert_eq!(artifacts, (2, 1, 1, 1));
+}
+
+#[tokio::test]
+async fn reusing_a_command_id_with_another_payload_is_rejected() {
+    let room = ready_room().await;
+    start_ready_game(&room, "command-payload-conflict-start").await;
+    let command_id = uuid::Uuid::new_v4();
+
+    let accepted = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, command_id, 1))
+        .await
+        .expect("the original command must receive a response");
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let conflict = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, command_id, 2))
+        .await
+        .expect("the conflicting retry must receive a response");
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(conflict).await["error"]["code"],
+        "IDEMPOTENCY_KEY_REUSED"
+    );
+
+    let artifacts = sqlx::query_as::<_, (i64, i64)>(
+        r"
+        SELECT
+            (SELECT count(*) FROM game_events WHERE game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the original command artifacts must remain queryable");
+    assert_eq!(artifacts, (1, 1));
+}
+
+#[tokio::test]
+async fn commands_for_the_same_state_version_have_one_acceptance_and_one_stale_result() {
+    let room = ready_room().await;
+    start_ready_game(&room, "same-version-race-start").await;
+    let first_command_id = uuid::Uuid::new_v4();
+    let second_command_id = uuid::Uuid::new_v4();
+    let barrier = Arc::new(Barrier::new(2));
+
+    let first_barrier = Arc::clone(&barrier);
+    let first_app = room.app.clone();
+    let first_cookie = room.host_cookie.clone();
+    let first = async move {
+        first_barrier.wait().await;
+        first_app
+            .oneshot(command_request(&first_cookie, first_command_id, 1))
+            .await
+            .expect("the first competing command must receive a response")
+    };
+    let second_barrier = Arc::clone(&barrier);
+    let second_app = room.app.clone();
+    let second_cookie = room.host_cookie.clone();
+    let second = async move {
+        second_barrier.wait().await;
+        second_app
+            .oneshot(command_request(&second_cookie, second_command_id, 1))
+            .await
+            .expect("the second competing command must receive a response")
+    };
+    let (first_response, second_response) = tokio::join!(first, second);
+
+    let responses = [first_response, second_response];
+    let mut accepted = 0;
+    let mut stale = 0;
+    for response in responses {
+        match response.status() {
+            StatusCode::OK => accepted += 1,
+            StatusCode::CONFLICT => {
+                let body = response_json(response).await;
+                assert_eq!(body["error"]["code"], "STALE_STATE_VERSION");
+                stale += 1;
+            }
+            status => panic!("unexpected competing command status: {status}"),
+        }
+    }
+    assert_eq!((accepted, stale), (1, 1));
+
+    let artifacts = sqlx::query_as::<_, (i64, i64)>(
+        r"
+        SELECT
+            (SELECT count(*) FROM game_events WHERE game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the winning command artifacts must remain queryable");
+    assert_eq!(artifacts, (1, 1));
+}
+
+#[tokio::test]
+async fn a_locked_game_does_not_block_a_command_for_another_game() {
+    let first_room = ready_room().await;
+    let second_room = ready_room().await;
+    let first_game = start_ready_game(&first_room, "locked-first-game-start").await;
+    start_ready_game(&second_room, "parallel-second-game-start").await;
+    let first_game_id = uuid::Uuid::parse_str(
+        first_game["game"]["id"]
+            .as_str()
+            .expect("the first game id must be present"),
+    )
+    .expect("the first game id must be valid");
+
+    let mut blocker = first_room
+        .database
+        .begin()
+        .await
+        .expect("the blocking transaction must begin");
+    let blocker_process_id = sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("the blocking database process must be identifiable");
+    sqlx::query("SELECT id FROM games WHERE id = $1 FOR UPDATE")
+        .bind(first_game_id)
+        .execute(&mut *blocker)
+        .await
+        .expect("the first game row must be locked");
+
+    let blocked_app = first_room.app.clone();
+    let blocked_cookie = first_room.host_cookie.clone();
+    let blocked_command = tokio::spawn(async move {
+        blocked_app
+            .oneshot(command_request(&blocked_cookie, uuid::Uuid::new_v4(), 1))
+            .await
+            .expect("the blocked command must receive a response after release")
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let waiting = sqlx::query_scalar::<_, bool>(
+                r"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND $1 = ANY(pg_blocking_pids(pid))
+                      AND wait_event_type = 'Lock'
+                      AND query LIKE '%FOR UPDATE OF games%'
+                )
+                ",
+            )
+            .bind(blocker_process_id)
+            .fetch_one(&first_room.database)
+            .await
+            .expect("the lock wait must be observable");
+            if waiting {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the first command must wait on the locked game");
+
+    let parallel_response = tokio::time::timeout(
+        Duration::from_secs(5),
+        second_room.app.clone().oneshot(command_request(
+            &second_room.host_cookie,
+            uuid::Uuid::new_v4(),
+            1,
+        )),
+    )
+    .await
+    .expect("another game must continue while the first game is locked")
+    .expect("the parallel command must receive a response");
+    assert_eq!(parallel_response.status(), StatusCode::OK);
+
+    blocker
+        .rollback()
+        .await
+        .expect("the first game lock must be released");
+    let blocked_response = tokio::time::timeout(Duration::from_secs(5), blocked_command)
+        .await
+        .expect("the first command must finish after its lock is released")
+        .expect("the blocked command task must not panic");
+    assert_eq!(blocked_response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
