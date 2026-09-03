@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
+import { useGameCommandStore } from './stores/gameCommand'
 
 const availableHeroes = [
   { available: true, id: 'harry', name: 'Harry' },
@@ -73,10 +74,11 @@ function gameProjectionResponse() {
   return {
     game: {
       adventure: { id: 'adventure:001', name: 'Game 1' },
+      expires_at: '2026-09-10T12:00:00Z',
       id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
       status: 'in_progress',
     },
-    legal_actions: [],
+    legal_actions: ['complete_dark_arts'],
     participant: {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
@@ -113,6 +115,37 @@ function gameProjectionResponse() {
       },
     },
     turn: { active_position: 1, number: 1, phase: 'dark_arts' },
+  }
+}
+
+function completedGameProjectionResponse() {
+  const projection = gameProjectionResponse()
+  return {
+    ...projection,
+    game: { ...projection.game, expires_at: '2026-09-10T13:00:00Z' },
+    legal_actions: [],
+    snapshot: {
+      ...projection.snapshot,
+      digest: `blake3:${'d'.repeat(64)}`,
+      sequence: 1,
+      state_version: 2,
+    },
+    turn: { ...projection.turn, phase: 'hero_action' },
+  }
+}
+
+function acceptedCommandResponse(commandId: string) {
+  return {
+    projection: completedGameProjectionResponse(),
+    receipt: {
+      accepted_sequence: 1,
+      accepted_state_version: 2,
+      command_id: commandId,
+      expected_state_version: 1,
+      expires_at: '2026-09-10T13:00:00Z',
+      status: 'accepted',
+      type: 'complete_dark_arts',
+    },
   }
 }
 
@@ -903,5 +936,209 @@ describe('application shell', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
     expect(localStorage.getItem('hogwarts.session.expected')).toBe('true')
+  })
+
+  it('keeps a submitted intention separate until the committed receipt returns', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    let completeCommand = (_response: Response): void => undefined
+    const commandResponse = new Promise<Response>((resolve) => {
+      completeCommand = resolve
+    })
+    let submittedCommandId = ''
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        submittedCommandId = body.command_id
+        return commandResponse
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    const pinia = createPinia()
+    const gameCommand = useGameCommandStore(pinia)
+    render(App, { global: { plugins: [pinia] } })
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    void fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+
+    await waitFor(() => expect(screen.getByText('Intenção pendente')).toBeVisible())
+    expect(gameCommand.errorCode).toBeNull()
+    expect(screen.getByText('Artes das Trevas')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
+    const persisted = JSON.parse(
+      sessionStorage.getItem('hogwarts.game-command.pending-intent') ?? '{}',
+    ) as Record<string, unknown>
+    expect(Object.keys(persisted).sort()).toEqual([
+      'commandId',
+      'commandType',
+      'createdAt',
+      'gameId',
+    ])
+
+    completeCommand(
+      new Response(JSON.stringify(acceptedCommandResponse(submittedCommandId)), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Partida em andamento' }),
+    ).toBeVisible()
+    expect(screen.getByText('Ação do Herói')).toBeVisible()
+    expect(screen.getByText('Ação oficial')).toBeVisible()
+    expect(screen.getByText(/Recibo aceito no estado v2, sequência 1/)).toBeVisible()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+
+    const commandCall = request.mock.calls.find(
+      ([url]) => String(url) === '/api/games/current/commands',
+    )
+    expect(JSON.parse(String(commandCall?.[1]?.body))).toEqual({
+      command_id: submittedCommandId,
+      expected_state_version: 1,
+      type: 'complete_dark_arts',
+    })
+  })
+
+  it('recovers an accepted command after the response is lost and the app reloads', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const firstRequest = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands') {
+        return Promise.reject(new TypeError('response lost after commit'))
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', firstRequest)
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+    expect(await screen.findByText('Confirmação ainda desconhecida')).toBeVisible()
+    const pending = JSON.parse(
+      sessionStorage.getItem('hogwarts.game-command.pending-intent') ?? '{}',
+    ) as { commandId: string }
+
+    cleanup()
+    const secondRequest = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === `/api/games/current/commands/${pending.commandId}`) {
+        return Promise.resolve(
+          new Response(JSON.stringify(acceptedCommandResponse(pending.commandId)), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', secondRequest)
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Partida em andamento' }),
+    ).toBeVisible()
+    expect(screen.getByText('Ação oficial')).toBeVisible()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+  })
+
+  it('recovers a pre-commit crash as an unaccepted intention', async () => {
+    const game = gameProjectionResponse()
+    const commandId = '642103d0-d780-48ea-bf65-c40228751911'
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    sessionStorage.setItem(
+      'hogwarts.game-command.pending-intent',
+      JSON.stringify({
+        commandId,
+        commandType: 'complete_dark_arts',
+        createdAt: '2026-09-03T12:00:00Z',
+        gameId: game.game.id,
+      }),
+    )
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(game), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === `/api/games/current/commands/${commandId}`) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: { code: 'COMMAND_NOT_FOUND' } }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 404,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(await screen.findByText('Nenhum aceite encontrado')).toBeVisible()
+    expect(screen.getByText('Artes das Trevas')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
   })
 })

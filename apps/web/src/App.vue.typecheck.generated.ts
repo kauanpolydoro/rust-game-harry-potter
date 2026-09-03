@@ -17,170 +17,208 @@ const _hoisted_3 = {
 const _hoisted_4 = { class: "state-heading" }
 const _hoisted_5 = { id: "service-heading" }
 const _hoisted_6 = { class: "state-description" }
-const _hoisted_7 = {
-  key: 1,
-  class: "room-success game-stage",
-  "aria-labelledby": "game-heading"
-}
+const _hoisted_7 = ["aria-busy"]
 const _hoisted_8 = { class: "room-stage room-stage--success" }
-const _hoisted_9 = { class: "game-situation" }
-const _hoisted_10 = { class: "participant-lineup" }
-const _hoisted_11 = { key: 0 }
-const _hoisted_12 = { class: "snapshot-details" }
-const _hoisted_13 = { class: "digest-value" }
-const _hoisted_14 = ["aria-busy"]
-const _hoisted_15 = { class: "room-stage room-stage--success" }
-const _hoisted_16 = {
+const _hoisted_9 = {
+  class: "service-confirmation",
+  role: "status"
+}
+const _hoisted_10 = {
+  id: "game-heading",
+  tabindex: "-1"
+}
+const _hoisted_11 = {
+  key: 0,
+  class: "command-feedback command-feedback--pending",
+  role: "status",
+  "aria-live": "polite"
+}
+const _hoisted_12 = {
+  key: 1,
+  class: "command-feedback command-feedback--warning",
+  role: "alert"
+}
+const _hoisted_13 = {
+  key: 2,
+  class: "command-feedback command-feedback--accepted",
+  role: "status",
+  "aria-live": "polite"
+}
+const _hoisted_14 = {
+  key: 3,
+  class: "command-feedback",
+  role: "status"
+}
+const _hoisted_15 = {
+  key: 4,
+  class: "command-feedback command-feedback--warning",
+  role: "alert"
+}
+const _hoisted_16 = { class: "game-situation" }
+const _hoisted_17 = { class: "participant-lineup" }
+const _hoisted_18 = { key: 0 }
+const _hoisted_19 = { class: "snapshot-details" }
+const _hoisted_20 = { class: "digest-value" }
+const _hoisted_21 = ["aria-busy"]
+const _hoisted_22 = { class: "room-stage room-stage--success" }
+const _hoisted_23 = {
   id: "room-success-heading",
   tabindex: "-1"
 }
-const _hoisted_17 = { class: "room-code-block" }
-const _hoisted_18 = { "aria-labelledby": "room-code-label" }
-const _hoisted_19 = { class: "room-details" }
-const _hoisted_20 = ["aria-busy"]
-const _hoisted_21 = { class: "hero-options" }
-const _hoisted_22 = {
+const _hoisted_24 = { class: "room-code-block" }
+const _hoisted_25 = { "aria-labelledby": "room-code-label" }
+const _hoisted_26 = { class: "room-details" }
+const _hoisted_27 = ["aria-busy"]
+const _hoisted_28 = { class: "hero-options" }
+const _hoisted_29 = {
   key: 0,
   class: "hero-option"
 }
-const _hoisted_23 = ["value"]
-const _hoisted_24 = {
+const _hoisted_30 = ["value"]
+const _hoisted_31 = {
   key: 1,
   class: "hero-option hero-option--unavailable"
 }
-const _hoisted_25 = ["value"]
-const _hoisted_26 = ["disabled"]
-const _hoisted_27 = {
+const _hoisted_32 = ["value"]
+const _hoisted_33 = ["disabled"]
+const _hoisted_34 = {
   key: 0,
   class: "form-error",
   role: "alert"
 }
-const _hoisted_28 = { class: "participant-lineup" }
-const _hoisted_29 = {
+const _hoisted_35 = { class: "participant-lineup" }
+const _hoisted_36 = {
   key: 1,
   class: "content-selection"
 }
-const _hoisted_30 = ["disabled"]
-const _hoisted_31 = ["value"]
-const _hoisted_32 = ["value"]
-const _hoisted_33 = { key: 0 }
-const _hoisted_34 = {
+const _hoisted_37 = ["disabled"]
+const _hoisted_38 = ["value"]
+const _hoisted_39 = ["value"]
+const _hoisted_40 = { key: 0 }
+const _hoisted_41 = {
   key: 1,
   class: "pending-selection-note"
 }
-const _hoisted_35 = {
+const _hoisted_42 = {
   key: 2,
   class: "content-warning",
   role: "status"
 }
-const _hoisted_36 = { class: "lobby-utilities" }
-const _hoisted_37 = ["disabled"]
-const _hoisted_38 = {
+const _hoisted_43 = { class: "lobby-utilities" }
+const _hoisted_44 = ["disabled"]
+const _hoisted_45 = {
   key: 2,
   class: "copy-feedback",
   role: "status"
 }
-const _hoisted_39 = {
+const _hoisted_46 = {
   key: 3,
   class: "copy-feedback copy-feedback--error",
   role: "alert"
 }
-const _hoisted_40 = {
+const _hoisted_47 = {
   key: 4,
   class: "form-error lobby-error",
   role: "alert"
 }
-const _hoisted_41 = { class: "room-stage" }
-const _hoisted_42 = ["aria-busy"]
-const _hoisted_43 = {
+const _hoisted_48 = { class: "room-stage" }
+const _hoisted_49 = ["aria-busy"]
+const _hoisted_50 = {
   key: 0,
   class: "pending-intent"
 }
-const _hoisted_44 = { class: "field" }
-const _hoisted_45 = ["aria-invalid", "readonly"]
-const _hoisted_46 = {
+const _hoisted_51 = { class: "field" }
+const _hoisted_52 = ["aria-invalid", "readonly"]
+const _hoisted_53 = {
   id: "display-name-error",
   class: "field-error",
   role: "alert"
 }
-const _hoisted_47 = { class: "field" }
-const _hoisted_48 = { class: "password-control" }
-const _hoisted_49 = ["aria-invalid", "type", "readonly"]
-const _hoisted_50 = {
+const _hoisted_54 = { class: "field" }
+const _hoisted_55 = { class: "password-control" }
+const _hoisted_56 = ["aria-invalid", "type", "readonly"]
+const _hoisted_57 = {
   id: "password-error",
   class: "field-error",
   role: "alert"
 }
-const _hoisted_51 = {
+const _hoisted_58 = {
   key: 1,
   class: "form-error",
   role: "alert"
 }
-const _hoisted_52 = { class: "alternate-path" }
-const _hoisted_53 = {
+const _hoisted_59 = { class: "alternate-path" }
+const _hoisted_60 = {
   key: 4,
   class: "room-setup",
   "aria-labelledby": "join-heading"
 }
-const _hoisted_54 = { class: "room-stage" }
-const _hoisted_55 = { id: "join-heading" }
-const _hoisted_56 = { class: "stage-description" }
-const _hoisted_57 = ["aria-busy"]
-const _hoisted_58 = { class: "field" }
-const _hoisted_59 = {
+const _hoisted_61 = { class: "room-stage" }
+const _hoisted_62 = { id: "join-heading" }
+const _hoisted_63 = { class: "stage-description" }
+const _hoisted_64 = ["aria-busy"]
+const _hoisted_65 = { class: "field" }
+const _hoisted_66 = {
   key: 0,
   id: "join-form-error",
   class: "form-error",
   role: "alert"
 }
-const _hoisted_60 = { class: "alternate-path" }
-const _hoisted_61 = ["aria-busy"]
-const _hoisted_62 = { class: "field" }
-const _hoisted_63 = ["aria-invalid", "readonly"]
-const _hoisted_64 = {
+const _hoisted_67 = { class: "alternate-path" }
+const _hoisted_68 = ["aria-busy"]
+const _hoisted_69 = { class: "field" }
+const _hoisted_70 = ["aria-invalid", "readonly"]
+const _hoisted_71 = {
   id: "join-display-name-error",
   class: "field-error",
   role: "alert"
 }
-const _hoisted_65 = { class: "hero-fieldset" }
-const _hoisted_66 = { class: "hero-options" }
-const _hoisted_67 = {
+const _hoisted_72 = { class: "hero-fieldset" }
+const _hoisted_73 = { class: "hero-options" }
+const _hoisted_74 = {
   key: 0,
   class: "hero-option"
 }
-const _hoisted_68 = ["disabled", "value"]
-const _hoisted_69 = {
+const _hoisted_75 = ["disabled", "value"]
+const _hoisted_76 = {
   key: 1,
   class: "hero-option hero-option--unavailable"
 }
-const _hoisted_70 = ["value"]
-const _hoisted_71 = {
+const _hoisted_77 = ["value"]
+const _hoisted_78 = {
   key: 0,
   class: "form-error",
   role: "alert"
 }
-const _hoisted_72 = { class: "action-dock" }
-const _hoisted_73 = ["aria-disabled"]
-const _hoisted_74 = ["aria-disabled"]
-const _hoisted_75 = {
-  key: 2,
+const _hoisted_79 = { class: "action-dock" }
+const _hoisted_80 = ["aria-disabled"]
+const _hoisted_81 = ["aria-disabled"]
+const _hoisted_82 = {
+  key: 3,
+  class: "primary-button",
+  disabled: true,
+  type: "button"
+}
+const _hoisted_83 = {
+  key: 5,
   class: "continuity-note"
 }
-const _hoisted_76 = ["disabled"]
-const _hoisted_77 = ["disabled"]
-const _hoisted_78 = ["disabled"]
-const _hoisted_79 = {
-  key: 6,
+const _hoisted_84 = ["disabled"]
+const _hoisted_85 = ["disabled"]
+const _hoisted_86 = ["disabled"]
+const _hoisted_87 = {
+  key: 9,
   class: "continuity-note"
 }
-const _hoisted_80 = ["disabled"]
-const _hoisted_81 = ["disabled"]
-const _hoisted_82 = ["disabled"]
+const _hoisted_88 = ["disabled"]
+const _hoisted_89 = ["disabled"]
+const _hoisted_90 = ["disabled"]
 
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { type Availability, useHealthStore } from './stores/health'
+import { useGameCommandStore } from './stores/gameCommand'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
 
@@ -190,6 +228,7 @@ const __sfc__ = /*@__PURE__*/_defineComponent({
   setup(__props) {
 
 const health = useHealthStore()
+const gameCommand = useGameCommandStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
 const entryMode = ref<'create' | 'join'>('create')
@@ -254,6 +293,43 @@ const activeParticipant = computed(() =>
   ),
 )
 const currentGameParticipantPosition = computed(() => game.value?.participant.position)
+const canCompleteDarkArts = computed(
+  () =>
+    game.value?.legal_actions.includes('complete_dark_arts') === true &&
+    !gameCommand.pendingIntent &&
+    gameCommand.status !== 'submitting' &&
+    gameCommand.status !== 'recovering',
+)
+const gamePhaseLabel = computed(() => {
+  switch (game.value?.turn.phase) {
+    case 'dark_arts':
+      return 'Artes das Trevas'
+    case 'hero_action':
+      return 'Ação do Herói'
+    default:
+      return game.value?.turn.phase ?? ''
+  }
+})
+const gameCommandError = computed(() => {
+  switch (gameCommand.errorCode) {
+    case 'STALE_STATE_VERSION':
+      return 'O estado oficial avançou. Atualize a partida e decida novamente.'
+    case 'GAME_ACTION_NOT_ALLOWED':
+      return 'Esta ação não está disponível para você no estado oficial atual.'
+    case 'GAME_EXPIRED':
+      return 'A partida expirou e não aceita novas ações.'
+    case null:
+      return null
+    default:
+      return 'Não foi possível confirmar a ação. Consulte o resultado antes de decidir novamente.'
+  }
+})
+const acceptedCommandSummary = computed(() => {
+  const receipt = gameCommand.receipt
+  return receipt
+    ? `Recibo aceito no estado v${receipt.accepted_state_version}, sequência ${receipt.accepted_sequence}.`
+    : ''
+})
 const serviceHeading = computed(() => {
   if (isRestoringSession.value) {
     return 'Retomando sua sessão'
@@ -457,6 +533,41 @@ async function refreshLobby(): Promise<void> {
   document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
 }
 
+async function completeDarkArts(): Promise<void> {
+  if (!game.value || !canCompleteDarkArts.value) {
+    return
+  }
+  const projection = await gameCommand.completeDarkArts(game.value)
+  if (projection) {
+    roomAccess.game = projection
+    await nextTick()
+    document.getElementById('game-heading')?.focus()
+  }
+}
+
+async function recoverGameCommand(): Promise<void> {
+  if (!game.value) {
+    return
+  }
+  const projection = await gameCommand.recoverPending(game.value.game.id)
+  if (projection) {
+    roomAccess.game = projection
+    await nextTick()
+    document.getElementById('game-heading')?.focus()
+  }
+}
+
+function formatExpiration(value: string): string {
+  const expiration = new Date(value)
+  if (Number.isNaN(expiration.getTime())) {
+    return 'Prazo indisponível'
+  }
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(expiration)
+}
+
 async function focusAfterAction(errorCode: string | null): Promise<void> {
   await nextTick()
   if (lobby.value) {
@@ -529,6 +640,9 @@ watch(
 
 onMounted(async () => {
   await Promise.all([health.check(), roomAccess.restoreSession()])
+  if (game.value && gameCommand.pendingIntent) {
+    await recoverGameCommand()
+  }
   if (lobby.value || game.value) {
     await nextTick()
     document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
@@ -536,6 +650,7 @@ onMounted(async () => {
 })
 
 void ((health.availability === 'checking' || roomAccess.status === 'restoring') satisfies boolean | 'true' | 'false')
+void ((gameCommand.status === 'submitting' || gameCommand.status === 'recovering') satisfies boolean | 'true' | 'false')
 void ((lobbyIsBusy()) satisfies boolean | 'true' | 'false')
 void ((roomAccess.status === 'selecting_hero') satisfies boolean | 'true' | 'false')
 void ((true) satisfies boolean | 'true' | 'false')
@@ -552,6 +667,7 @@ void ((roomAccess.status === 'joining') satisfies boolean | 'true' | 'false')
 void ((true) satisfies boolean | 'true' | 'false')
 void ((health.availability === 'checking') satisfies boolean | 'true' | 'false')
 void ((roomAccess.status === 'restoring') satisfies boolean | 'true' | 'false')
+void ((true) satisfies boolean | 'true' | 'false')
 void ((lobbyIsBusy()) satisfies boolean | 'true' | 'false')
 void ((lobbyIsBusy()) satisfies boolean | 'true' | 'false')
 void ((lobbyIsBusy()) satisfies boolean | 'true' | 'false')
@@ -561,7 +677,7 @@ void ((roomAccess.status === 'joining' || !selectedHero) satisfies boolean | 'tr
 
 return (_ctx: __VueTemplateContext,_cache: any) => {
   return (_openBlock(), _createElementBlock("main", _hoisted_1, [
-    _cache[76] || (_cache[76] = _createElementVNode("header", { class: "masthead" }, [
+    _cache[83] || (_cache[83] = _createElementVNode("header", { class: "masthead" }, [
       _createElementVNode("span", {
         class: "cue-mark",
         "aria-hidden": "true"
@@ -576,7 +692,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
           "aria-labelledby": "service-heading",
           "aria-busy": _unref(health).availability === 'checking' || _unref(roomAccess).status === 'restoring'
         }, [
-          _cache[24] || (_cache[24] = _createElementVNode("div", {
+          _cache[26] || (_cache[26] = _createElementVNode("div", {
             class: "cue-rail",
             "aria-hidden": "true"
           }, [
@@ -586,7 +702,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
           ], -1 /* CACHED */)),
           _createElementVNode("div", _hoisted_3, [
             _createElementVNode("div", _hoisted_4, [
-              _cache[23] || (_cache[23] = _createElementVNode("span", {
+              _cache[25] || (_cache[25] = _createElementVNode("span", {
                 class: "state-signal",
                 "aria-hidden": "true"
               }, null, -1 /* CACHED */)),
@@ -596,8 +712,13 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
           ])
         ], 10 /* CLASS, PROPS */, _hoisted_2))
       : (game.value)
-        ? (_openBlock(), _createElementBlock("section", _hoisted_7, [
-            _cache[40] || (_cache[40] = _createElementVNode("div", {
+        ? (_openBlock(), _createElementBlock("section", {
+            key: 1,
+            class: "room-success game-stage",
+            "aria-labelledby": "game-heading",
+            "aria-busy": _unref(gameCommand).status === 'submitting' || _unref(gameCommand).status === 'recovering'
+          }, [
+            _cache[47] || (_cache[47] = _createElementVNode("div", {
               class: "cue-rail",
               "aria-hidden": "true"
             }, [
@@ -606,41 +727,67 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
               _createElementVNode("span", { class: "cue-label" }, "Partida selada")
             ], -1 /* CACHED */)),
             _createElementVNode("div", _hoisted_8, [
-              _cache[36] || (_cache[36] = _createElementVNode("p", {
-                class: "service-confirmation",
-                role: "status"
-              }, [
-                _createElementVNode("span", {
+              _createElementVNode("p", _hoisted_9, [
+                _cache[27] || (_cache[27] = _createElementVNode("span", {
                   class: "state-signal",
                   "aria-hidden": "true"
-                }),
-                _createTextVNode(" Snapshot inicial confirmado ")
-              ], -1 /* CACHED */)),
-              _cache[37] || (_cache[37] = _createElementVNode("h2", {
-                id: "game-heading",
-                tabindex: "-1"
-              }, "Partida iniciada", -1 /* CACHED */)),
-              _cache[38] || (_cache[38] = _createElementVNode("p", { class: "stage-description" }, " A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida. ", -1 /* CACHED */)),
-              _createElementVNode("dl", _hoisted_9, [
+                }, null, -1 /* CACHED */)),
+                _createTextVNode(" " + _toDisplayString(game.value.snapshot.sequence === 0 ? 'Snapshot inicial confirmado' : 'Estado oficial confirmado'), 1 /* TEXT */)
+              ]),
+              _createElementVNode("h2", _hoisted_10, _toDisplayString(game.value.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento'), 1 /* TEXT */),
+              _cache[45] || (_cache[45] = _createElementVNode("p", { class: "stage-description" }, " A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida. ", -1 /* CACHED */)),
+              (_unref(gameCommand).status === 'submitting' || _unref(gameCommand).status === 'recovering')
+                ? (_openBlock(), _createElementBlock("div", _hoisted_11, [
+                    _cache[28] || (_cache[28] = _createElementVNode("strong", null, "Intenção pendente", -1 /* CACHED */)),
+                    _createElementVNode("p", null, _toDisplayString(_unref(gameCommand).status === 'recovering'
+                ? 'Consultando o recibo persistido. O estado abaixo continua sendo a última versão oficial.'
+                : 'A solicitação foi enviada. Nada muda na mesa até o servidor concluir o commit.'), 1 /* TEXT */)
+                  ]))
+                : (_unref(gameCommand).status === 'uncertain')
+                  ? (_openBlock(), _createElementBlock("div", _hoisted_12, [...(_cache[29] || (_cache[29] = [
+                      _createElementVNode("strong", null, "Confirmação ainda desconhecida", -1 /* CACHED */),
+                      _createElementVNode("p", null, " A conexão terminou sem resposta. Consulte o mesmo comando antes de tomar outra decisão. ", -1 /* CACHED */)
+                    ]))]))
+                  : (_unref(gameCommand).status === 'accepted' && acceptedCommandSummary.value)
+                    ? (_openBlock(), _createElementBlock("div", _hoisted_13, [
+                        _cache[30] || (_cache[30] = _createElementVNode("strong", null, "Ação oficial", -1 /* CACHED */)),
+                        _createElementVNode("p", null, _toDisplayString(acceptedCommandSummary.value), 1 /* TEXT */)
+                      ]))
+                    : (_unref(gameCommand).status === 'not_committed')
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_14, [...(_cache[31] || (_cache[31] = [
+                          _createElementVNode("strong", null, "Nenhum aceite encontrado", -1 /* CACHED */),
+                          _createElementVNode("p", null, "A intenção anterior não foi oficializada. Revise a mesa e decida novamente.", -1 /* CACHED */)
+                        ]))]))
+                      : (_unref(gameCommand).status === 'failed' && gameCommandError.value)
+                        ? (_openBlock(), _createElementBlock("div", _hoisted_15, [
+                            _cache[32] || (_cache[32] = _createElementVNode("strong", null, "Ação não aceita", -1 /* CACHED */)),
+                            _createElementVNode("p", null, _toDisplayString(gameCommandError.value), 1 /* TEXT */)
+                          ]))
+                        : _createCommentVNode("v-if", true),
+              _createElementVNode("dl", _hoisted_16, [
                 _createElementVNode("div", null, [
-                  _cache[25] || (_cache[25] = _createElementVNode("dt", null, "Turno", -1 /* CACHED */)),
+                  _cache[33] || (_cache[33] = _createElementVNode("dt", null, "Turno", -1 /* CACHED */)),
                   _createElementVNode("dd", null, _toDisplayString(game.value.turn.number), 1 /* TEXT */)
                 ]),
                 _createElementVNode("div", null, [
-                  _cache[26] || (_cache[26] = _createElementVNode("dt", null, "Fase", -1 /* CACHED */)),
-                  _createElementVNode("dd", null, _toDisplayString(game.value.turn.phase === 'dark_arts' ? 'Artes das Trevas' : game.value.turn.phase), 1 /* TEXT */)
+                  _cache[34] || (_cache[34] = _createElementVNode("dt", null, "Fase", -1 /* CACHED */)),
+                  _createElementVNode("dd", null, _toDisplayString(gamePhaseLabel.value), 1 /* TEXT */)
                 ]),
                 _createElementVNode("div", null, [
-                  _cache[27] || (_cache[27] = _createElementVNode("dt", null, "Participante ativo", -1 /* CACHED */)),
+                  _cache[35] || (_cache[35] = _createElementVNode("dt", null, "Participante ativo", -1 /* CACHED */)),
                   _createElementVNode("dd", null, _toDisplayString(activeParticipant.value?.display_name ?? `Posição ${game.value.turn.active_position}`), 1 /* TEXT */)
                 ]),
                 _createElementVNode("div", null, [
-                  _cache[28] || (_cache[28] = _createElementVNode("dt", null, "Aventura", -1 /* CACHED */)),
+                  _cache[36] || (_cache[36] = _createElementVNode("dt", null, "Aventura", -1 /* CACHED */)),
                   _createElementVNode("dd", null, _toDisplayString(game.value.game.adventure.name), 1 /* TEXT */)
+                ]),
+                _createElementVNode("div", null, [
+                  _cache[37] || (_cache[37] = _createElementVNode("dt", null, "Retenção até", -1 /* CACHED */)),
+                  _createElementVNode("dd", null, _toDisplayString(formatExpiration(game.value.game.expires_at)), 1 /* TEXT */)
                 ])
               ]),
-              _createElementVNode("div", _hoisted_10, [
-                _cache[29] || (_cache[29] = _createElementVNode("h3", null, "Posições seladas", -1 /* CACHED */)),
+              _createElementVNode("div", _hoisted_17, [
+                _cache[38] || (_cache[38] = _createElementVNode("h3", null, "Posições seladas", -1 /* CACHED */)),
                 _createElementVNode("ol", null, [
                   (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(game.value.participants, (participant) => {
                     return (_openBlock(), _createElementBlock("li", {
@@ -650,40 +797,40 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                       _createElementVNode("strong", null, _toDisplayString(participant.display_name), 1 /* TEXT */),
                       _createElementVNode("span", null, _toDisplayString(participant.hero.name), 1 /* TEXT */),
                       (participant.position === currentGameParticipantPosition.value)
-                        ? (_openBlock(), _createElementBlock("span", _hoisted_11, "Você"))
+                        ? (_openBlock(), _createElementBlock("span", _hoisted_18, "Você"))
                         : _createCommentVNode("v-if", true)
                     ]))
                   }), 128 /* KEYED_FRAGMENT */))
                 ])
               ]),
-              _createElementVNode("details", _hoisted_12, [
-                _cache[35] || (_cache[35] = _createElementVNode("summary", null, "Ver versões do Snapshot", -1 /* CACHED */)),
+              _createElementVNode("details", _hoisted_19, [
+                _cache[44] || (_cache[44] = _createElementVNode("summary", null, "Ver versões do Snapshot", -1 /* CACHED */)),
                 _createElementVNode("dl", null, [
                   _createElementVNode("div", null, [
-                    _cache[30] || (_cache[30] = _createElementVNode("dt", null, "Estado", -1 /* CACHED */)),
+                    _cache[39] || (_cache[39] = _createElementVNode("dt", null, "Estado", -1 /* CACHED */)),
                     _createElementVNode("dd", null, "v" + _toDisplayString(game.value.snapshot.state_version) + " · sequência " + _toDisplayString(game.value.snapshot.sequence), 1 /* TEXT */)
                   ]),
                   _createElementVNode("div", null, [
-                    _cache[31] || (_cache[31] = _createElementVNode("dt", null, "Ruleset", -1 /* CACHED */)),
+                    _cache[40] || (_cache[40] = _createElementVNode("dt", null, "Ruleset", -1 /* CACHED */)),
                     _createElementVNode("dd", null, _toDisplayString(game.value.snapshot.versions.ruleset), 1 /* TEXT */)
                   ]),
                   _createElementVNode("div", null, [
-                    _cache[32] || (_cache[32] = _createElementVNode("dt", null, "Manifesto", -1 /* CACHED */)),
+                    _cache[41] || (_cache[41] = _createElementVNode("dt", null, "Manifesto", -1 /* CACHED */)),
                     _createElementVNode("dd", null, "v" + _toDisplayString(game.value.snapshot.versions.manifest), 1 /* TEXT */)
                   ]),
                   _createElementVNode("div", null, [
-                    _cache[33] || (_cache[33] = _createElementVNode("dt", null, "Digest", -1 /* CACHED */)),
-                    _createElementVNode("dd", _hoisted_13, _toDisplayString(game.value.snapshot.digest), 1 /* TEXT */)
+                    _cache[42] || (_cache[42] = _createElementVNode("dt", null, "Digest", -1 /* CACHED */)),
+                    _createElementVNode("dd", _hoisted_20, _toDisplayString(game.value.snapshot.digest), 1 /* TEXT */)
                   ]),
                   _createElementVNode("div", null, [
-                    _cache[34] || (_cache[34] = _createElementVNode("dt", null, "PRNG", -1 /* CACHED */)),
+                    _cache[43] || (_cache[43] = _createElementVNode("dt", null, "PRNG", -1 /* CACHED */)),
                     _createElementVNode("dd", null, _toDisplayString(game.value.snapshot.versions.prng), 1 /* TEXT */)
                   ])
                 ])
               ]),
-              _cache[39] || (_cache[39] = _createElementVNode("p", { class: "seed-note" }, "A seed permanece secreta enquanto a partida estiver em andamento.", -1 /* CACHED */))
+              _cache[46] || (_cache[46] = _createElementVNode("p", { class: "seed-note" }, "A seed permanece secreta enquanto a partida estiver em andamento.", -1 /* CACHED */))
             ])
-          ]))
+          ], 8 /* PROPS */, _hoisted_7))
         : (lobby.value)
           ? (_openBlock(), _createElementBlock("section", {
               key: 2,
@@ -692,7 +839,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
               "aria-live": "polite",
               "aria-busy": lobbyIsBusy()
             }, [
-              _cache[54] || (_cache[54] = _createElementVNode("div", {
+              _cache[61] || (_cache[61] = _createElementVNode("div", {
                 class: "cue-rail",
                 "aria-hidden": "true"
               }, [
@@ -700,8 +847,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                 _createElementVNode("span", { class: "cue-line" }),
                 _createElementVNode("span", { class: "cue-label" }, "Sala aberta")
               ], -1 /* CACHED */)),
-              _createElementVNode("div", _hoisted_15, [
-                _cache[52] || (_cache[52] = _createElementVNode("p", {
+              _createElementVNode("div", _hoisted_22, [
+                _cache[59] || (_cache[59] = _createElementVNode("p", {
                   class: "service-confirmation",
                   role: "status"
                 }, [
@@ -711,31 +858,31 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                   }),
                   _createTextVNode(" Posição confirmada ")
                 ], -1 /* CACHED */)),
-                _createElementVNode("h2", _hoisted_16, _toDisplayString(isHost.value ? 'Sala pronta' : 'Sala aberta'), 1 /* TEXT */),
-                _cache[53] || (_cache[53] = _createElementVNode("p", { class: "stage-description" }, " Sua participação está vinculada a esta sessão. O código apenas localiza a sala. ", -1 /* CACHED */)),
-                _createElementVNode("div", _hoisted_17, [
-                  _cache[41] || (_cache[41] = _createElementVNode("span", { id: "room-code-label" }, "Código da sala", -1 /* CACHED */)),
-                  _createElementVNode("output", _hoisted_18, _toDisplayString(lobby.value.room.code), 1 /* TEXT */)
+                _createElementVNode("h2", _hoisted_23, _toDisplayString(isHost.value ? 'Sala pronta' : 'Sala aberta'), 1 /* TEXT */),
+                _cache[60] || (_cache[60] = _createElementVNode("p", { class: "stage-description" }, " Sua participação está vinculada a esta sessão. O código apenas localiza a sala. ", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_24, [
+                  _cache[48] || (_cache[48] = _createElementVNode("span", { id: "room-code-label" }, "Código da sala", -1 /* CACHED */)),
+                  _createElementVNode("output", _hoisted_25, _toDisplayString(lobby.value.room.code), 1 /* TEXT */)
                 ]),
-                _createElementVNode("dl", _hoisted_19, [
+                _createElementVNode("dl", _hoisted_26, [
                   _createElementVNode("div", null, [
                     _createElementVNode("dt", null, _toDisplayString(isHost.value ? 'Anfitrião da sala' : 'Sua participação'), 1 /* TEXT */),
                     _createElementVNode("dd", null, _toDisplayString(lobby.value.participant.display_name), 1 /* TEXT */)
                   ]),
                   _createElementVNode("div", null, [
-                    _cache[42] || (_cache[42] = _createElementVNode("dt", null, "Posição durável", -1 /* CACHED */)),
+                    _cache[49] || (_cache[49] = _createElementVNode("dt", null, "Posição durável", -1 /* CACHED */)),
                     _createElementVNode("dd", null, "Posição " + _toDisplayString(lobby.value.participant.position), 1 /* TEXT */)
                   ]),
                   _createElementVNode("div", null, [
-                    _cache[43] || (_cache[43] = _createElementVNode("dt", null, "Herói", -1 /* CACHED */)),
+                    _cache[50] || (_cache[50] = _createElementVNode("dt", null, "Herói", -1 /* CACHED */)),
                     _createElementVNode("dd", null, _toDisplayString(lobby.value.participant.hero?.name ?? 'Ainda não escolhido'), 1 /* TEXT */)
                   ]),
-                  _cache[45] || (_cache[45] = _createElementVNode("div", null, [
+                  _cache[52] || (_cache[52] = _createElementVNode("div", null, [
                     _createElementVNode("dt", null, "Sessão"),
                     _createElementVNode("dd", null, "Protegida neste navegador")
                   ], -1 /* CACHED */)),
                   _createElementVNode("div", null, [
-                    _cache[44] || (_cache[44] = _createElementVNode("dt", null, "Prontidão", -1 /* CACHED */)),
+                    _cache[51] || (_cache[51] = _createElementVNode("dt", null, "Prontidão", -1 /* CACHED */)),
                     _createElementVNode("dd", null, _toDisplayString(lobby.value.participant.ready ? 'Confirmada' : 'Pendente'), 1 /* TEXT */)
                   ])
                 ]),
@@ -747,34 +894,34 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                       onSubmit: _cache[1] || (_cache[1] = _withModifiers(($event: any) => (confirmHero()), ["prevent"]))
                     }, [
                       _createElementVNode("fieldset", null, [
-                        _cache[48] || (_cache[48] = _createElementVNode("legend", null, "Escolha seu Herói", -1 /* CACHED */)),
-                        _createElementVNode("div", _hoisted_21, [
+                        _cache[55] || (_cache[55] = _createElementVNode("legend", null, "Escolha seu Herói", -1 /* CACHED */)),
+                        _createElementVNode("div", _hoisted_28, [
                           (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(lobby.value.heroes, (hero) => {
                             return (_openBlock(), _createElementBlock(_Fragment, {
                               key: hero.id
                             }, [
                               (heroIsSelectable(hero.id, hero.available))
-                                ? (_openBlock(), _createElementBlock("label", _hoisted_22, [
+                                ? (_openBlock(), _createElementBlock("label", _hoisted_29, [
                                     _withDirectives(_createElementVNode("input", {
                                       "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((selectedHero).value = $event)),
                                       value: hero.id,
                                       name: "lobby-hero",
                                       type: "radio"
-                                    }, null, 8 /* PROPS */, _hoisted_23), [
+                                    }, null, 8 /* PROPS */, _hoisted_30), [
                                       [_vModelRadio, selectedHero.value]
                                     ]),
                                     _createElementVNode("span", null, _toDisplayString(hero.name), 1 /* TEXT */),
-                                    _cache[46] || (_cache[46] = _createElementVNode("small", { "aria-hidden": "true" }, "Disponível", -1 /* CACHED */))
+                                    _cache[53] || (_cache[53] = _createElementVNode("small", { "aria-hidden": "true" }, "Disponível", -1 /* CACHED */))
                                   ]))
-                                : (_openBlock(), _createElementBlock("label", _hoisted_24, [
+                                : (_openBlock(), _createElementBlock("label", _hoisted_31, [
                                     _createElementVNode("input", {
                                       disabled: true,
                                       value: hero.id,
                                       name: "lobby-hero",
                                       type: "radio"
-                                    }, null, 8 /* PROPS */, _hoisted_25),
+                                    }, null, 8 /* PROPS */, _hoisted_32),
                                     _createElementVNode("span", null, _toDisplayString(hero.name), 1 /* TEXT */),
-                                    _cache[47] || (_cache[47] = _createElementVNode("small", { "aria-hidden": "true" }, "Indisponível", -1 /* CACHED */))
+                                    _cache[54] || (_cache[54] = _createElementVNode("small", { "aria-hidden": "true" }, "Indisponível", -1 /* CACHED */))
                                   ]))
                             ], 64 /* STABLE_FRAGMENT */))
                           }), 128 /* KEYED_FRAGMENT */))
@@ -784,14 +931,14 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                         class: "secondary-button",
                         disabled: !selectedHero.value || lobbyIsBusy(),
                         type: "submit"
-                      }, _toDisplayString(_unref(roomAccess).status === 'selecting_hero' ? 'Confirmando Herói' : 'Confirmar Herói'), 9 /* TEXT, PROPS */, _hoisted_26),
+                      }, _toDisplayString(_unref(roomAccess).status === 'selecting_hero' ? 'Confirmando Herói' : 'Confirmar Herói'), 9 /* TEXT, PROPS */, _hoisted_33),
                       (lobbyError.value)
-                        ? (_openBlock(), _createElementBlock("p", _hoisted_27, _toDisplayString(lobbyError.value), 1 /* TEXT */))
+                        ? (_openBlock(), _createElementBlock("p", _hoisted_34, _toDisplayString(lobbyError.value), 1 /* TEXT */))
                         : _createCommentVNode("v-if", true)
-                    ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_20))
+                    ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_27))
                   : _createCommentVNode("v-if", true),
-                _createElementVNode("div", _hoisted_28, [
-                  _cache[49] || (_cache[49] = _createElementVNode("h3", null, "Participantes", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_35, [
+                  _cache[56] || (_cache[56] = _createElementVNode("h3", null, "Participantes", -1 /* CACHED */)),
                   _createElementVNode("ol", null, [
                     (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(lobby.value.participants, (participant) => {
                       return (_openBlock(), _createElementBlock("li", {
@@ -808,14 +955,14 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                   ])
                 ]),
                 (isHost.value)
-                  ? (_openBlock(), _createElementBlock("div", _hoisted_29, [
-                      _cache[51] || (_cache[51] = _createElementVNode("label", { for: "adventure-selection" }, "Aventura e conteúdo da partida", -1 /* CACHED */)),
+                  ? (_openBlock(), _createElementBlock("div", _hoisted_36, [
+                      _cache[58] || (_cache[58] = _createElementVNode("label", { for: "adventure-selection" }, "Aventura e conteúdo da partida", -1 /* CACHED */)),
                       _withDirectives(_createElementVNode("select", {
                         id: "adventure-selection",
                         "onUpdate:modelValue": _cache[2] || (_cache[2] = ($event: any) => ((selectedContentKey).value = $event)),
                         disabled: lobbyIsBusy() || Boolean(_unref(roomAccess).pendingStartInput)
                       }, [
-                        _cache[50] || (_cache[50] = _createElementVNode("option", {
+                        _cache[57] || (_cache[57] = _createElementVNode("option", {
                           value: "",
                           disabled: ""
                         }, "Selecione conteúdo jogável", -1 /* CACHED */)),
@@ -827,29 +974,29 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                               ? (_openBlock(), _createElementBlock("option", {
                                   key: 0,
                                   value: choice.key
-                                }, _toDisplayString(choice.adventure.name) + " · " + _toDisplayString(choice.manifest.ruleset_version), 9 /* TEXT, PROPS */, _hoisted_31))
+                                }, _toDisplayString(choice.adventure.name) + " · " + _toDisplayString(choice.manifest.ruleset_version), 9 /* TEXT, PROPS */, _hoisted_38))
                               : (_openBlock(), _createElementBlock("option", {
                                   key: 1,
                                   disabled: "",
                                   value: choice.key
-                                }, _toDisplayString(choice.adventure.name) + " · " + _toDisplayString(choice.manifest.ruleset_version) + " · não jogável ", 9 /* TEXT, PROPS */, _hoisted_32))
+                                }, _toDisplayString(choice.adventure.name) + " · " + _toDisplayString(choice.manifest.ruleset_version) + " · não jogável ", 9 /* TEXT, PROPS */, _hoisted_39))
                           ], 64 /* STABLE_FRAGMENT */))
                         }), 128 /* KEYED_FRAGMENT */))
-                      ], 8 /* PROPS */, _hoisted_30), [
+                      ], 8 /* PROPS */, _hoisted_37), [
                         [_vModelSelect, selectedContentKey.value]
                       ]),
                       (selectedContent.value)
-                        ? (_openBlock(), _createElementBlock("p", _hoisted_33, " Manifesto v" + _toDisplayString(selectedContent.value.manifest.manifest_version) + " · " + _toDisplayString(selectedContent.value.manifest.content_version), 1 /* TEXT */))
+                        ? (_openBlock(), _createElementBlock("p", _hoisted_40, " Manifesto v" + _toDisplayString(selectedContent.value.manifest.manifest_version) + " · " + _toDisplayString(selectedContent.value.manifest.content_version), 1 /* TEXT */))
                         : _createCommentVNode("v-if", true),
                       (_unref(roomAccess).pendingStartInput)
-                        ? (_openBlock(), _createElementBlock("p", _hoisted_34, " Escolha preservada para repetir a mesma solicitação com segurança. "))
+                        ? (_openBlock(), _createElementBlock("p", _hoisted_41, " Escolha preservada para repetir a mesma solicitação com segurança. "))
                         : _createCommentVNode("v-if", true),
                       (!selectedContent.value)
-                        ? (_openBlock(), _createElementBlock("p", _hoisted_35, " Nenhum Manifesto jogável está publicado. Lacunas funcionais impedem o selo da sala. "))
+                        ? (_openBlock(), _createElementBlock("p", _hoisted_42, " Nenhum Manifesto jogável está publicado. Lacunas funcionais impedem o selo da sala. "))
                         : _createCommentVNode("v-if", true)
                     ]))
                   : _createCommentVNode("v-if", true),
-                _createElementVNode("div", _hoisted_36, [
+                _createElementVNode("div", _hoisted_43, [
                   _createElementVNode("button", {
                     class: "text-button",
                     type: "button",
@@ -862,26 +1009,26 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                         type: "button",
                         disabled: lobbyIsBusy(),
                         onClick: _cache[4] || (_cache[4] = ($event: any) => (toggleReadiness()))
-                      }, " Reabrir minha preparação ", 8 /* PROPS */, _hoisted_37))
+                      }, " Reabrir minha preparação ", 8 /* PROPS */, _hoisted_44))
                     : _createCommentVNode("v-if", true)
                 ]),
                 (copyResult.value === 'copied')
-                  ? (_openBlock(), _createElementBlock("p", _hoisted_38, "Código copiado."))
+                  ? (_openBlock(), _createElementBlock("p", _hoisted_45, "Código copiado."))
                   : (copyResult.value === 'failed')
-                    ? (_openBlock(), _createElementBlock("p", _hoisted_39, " Não foi possível copiar. Selecione o código e copie manualmente. "))
+                    ? (_openBlock(), _createElementBlock("p", _hoisted_46, " Não foi possível copiar. Selecione o código e copie manualmente. "))
                     : _createCommentVNode("v-if", true),
                 (lobbyError.value)
-                  ? (_openBlock(), _createElementBlock("p", _hoisted_40, _toDisplayString(lobbyError.value), 1 /* TEXT */))
+                  ? (_openBlock(), _createElementBlock("p", _hoisted_47, _toDisplayString(lobbyError.value), 1 /* TEXT */))
                   : _createCommentVNode("v-if", true)
               ])
-            ], 8 /* PROPS */, _hoisted_14))
+            ], 8 /* PROPS */, _hoisted_21))
           : (entryMode.value === 'create')
             ? (_openBlock(), _createElementBlock("section", {
                 key: 3,
                 class: _normalizeClass(["room-setup", { 'room-setup--pending': Boolean(_unref(roomCreation).pendingIntent) }]),
                 "aria-labelledby": "room-setup-heading"
               }, [
-                _cache[64] || (_cache[64] = _createElementVNode("div", {
+                _cache[71] || (_cache[71] = _createElementVNode("div", {
                   class: "cue-rail",
                   "aria-hidden": "true"
                 }, [
@@ -889,8 +1036,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                   _createElementVNode("span", { class: "cue-line" }),
                   _createElementVNode("span", { class: "cue-label" }, "Abrir a mesa")
                 ], -1 /* CACHED */)),
-                _createElementVNode("div", _hoisted_41, [
-                  _cache[61] || (_cache[61] = _createElementVNode("p", {
+                _createElementVNode("div", _hoisted_48, [
+                  _cache[68] || (_cache[68] = _createElementVNode("p", {
                     class: "service-confirmation",
                     role: "status"
                   }, [
@@ -900,8 +1047,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                     }),
                     _createTextVNode(" Servidor pronto ")
                   ], -1 /* CACHED */)),
-                  _cache[62] || (_cache[62] = _createElementVNode("h2", { id: "room-setup-heading" }, "Abra uma sala para o seu grupo", -1 /* CACHED */)),
-                  _cache[63] || (_cache[63] = _createElementVNode("p", { class: "stage-description" }, " Você será o anfitrião e continuará reconhecido neste navegador, sem criar uma conta. ", -1 /* CACHED */)),
+                  _cache[69] || (_cache[69] = _createElementVNode("h2", { id: "room-setup-heading" }, "Abra uma sala para o seu grupo", -1 /* CACHED */)),
+                  _cache[70] || (_cache[70] = _createElementVNode("p", { class: "stage-description" }, " Você será o anfitrião e continuará reconhecido neste navegador, sem criar uma conta. ", -1 /* CACHED */)),
                   _createElementVNode("form", {
                     id: "create-room",
                     class: "room-form",
@@ -909,17 +1056,17 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                     onSubmit: _cache[10] || (_cache[10] = _withModifiers(($event: any) => (createRoom()), ["prevent"]))
                   }, [
                     (_unref(roomCreation).pendingIntent && _unref(roomCreation).status !== 'submitting')
-                      ? (_openBlock(), _createElementBlock("div", _hoisted_43, [
-                          _cache[55] || (_cache[55] = _createElementVNode("p", { role: "status" }, "Existe uma criação pendente neste navegador.", -1 /* CACHED */)),
-                          _cache[56] || (_cache[56] = _createElementVNode("p", null, " Retome com o mesmo nome e senha. Descartar inicia outra sala sem excluir a anterior. ", -1 /* CACHED */)),
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_50, [
+                          _cache[62] || (_cache[62] = _createElementVNode("p", { role: "status" }, "Existe uma criação pendente neste navegador.", -1 /* CACHED */)),
+                          _cache[63] || (_cache[63] = _createElementVNode("p", null, " Retome com o mesmo nome e senha. Descartar inicia outra sala sem excluir a anterior. ", -1 /* CACHED */)),
                           _createElementVNode("button", {
                             type: "button",
                             onClick: _cache[5] || (_cache[5] = ($event: any) => (discardPendingRequest()))
                           }, " Descartar e começar outra ")
                         ]))
                       : _createCommentVNode("v-if", true),
-                    _createElementVNode("div", _hoisted_44, [
-                      _cache[57] || (_cache[57] = _createElementVNode("label", { for: "display-name" }, "Seu nome", -1 /* CACHED */)),
+                    _createElementVNode("div", _hoisted_51, [
+                      _cache[64] || (_cache[64] = _createElementVNode("label", { for: "display-name" }, "Seu nome", -1 /* CACHED */)),
                       _withDirectives(_createElementVNode("input", {
                         id: "display-name",
                         "onUpdate:modelValue": _cache[6] || (_cache[6] = ($event: any) => ((displayName).value = $event)),
@@ -931,14 +1078,14 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                         readonly: _unref(roomCreation).status === 'submitting' || Boolean(_unref(roomCreation).pendingInput),
                         required: "",
                         type: "text"
-                      }, null, 8 /* PROPS */, _hoisted_45), [
+                      }, null, 8 /* PROPS */, _hoisted_52), [
                         [_vModelText, displayName.value]
                       ]),
-                      _createElementVNode("p", _hoisted_46, _toDisplayString(displayNameError.value), 1 /* TEXT */)
+                      _createElementVNode("p", _hoisted_53, _toDisplayString(displayNameError.value), 1 /* TEXT */)
                     ]),
-                    _createElementVNode("div", _hoisted_47, [
-                      _cache[58] || (_cache[58] = _createElementVNode("label", { for: "recovery-password" }, "Senha de recuperação", -1 /* CACHED */)),
-                      _createElementVNode("div", _hoisted_48, [
+                    _createElementVNode("div", _hoisted_54, [
+                      _cache[65] || (_cache[65] = _createElementVNode("label", { for: "recovery-password" }, "Senha de recuperação", -1 /* CACHED */)),
+                      _createElementVNode("div", _hoisted_55, [
                         _withDirectives(_createElementVNode("input", {
                           id: "recovery-password",
                           "onUpdate:modelValue": _cache[7] || (_cache[7] = ($event: any) => ((recoveryPassword).value = $event)),
@@ -951,7 +1098,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                           name: "recovery-password",
                           readonly: _unref(roomCreation).status === 'submitting' || Boolean(_unref(roomCreation).pendingInput),
                           required: ""
-                        }, null, 8 /* PROPS */, _hoisted_49), [
+                        }, null, 8 /* PROPS */, _hoisted_56), [
                           [_vModelDynamic, recoveryPassword.value]
                         ]),
                         _createElementVNode("button", {
@@ -962,26 +1109,26 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                         }, _toDisplayString(passwordVisible.value ? 'Ocultar senha' : 'Mostrar senha'), 1 /* TEXT */)
                       ])
                     ]),
-                    _cache[60] || (_cache[60] = _createElementVNode("p", {
+                    _cache[67] || (_cache[67] = _createElementVNode("p", {
                       id: "password-guidance",
                       class: "field-guidance"
                     }, " Use ao menos 12 caracteres e evite frases previsíveis. A senha não será exibida de novo. ", -1 /* CACHED */)),
-                    _createElementVNode("p", _hoisted_50, _toDisplayString(passwordError.value), 1 /* TEXT */),
+                    _createElementVNode("p", _hoisted_57, _toDisplayString(passwordError.value), 1 /* TEXT */),
                     (createFormError.value)
-                      ? (_openBlock(), _createElementBlock("p", _hoisted_51, _toDisplayString(createFormError.value), 1 /* TEXT */))
+                      ? (_openBlock(), _createElementBlock("p", _hoisted_58, _toDisplayString(createFormError.value), 1 /* TEXT */))
                       : _createCommentVNode("v-if", true),
-                    _createElementVNode("p", _hoisted_52, [
-                      _cache[59] || (_cache[59] = _createTextVNode(" Já recebeu um código? ", -1 /* CACHED */)),
+                    _createElementVNode("p", _hoisted_59, [
+                      _cache[66] || (_cache[66] = _createTextVNode(" Já recebeu um código? ", -1 /* CACHED */)),
                       _createElementVNode("button", {
                         type: "button",
                         onClick: _cache[9] || (_cache[9] = ($event: any) => (showJoin()))
                       }, "Entrar em uma sala")
                     ])
-                  ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_42)
+                  ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_49)
                 ])
               ], 2 /* CLASS */))
-            : (_openBlock(), _createElementBlock("section", _hoisted_53, [
-                _cache[73] || (_cache[73] = _createElementVNode("div", {
+            : (_openBlock(), _createElementBlock("section", _hoisted_60, [
+                _cache[80] || (_cache[80] = _createElementVNode("div", {
                   class: "cue-rail",
                   "aria-hidden": "true"
                 }, [
@@ -989,8 +1136,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                   _createElementVNode("span", { class: "cue-line" }),
                   _createElementVNode("span", { class: "cue-label" }, "Entrar na mesa")
                 ], -1 /* CACHED */)),
-                _createElementVNode("div", _hoisted_54, [
-                  _cache[72] || (_cache[72] = _createElementVNode("p", {
+                _createElementVNode("div", _hoisted_61, [
+                  _cache[79] || (_cache[79] = _createElementVNode("p", {
                     class: "service-confirmation",
                     role: "status"
                   }, [
@@ -1000,8 +1147,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                     }),
                     _createTextVNode(" Servidor pronto ")
                   ], -1 /* CACHED */)),
-                  _createElementVNode("h2", _hoisted_55, _toDisplayString(_unref(roomAccess).roomLookup ? 'Escolha seu lugar à mesa' : 'Entre na sala do grupo'), 1 /* TEXT */),
-                  _createElementVNode("p", _hoisted_56, _toDisplayString(_unref(roomAccess).roomLookup
+                  _createElementVNode("h2", _hoisted_62, _toDisplayString(_unref(roomAccess).roomLookup ? 'Escolha seu lugar à mesa' : 'Entre na sala do grupo'), 1 /* TEXT */),
+                  _createElementVNode("p", _hoisted_63, _toDisplayString(_unref(roomAccess).roomLookup
               ? `Sala ${lookupCode.value} está aberta. Escolha somente entre os Heróis disponíveis.`
               : 'Use o código compartilhado pelo anfitrião. Ele localiza a sala, mas não recupera uma participação.'), 1 /* TEXT */),
                   (!_unref(roomAccess).roomLookup)
@@ -1012,8 +1159,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                         "aria-busy": _unref(roomAccess).status === 'looking_up',
                         onSubmit: _cache[13] || (_cache[13] = _withModifiers(($event: any) => (findRoom()), ["prevent"]))
                       }, [
-                        _createElementVNode("div", _hoisted_58, [
-                          _cache[65] || (_cache[65] = _createElementVNode("label", { for: "room-code" }, "Código da sala", -1 /* CACHED */)),
+                        _createElementVNode("div", _hoisted_65, [
+                          _cache[72] || (_cache[72] = _createElementVNode("label", { for: "room-code" }, "Código da sala", -1 /* CACHED */)),
                           _withDirectives(_createElementVNode("input", {
                             id: "room-code",
                             "onUpdate:modelValue": _cache[11] || (_cache[11] = ($event: any) => ((roomCode).value = $event)),
@@ -1030,22 +1177,22 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                           }, null, 512 /* NEED_PATCH */), [
                             [_vModelText, roomCode.value]
                           ]),
-                          _cache[66] || (_cache[66] = _createElementVNode("p", {
+                          _cache[73] || (_cache[73] = _createElementVNode("p", {
                             id: "room-code-guidance",
                             class: "field-guidance"
                           }, " O código tem oito letras e números. ", -1 /* CACHED */))
                         ]),
                         (joinFormError.value)
-                          ? (_openBlock(), _createElementBlock("p", _hoisted_59, _toDisplayString(joinFormError.value), 1 /* TEXT */))
+                          ? (_openBlock(), _createElementBlock("p", _hoisted_66, _toDisplayString(joinFormError.value), 1 /* TEXT */))
                           : _createCommentVNode("v-if", true),
-                        _createElementVNode("p", _hoisted_60, [
-                          _cache[67] || (_cache[67] = _createTextVNode(" Precisa abrir a mesa? ", -1 /* CACHED */)),
+                        _createElementVNode("p", _hoisted_67, [
+                          _cache[74] || (_cache[74] = _createTextVNode(" Precisa abrir a mesa? ", -1 /* CACHED */)),
                           _createElementVNode("button", {
                             type: "button",
                             onClick: _cache[12] || (_cache[12] = ($event: any) => (showCreate()))
                           }, "Criar uma sala")
                         ])
-                      ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_57))
+                      ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_64))
                     : (_openBlock(), _createElementBlock("form", {
                         key: 1,
                         id: "join-room",
@@ -1053,8 +1200,8 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                         "aria-busy": _unref(roomAccess).status === 'joining',
                         onSubmit: _cache[17] || (_cache[17] = _withModifiers(($event: any) => (joinRoom()), ["prevent"]))
                       }, [
-                        _createElementVNode("div", _hoisted_62, [
-                          _cache[68] || (_cache[68] = _createElementVNode("label", { for: "join-display-name" }, "Seu nome", -1 /* CACHED */)),
+                        _createElementVNode("div", _hoisted_69, [
+                          _cache[75] || (_cache[75] = _createElementVNode("label", { for: "join-display-name" }, "Seu nome", -1 /* CACHED */)),
                           _withDirectives(_createElementVNode("input", {
                             id: "join-display-name",
                             "onUpdate:modelValue": _cache[14] || (_cache[14] = ($event: any) => ((displayName).value = $event)),
@@ -1066,20 +1213,20 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                             readonly: _unref(roomAccess).status === 'joining' || Boolean(_unref(roomAccess).pendingInput),
                             required: "",
                             type: "text"
-                          }, null, 8 /* PROPS */, _hoisted_63), [
+                          }, null, 8 /* PROPS */, _hoisted_70), [
                             [_vModelText, displayName.value]
                           ]),
-                          _createElementVNode("p", _hoisted_64, _toDisplayString(displayNameError.value), 1 /* TEXT */)
+                          _createElementVNode("p", _hoisted_71, _toDisplayString(displayNameError.value), 1 /* TEXT */)
                         ]),
-                        _createElementVNode("fieldset", _hoisted_65, [
-                          _cache[71] || (_cache[71] = _createElementVNode("legend", null, "Herói", -1 /* CACHED */)),
-                          _createElementVNode("div", _hoisted_66, [
+                        _createElementVNode("fieldset", _hoisted_72, [
+                          _cache[78] || (_cache[78] = _createElementVNode("legend", null, "Herói", -1 /* CACHED */)),
+                          _createElementVNode("div", _hoisted_73, [
                             (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(lookupHeroes.value, (hero) => {
                               return (_openBlock(), _createElementBlock(_Fragment, {
                                 key: hero.id
                               }, [
                                 (hero.available)
-                                  ? (_openBlock(), _createElementBlock("label", _hoisted_67, [
+                                  ? (_openBlock(), _createElementBlock("label", _hoisted_74, [
                                       _withDirectives(_createElementVNode("input", {
                                         "onUpdate:modelValue": _cache[15] || (_cache[15] = ($event: any) => ((selectedHero).value = $event)),
                                         disabled: _unref(roomAccess).status === 'joining',
@@ -1087,39 +1234,39 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                                         name: "join-hero",
                                         required: "",
                                         type: "radio"
-                                      }, null, 8 /* PROPS */, _hoisted_68), [
+                                      }, null, 8 /* PROPS */, _hoisted_75), [
                                         [_vModelRadio, selectedHero.value]
                                       ]),
                                       _createElementVNode("span", null, _toDisplayString(hero.name), 1 /* TEXT */),
-                                      _cache[69] || (_cache[69] = _createElementVNode("small", { "aria-hidden": "true" }, "Disponível", -1 /* CACHED */))
+                                      _cache[76] || (_cache[76] = _createElementVNode("small", { "aria-hidden": "true" }, "Disponível", -1 /* CACHED */))
                                     ]))
-                                  : (_openBlock(), _createElementBlock("label", _hoisted_69, [
+                                  : (_openBlock(), _createElementBlock("label", _hoisted_76, [
                                       _createElementVNode("input", {
                                         disabled: true,
                                         value: hero.id,
                                         name: "join-hero",
                                         required: "",
                                         type: "radio"
-                                      }, null, 8 /* PROPS */, _hoisted_70),
+                                      }, null, 8 /* PROPS */, _hoisted_77),
                                       _createElementVNode("span", null, _toDisplayString(hero.name), 1 /* TEXT */),
-                                      _cache[70] || (_cache[70] = _createElementVNode("small", { "aria-hidden": "true" }, "Indisponível", -1 /* CACHED */))
+                                      _cache[77] || (_cache[77] = _createElementVNode("small", { "aria-hidden": "true" }, "Indisponível", -1 /* CACHED */))
                                     ]))
                               ], 64 /* STABLE_FRAGMENT */))
                             }), 128 /* KEYED_FRAGMENT */))
                           ])
                         ]),
                         (joinFormError.value)
-                          ? (_openBlock(), _createElementBlock("p", _hoisted_71, _toDisplayString(joinFormError.value), 1 /* TEXT */))
+                          ? (_openBlock(), _createElementBlock("p", _hoisted_78, _toDisplayString(joinFormError.value), 1 /* TEXT */))
                           : _createCommentVNode("v-if", true),
                         _createElementVNode("button", {
                           class: "text-button",
                           type: "button",
                           onClick: _cache[16] || (_cache[16] = ($event: any) => (_unref(roomAccess).clearLookup()))
                         }, " Usar outro código ")
-                      ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_61))
+                      ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_68))
                 ])
               ])),
-    _createElementVNode("footer", _hoisted_72, [
+    _createElementVNode("footer", _hoisted_79, [
       (_unref(health).availability !== 'ready')
         ? (_openBlock(), _createElementBlock("button", {
             key: 0,
@@ -1127,7 +1274,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
             type: "button",
             "aria-disabled": _unref(health).availability === 'checking',
             onClick: _cache[18] || (_cache[18] = ($event: any) => (retry()))
-          }, _toDisplayString(_unref(health).availability === 'checking' ? 'Verificando servidor' : 'Tentar novamente'), 9 /* TEXT, PROPS */, _hoisted_73))
+          }, _toDisplayString(_unref(health).availability === 'checking' ? 'Verificando servidor' : 'Tentar novamente'), 9 /* TEXT, PROPS */, _hoisted_80))
         : (sessionNeedsRecovery.value)
           ? (_openBlock(), _createElementBlock("button", {
               key: 1,
@@ -1135,64 +1282,82 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
               type: "button",
               "aria-disabled": _unref(roomAccess).status === 'restoring',
               onClick: _cache[19] || (_cache[19] = ($event: any) => (retrySession()))
-            }, _toDisplayString(isRestoringSession.value ? 'Retomando sessão' : 'Tentar retomar sessão'), 9 /* TEXT, PROPS */, _hoisted_74))
-          : (game.value)
-            ? (_openBlock(), _createElementBlock("p", _hoisted_75, [...(_cache[74] || (_cache[74] = [
-                _createElementVNode("span", { "aria-hidden": "true" }, null, -1 /* CACHED */),
-                _createTextVNode(" Estado inicial oficial recebido. A seed não foi enviada ao navegador. ", -1 /* CACHED */)
-              ]))]))
-            : (lobby.value && lobby.value.participant.hero && !lobby.value.participant.ready)
-              ? (_openBlock(), _createElementBlock("button", {
-                  key: 3,
-                  class: "primary-button",
-                  disabled: lobbyIsBusy(),
-                  type: "button",
-                  onClick: _cache[20] || (_cache[20] = ($event: any) => (toggleReadiness()))
-                }, _toDisplayString(_unref(roomAccess).status === 'setting_readiness' ? 'Confirmando prontidão' : 'Estou pronto'), 9 /* TEXT, PROPS */, _hoisted_76))
-              : (lobby.value && isHost.value && canStartGame.value)
+            }, _toDisplayString(isRestoringSession.value ? 'Retomando sessão' : 'Tentar retomar sessão'), 9 /* TEXT, PROPS */, _hoisted_81))
+          : (game.value && _unref(gameCommand).status === 'uncertain')
+            ? (_openBlock(), _createElementBlock("button", {
+                key: 2,
+                class: "primary-button",
+                type: "button",
+                onClick: _cache[20] || (_cache[20] = ($event: any) => (recoverGameCommand()))
+              }, " Verificar resultado da ação "))
+            : (game.value && (_unref(gameCommand).status === 'submitting' || _unref(gameCommand).status === 'recovering'))
+              ? (_openBlock(), _createElementBlock("button", _hoisted_82, _toDisplayString(_unref(gameCommand).status === 'recovering' ? 'Consultando recibo' : 'Aguardando confirmação'), 1 /* TEXT */))
+              : (game.value && canCompleteDarkArts.value)
                 ? (_openBlock(), _createElementBlock("button", {
                     key: 4,
                     class: "primary-button",
-                    disabled: lobbyIsBusy(),
                     type: "button",
-                    onClick: _cache[21] || (_cache[21] = ($event: any) => (startGame()))
-                  }, _toDisplayString(_unref(roomAccess).status === 'starting_game' ? 'Selando sala' : 'Selar sala e iniciar'), 9 /* TEXT, PROPS */, _hoisted_77))
-                : (lobby.value && lobby.value.participant.ready)
-                  ? (_openBlock(), _createElementBlock("button", {
-                      key: 5,
-                      class: "primary-button",
-                      disabled: lobbyIsBusy(),
-                      type: "button",
-                      onClick: _cache[22] || (_cache[22] = ($event: any) => (refreshLobby()))
-                    }, _toDisplayString(_unref(roomAccess).status === 'restoring' ? 'Atualizando sala' : 'Atualizar estado da sala'), 9 /* TEXT, PROPS */, _hoisted_78))
-                  : (lobby.value)
-                    ? (_openBlock(), _createElementBlock("p", _hoisted_79, [...(_cache[75] || (_cache[75] = [
-                        _createElementVNode("span", { "aria-hidden": "true" }, null, -1 /* CACHED */),
-                        _createTextVNode(" Escolha um Herói antes de confirmar sua prontidão. ", -1 /* CACHED */)
-                      ]))]))
-                    : (entryMode.value === 'create')
+                    onClick: _cache[21] || (_cache[21] = ($event: any) => (completeDarkArts()))
+                  }, " Concluir Artes das Trevas "))
+                : (game.value)
+                  ? (_openBlock(), _createElementBlock("p", _hoisted_83, [
+                      _cache[81] || (_cache[81] = _createElementVNode("span", { "aria-hidden": "true" }, null, -1 /* CACHED */)),
+                      _createTextVNode(" " + _toDisplayString(game.value.turn.phase === 'hero_action'
+            ? 'Fase oficial concluída. As próximas ações chegam em uma etapa posterior.'
+            : 'Aguardando a ação do participante ativo.'), 1 /* TEXT */)
+                    ]))
+                  : (lobby.value && lobby.value.participant.hero && !lobby.value.participant.ready)
+                    ? (_openBlock(), _createElementBlock("button", {
+                        key: 6,
+                        class: "primary-button",
+                        disabled: lobbyIsBusy(),
+                        type: "button",
+                        onClick: _cache[22] || (_cache[22] = ($event: any) => (toggleReadiness()))
+                      }, _toDisplayString(_unref(roomAccess).status === 'setting_readiness' ? 'Confirmando prontidão' : 'Estou pronto'), 9 /* TEXT, PROPS */, _hoisted_84))
+                    : (lobby.value && isHost.value && canStartGame.value)
                       ? (_openBlock(), _createElementBlock("button", {
                           key: 7,
                           class: "primary-button",
-                          disabled: _unref(roomCreation).status === 'submitting',
-                          form: "create-room",
-                          type: "submit"
-                        }, _toDisplayString(createSubmitLabel.value), 9 /* TEXT, PROPS */, _hoisted_80))
-                      : (entryMode.value === 'join' && !_unref(roomAccess).roomLookup)
+                          disabled: lobbyIsBusy(),
+                          type: "button",
+                          onClick: _cache[23] || (_cache[23] = ($event: any) => (startGame()))
+                        }, _toDisplayString(_unref(roomAccess).status === 'starting_game' ? 'Selando sala' : 'Selar sala e iniciar'), 9 /* TEXT, PROPS */, _hoisted_85))
+                      : (lobby.value && lobby.value.participant.ready)
                         ? (_openBlock(), _createElementBlock("button", {
                             key: 8,
                             class: "primary-button",
-                            disabled: _unref(roomAccess).status === 'looking_up',
-                            form: "find-room",
-                            type: "submit"
-                          }, _toDisplayString(joinSubmitLabel.value), 9 /* TEXT, PROPS */, _hoisted_81))
-                        : (_openBlock(), _createElementBlock("button", {
-                            key: 9,
-                            class: "primary-button",
-                            disabled: _unref(roomAccess).status === 'joining' || !selectedHero.value,
-                            form: "join-room",
-                            type: "submit"
-                          }, _toDisplayString(joinSubmitLabel.value), 9 /* TEXT, PROPS */, _hoisted_82))
+                            disabled: lobbyIsBusy(),
+                            type: "button",
+                            onClick: _cache[24] || (_cache[24] = ($event: any) => (refreshLobby()))
+                          }, _toDisplayString(_unref(roomAccess).status === 'restoring' ? 'Atualizando sala' : 'Atualizar estado da sala'), 9 /* TEXT, PROPS */, _hoisted_86))
+                        : (lobby.value)
+                          ? (_openBlock(), _createElementBlock("p", _hoisted_87, [...(_cache[82] || (_cache[82] = [
+                              _createElementVNode("span", { "aria-hidden": "true" }, null, -1 /* CACHED */),
+                              _createTextVNode(" Escolha um Herói antes de confirmar sua prontidão. ", -1 /* CACHED */)
+                            ]))]))
+                          : (entryMode.value === 'create')
+                            ? (_openBlock(), _createElementBlock("button", {
+                                key: 10,
+                                class: "primary-button",
+                                disabled: _unref(roomCreation).status === 'submitting',
+                                form: "create-room",
+                                type: "submit"
+                              }, _toDisplayString(createSubmitLabel.value), 9 /* TEXT, PROPS */, _hoisted_88))
+                            : (entryMode.value === 'join' && !_unref(roomAccess).roomLookup)
+                              ? (_openBlock(), _createElementBlock("button", {
+                                  key: 11,
+                                  class: "primary-button",
+                                  disabled: _unref(roomAccess).status === 'looking_up',
+                                  form: "find-room",
+                                  type: "submit"
+                                }, _toDisplayString(joinSubmitLabel.value), 9 /* TEXT, PROPS */, _hoisted_89))
+                              : (_openBlock(), _createElementBlock("button", {
+                                  key: 12,
+                                  class: "primary-button",
+                                  disabled: _unref(roomAccess).status === 'joining' || !selectedHero.value,
+                                  form: "join-room",
+                                  type: "submit"
+                                }, _toDisplayString(joinSubmitLabel.value), 9 /* TEXT, PROPS */, _hoisted_90))
     ])
   ]))
 }

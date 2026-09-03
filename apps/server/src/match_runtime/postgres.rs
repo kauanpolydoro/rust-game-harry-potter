@@ -3,8 +3,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, SelectedContent, StartGameRequest, StoredGame, StoredGameStart, StoredRoomActor,
-    StoredRoomParticipant,
+    ApiError, ExecuteGameCommandRequest, SelectedContent, StartGameRequest, StoredCommandGame,
+    StoredCommandReceipt, StoredGame, StoredGameStart, StoredRoomActor, StoredRoomParticipant,
 };
 
 pub(super) struct NewGame<'a> {
@@ -15,6 +15,20 @@ pub(super) struct NewGame<'a> {
     pub(super) state_digest: &'a str,
     pub(super) snapshot_json: &'a str,
     pub(super) seed: &'a [u8; 32],
+}
+
+pub(super) struct NewGameCommand<'a> {
+    pub(super) game_id: Uuid,
+    pub(super) actor_participant_id: Uuid,
+    pub(super) command_id: Uuid,
+    pub(super) request: &'a ExecuteGameCommandRequest,
+    pub(super) command_type: &'a str,
+    pub(super) payload_digest: &'a str,
+    pub(super) state: &'a game_domain::InitialGameState,
+    pub(super) state_digest: &'a str,
+    pub(super) snapshot_json: &'a str,
+    pub(super) event_type: &'a str,
+    pub(super) event_json: &'a str,
 }
 
 pub(super) async fn publish_manifest(
@@ -191,7 +205,7 @@ pub(super) async fn persist_game(
         )
         VALUES (
             $1, $2, $3, 'in_progress', $4, $5, $6, $7, $8, $9,
-            $10, $11, $12, $13, $14::jsonb, $15, $16, 0, $17, $18
+            $10, $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19
         )
         ",
     )
@@ -211,6 +225,7 @@ pub(super) async fn persist_game(
     .bind(game.snapshot_json)
     .bind(game.state.prng_algorithm)
     .bind(game.seed.as_slice())
+    .bind(i64::try_from(game.state.prng_counter).map_err(|_| ApiError::internal())?)
     .bind(game.state.shuffle_algorithm)
     .bind(game.state.sampling_algorithm)
     .execute(&mut **transaction)
@@ -290,14 +305,192 @@ pub(super) async fn game_for_participant(
             games.state_digest,
             games.snapshot::text AS snapshot_json,
             games.prng_algorithm,
+            games.prng_counter,
             games.shuffle_algorithm,
-            games.sampling_algorithm
+            games.sampling_algorithm,
+            replace(
+                to_char(games.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS expires_at
         FROM games
         JOIN participants ON participants.room_id = games.room_id
         WHERE participants.id = $1
         ",
     )
     .bind(participant_id)
+    .fetch_optional(database)
+    .await
+    .map_err(|_| ApiError::internal())
+}
+
+pub(super) async fn lock_game_for_actor(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant_id: Uuid,
+) -> Result<Option<StoredCommandGame>, ApiError> {
+    sqlx::query_as::<_, StoredCommandGame>(
+        r"
+        SELECT
+            games.id,
+            games.status,
+            games.adventure_id,
+            games.manifest_digest,
+            games.manifest_version,
+            games.content_version,
+            games.ruleset_version,
+            games.snapshot_version,
+            games.state_version,
+            games.sequence,
+            games.state_digest,
+            games.snapshot::text AS snapshot_json,
+            games.prng_algorithm,
+            games.prng_counter,
+            games.shuffle_algorithm,
+            games.sampling_algorithm,
+            participants.position AS actor_position,
+            clock_timestamp() >= games.expires_at AS expired
+        FROM games
+        JOIN participants ON participants.room_id = games.room_id
+        WHERE participants.id = $1
+        FOR UPDATE OF games
+        ",
+    )
+    .bind(participant_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::internal())
+}
+
+pub(super) async fn persist_game_command(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: NewGameCommand<'_>,
+) -> Result<StoredCommandReceipt, ApiError> {
+    let expires_at = sqlx::query_scalar::<_, String>(
+        r"
+        UPDATE games
+        SET
+            state_version = $2,
+            sequence = $3,
+            state_digest = $4,
+            snapshot = $5::jsonb,
+            prng_counter = $6,
+            last_game_action_at = clock_timestamp(),
+            expires_at = clock_timestamp() + INTERVAL '7 days'
+        WHERE id = $1
+        RETURNING replace(
+            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+            ' ',
+            'T'
+        ) || 'Z'
+        ",
+    )
+    .bind(command.game_id)
+    .bind(i64::try_from(command.state.state_version).map_err(|_| ApiError::internal())?)
+    .bind(i64::try_from(command.state.sequence).map_err(|_| ApiError::internal())?)
+    .bind(command.state_digest)
+    .bind(command.snapshot_json)
+    .bind(i64::try_from(command.state.prng_counter).map_err(|_| ApiError::internal())?)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::internal())?;
+
+    sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            sequence,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        ",
+    )
+    .bind(command.game_id)
+    .bind(i64::try_from(command.state.sequence).map_err(|_| ApiError::internal())?)
+    .bind(command.event_type)
+    .bind(command.command_id)
+    .bind(command.actor_participant_id)
+    .bind(i64::try_from(command.state.state_version).map_err(|_| ApiError::internal())?)
+    .bind(command.event_json)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::internal())?;
+
+    sqlx::query_as::<_, StoredCommandReceipt>(
+        r"
+        INSERT INTO game_command_receipts (
+            game_id,
+            command_id,
+            actor_participant_id,
+            command_type,
+            expected_state_version,
+            payload_digest,
+            accepted_state_version,
+            accepted_sequence,
+            expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
+        RETURNING
+            command_id,
+            command_type,
+            expected_state_version,
+            accepted_state_version,
+            accepted_sequence,
+            replace(
+                to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS expires_at
+        ",
+    )
+    .bind(command.game_id)
+    .bind(command.command_id)
+    .bind(command.actor_participant_id)
+    .bind(command.command_type)
+    .bind(
+        i64::try_from(command.request.expected_state_version)
+            .map_err(|_| ApiError::stale_state_version())?,
+    )
+    .bind(command.payload_digest)
+    .bind(i64::try_from(command.state.state_version).map_err(|_| ApiError::internal())?)
+    .bind(i64::try_from(command.state.sequence).map_err(|_| ApiError::internal())?)
+    .bind(&expires_at)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::internal())
+}
+
+pub(super) async fn command_receipt_for_actor(
+    database: &PgPool,
+    participant_id: Uuid,
+    command_id: Uuid,
+) -> Result<Option<StoredCommandReceipt>, ApiError> {
+    sqlx::query_as::<_, StoredCommandReceipt>(
+        r"
+        SELECT
+            receipts.command_id,
+            receipts.command_type,
+            receipts.expected_state_version,
+            receipts.accepted_state_version,
+            receipts.accepted_sequence,
+            replace(
+                to_char(receipts.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS expires_at
+        FROM game_command_receipts AS receipts
+        JOIN games ON games.id = receipts.game_id
+        JOIN participants ON participants.room_id = games.room_id
+        WHERE participants.id = $1
+          AND receipts.actor_participant_id = $1
+          AND receipts.command_id = $2
+        ",
+    )
+    .bind(participant_id)
+    .bind(command_id)
     .fetch_optional(database)
     .await
     .map_err(|_| ApiError::internal())

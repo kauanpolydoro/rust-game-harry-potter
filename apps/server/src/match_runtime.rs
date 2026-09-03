@@ -2,15 +2,17 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::Response,
-    routing::post,
+    routing::{get, post},
 };
 use game_content::{ContentManifest, EntryKind};
 use game_domain::{
-    ContentSelection, GamePhase, GameStatus, HeroId, InitialGameState, LobbyParticipant,
-    ParticipantRole, StartGameError, StartGameInput, initialize_game,
+    ContentSelection, GameCommand, GameCommandError, GameCommandInput, GameEvent, GamePhase,
+    GameStatus, HeroId, InitialGameState, InitialPlayer, LobbyParticipant, PRNG_ALGORITHM,
+    ParticipantRole, SAMPLING_ALGORITHM, SHUFFLE_ALGORITHM, StartGameError, StartGameInput,
+    decide_game_command, initialize_game,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -26,7 +28,13 @@ mod postgres;
 const SEED_BYTES: usize = 32;
 
 pub(crate) fn router() -> Router<AppState> {
-    Router::new().route("/api/games", post(start_game))
+    Router::new()
+        .route("/api/games", post(start_game))
+        .route("/api/games/current/commands", post(execute_game_command))
+        .route(
+            "/api/games/current/commands/{command_id}",
+            get(command_result),
+        )
 }
 
 #[derive(Clone)]
@@ -102,6 +110,21 @@ struct StartGameRequest {
     ruleset_version: String,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExecuteGameCommandRequest {
+    command_id: String,
+    expected_state_version: u64,
+    #[serde(rename = "type")]
+    command_type: GameCommandType,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum GameCommandType {
+    CompleteDarkArts,
+}
+
 #[derive(FromRow)]
 struct StoredRoomActor {
     room_id: Uuid,
@@ -145,8 +168,42 @@ struct StoredGame {
     state_digest: String,
     snapshot_json: String,
     prng_algorithm: String,
+    prng_counter: i64,
     shuffle_algorithm: String,
     sampling_algorithm: String,
+    expires_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredCommandGame {
+    id: Uuid,
+    status: String,
+    adventure_id: String,
+    manifest_digest: String,
+    manifest_version: i16,
+    content_version: String,
+    ruleset_version: String,
+    snapshot_version: i16,
+    state_version: i64,
+    sequence: i64,
+    state_digest: String,
+    snapshot_json: String,
+    prng_algorithm: String,
+    prng_counter: i64,
+    shuffle_algorithm: String,
+    sampling_algorithm: String,
+    actor_position: i16,
+    expired: bool,
+}
+
+#[derive(FromRow)]
+struct StoredCommandReceipt {
+    command_id: Uuid,
+    command_type: String,
+    expected_state_version: i64,
+    accepted_state_version: i64,
+    accepted_sequence: i64,
+    expires_at: String,
 }
 
 #[derive(Serialize)]
@@ -164,6 +221,7 @@ struct GameSummary {
     id: String,
     status: String,
     adventure: AdventureSummary,
+    expires_at: String,
 }
 
 #[derive(Serialize)]
@@ -213,7 +271,25 @@ struct GameHero {
     name: &'static str,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
+struct ExecuteGameCommandResponse {
+    receipt: GameCommandReceipt,
+    projection: GameProjectionResponse,
+}
+
+#[derive(Serialize)]
+struct GameCommandReceipt {
+    command_id: String,
+    #[serde(rename = "type")]
+    command_type: String,
+    status: &'static str,
+    expected_state_version: i64,
+    accepted_state_version: i64,
+    accepted_sequence: i64,
+    expires_at: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 struct PersistedSnapshot {
     snapshot_version: u16,
     state_version: u64,
@@ -226,7 +302,7 @@ struct PersistedSnapshot {
     prng: PersistedPrng,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PersistedVersions {
     content: String,
     ruleset: String,
@@ -237,21 +313,21 @@ struct PersistedVersions {
     sampling: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PersistedTurn {
     number: u32,
     phase: String,
     active_position: u8,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PersistedPlayer {
     participant_id: String,
     position: u8,
     hero_id: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PersistedPrng {
     algorithm: String,
     counter: u64,
@@ -416,6 +492,104 @@ async fn replay_game_start(
     Ok(no_store_json(StatusCode::CREATED, projection))
 }
 
+async fn execute_game_command(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ExecuteGameCommandRequest>,
+) -> Result<Response, ApiError> {
+    let participant_id = authenticated_participant(&state, &headers).await?;
+    let command_id =
+        Uuid::parse_str(&request.command_id).map_err(|_| ApiError::invalid_command_id())?;
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let stored = postgres::lock_game_for_actor(&mut transaction, participant_id)
+        .await?
+        .ok_or_else(ApiError::game_action_not_allowed)?;
+    if stored.expired {
+        return Err(ApiError::game_expired());
+    }
+
+    let persisted: PersistedSnapshot =
+        serde_json::from_str(&stored.snapshot_json).map_err(|_| ApiError::internal())?;
+    verify_command_snapshot(&stored, &persisted)?;
+    let current = command_domain_state(&persisted)?;
+    let decision = decide_game_command(GameCommandInput {
+        state: &current,
+        actor_position: u8::try_from(stored.actor_position)
+            .map_err(|_| ApiError::game_action_not_allowed())?,
+        expected_state_version: request.expected_state_version,
+        command: match request.command_type {
+            GameCommandType::CompleteDarkArts => GameCommand::CompleteDarkArts,
+        },
+    })
+    .map_err(command_error)?;
+
+    let next_snapshot = persisted_after_decision(&persisted, &decision.state);
+    let snapshot_json = serde_json::to_string(&next_snapshot).map_err(|_| ApiError::internal())?;
+    let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
+    let request_json = serde_json::to_vec(&request).map_err(|_| ApiError::internal())?;
+    let payload_digest = format!("blake3:{}", blake3::hash(&request_json).to_hex());
+    let (event_type, event_json) = persisted_event(&decision.events)?;
+    let receipt = postgres::persist_game_command(
+        &mut transaction,
+        postgres::NewGameCommand {
+            game_id: stored.id,
+            actor_participant_id: participant_id,
+            command_id,
+            request: &request,
+            command_type: command_type_name(request.command_type),
+            payload_digest: &payload_digest,
+            state: &decision.state,
+            state_digest: &state_digest,
+            snapshot_json: &snapshot_json,
+            event_type,
+            event_json: &event_json,
+        },
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    let projection = projection_for_participant(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+    Ok(no_store_json(
+        StatusCode::OK,
+        ExecuteGameCommandResponse {
+            receipt: receipt_response(receipt),
+            projection,
+        },
+    ))
+}
+
+async fn command_result(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(command_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let participant_id = authenticated_participant(&state, &headers).await?;
+    let command_id = Uuid::parse_str(&command_id).map_err(|_| ApiError::invalid_command_id())?;
+    let receipt = postgres::command_receipt_for_actor(&state.database, participant_id, command_id)
+        .await?
+        .ok_or_else(ApiError::command_not_found)?;
+    let projection = projection_for_participant(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+
+    Ok(no_store_json(
+        StatusCode::OK,
+        ExecuteGameCommandResponse {
+            receipt: receipt_response(receipt),
+            projection,
+        },
+    ))
+}
+
 pub(crate) async fn projection_for_participant(
     database: &sqlx::PgPool,
     participant_id: Uuid,
@@ -445,7 +619,8 @@ pub(crate) async fn projection_for_participant(
         && persisted.versions.manifest_digest == game.manifest_digest
         && persisted.versions.prng == game.prng_algorithm
         && persisted.versions.shuffle == game.shuffle_algorithm
-        && persisted.versions.sampling == game.sampling_algorithm;
+        && persisted.versions.sampling == game.sampling_algorithm
+        && i64::try_from(persisted.prng.counter).ok() == Some(game.prng_counter);
     if !snapshot_metadata_matches {
         return Err(ApiError::internal());
     }
@@ -454,6 +629,13 @@ pub(crate) async fn projection_for_participant(
         .iter()
         .find(|participant| participant.id == participant_id)
         .ok_or_else(ApiError::internal)?;
+    let legal_actions = if persisted.turn.phase == "dark_arts"
+        && current.position == i16::from(persisted.turn.active_position)
+    {
+        vec!["complete_dark_arts".to_owned()]
+    } else {
+        Vec::new()
+    };
 
     Ok(Some(GameProjectionResponse {
         game: GameSummary {
@@ -463,6 +645,7 @@ pub(crate) async fn projection_for_participant(
                 id: game.adventure_id,
                 name: game.adventure_name,
             },
+            expires_at: game.expires_at,
         },
         snapshot: SnapshotSummary {
             snapshot_version: game.snapshot_version,
@@ -489,7 +672,7 @@ pub(crate) async fn projection_for_participant(
             .iter()
             .map(game_participant)
             .collect::<Result<Vec<_>, _>>()?,
-        legal_actions: Vec::new(),
+        legal_actions,
     }))
 }
 
@@ -557,6 +740,148 @@ fn start_error(error: StartGameError) -> ApiError {
     }
 }
 
+fn command_error(error: GameCommandError) -> ApiError {
+    match error {
+        GameCommandError::StaleStateVersion => ApiError::stale_state_version(),
+        GameCommandError::ActorNotActive | GameCommandError::CommandNotLegal => {
+            ApiError::game_action_not_allowed()
+        }
+        GameCommandError::VersionOverflow => ApiError::internal(),
+    }
+}
+
+const fn command_type_name(command_type: GameCommandType) -> &'static str {
+    match command_type {
+        GameCommandType::CompleteDarkArts => "complete_dark_arts",
+    }
+}
+
+fn receipt_response(receipt: StoredCommandReceipt) -> GameCommandReceipt {
+    GameCommandReceipt {
+        command_id: receipt.command_id.to_string(),
+        command_type: receipt.command_type,
+        status: "accepted",
+        expected_state_version: receipt.expected_state_version,
+        accepted_state_version: receipt.accepted_state_version,
+        accepted_sequence: receipt.accepted_sequence,
+        expires_at: receipt.expires_at,
+    }
+}
+
+fn verify_command_snapshot(
+    game: &StoredCommandGame,
+    persisted: &PersistedSnapshot,
+) -> Result<(), ApiError> {
+    let canonical_snapshot = serde_json::to_string(persisted).map_err(|_| ApiError::internal())?;
+    let verified_digest = format!(
+        "blake3:{}",
+        blake3::hash(canonical_snapshot.as_bytes()).to_hex()
+    );
+    let metadata_matches = verified_digest == game.state_digest
+        && i16::try_from(persisted.snapshot_version).ok() == Some(game.snapshot_version)
+        && i64::try_from(persisted.state_version).ok() == Some(game.state_version)
+        && i64::try_from(persisted.sequence).ok() == Some(game.sequence)
+        && persisted.status == game.status
+        && persisted.adventure_id == game.adventure_id
+        && i16::try_from(persisted.versions.manifest).ok() == Some(game.manifest_version)
+        && persisted.versions.content == game.content_version
+        && persisted.versions.ruleset == game.ruleset_version
+        && persisted.versions.manifest_digest == game.manifest_digest
+        && persisted.versions.prng == game.prng_algorithm
+        && persisted.versions.shuffle == game.shuffle_algorithm
+        && persisted.versions.sampling == game.sampling_algorithm
+        && i64::try_from(persisted.prng.counter).ok() == Some(game.prng_counter);
+    if !metadata_matches {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
+fn command_domain_state(persisted: &PersistedSnapshot) -> Result<InitialGameState, ApiError> {
+    let status = match persisted.status.as_str() {
+        "in_progress" => GameStatus::InProgress,
+        _ => return Err(ApiError::game_action_not_allowed()),
+    };
+    let phase = match persisted.turn.phase.as_str() {
+        "dark_arts" => GamePhase::DarkArts,
+        "hero_action" => GamePhase::HeroAction,
+        _ => return Err(ApiError::internal()),
+    };
+    let players = persisted
+        .participants
+        .iter()
+        .map(|player| {
+            Ok(InitialPlayer {
+                position: player.position,
+                hero: hero_id(&player.hero_id)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+
+    Ok(InitialGameState {
+        snapshot_version: persisted.snapshot_version,
+        state_version: persisted.state_version,
+        sequence: persisted.sequence,
+        status,
+        turn: persisted.turn.number,
+        phase,
+        active_position: persisted.turn.active_position,
+        adventure_id: persisted.adventure_id.clone(),
+        content_version: persisted.versions.content.clone(),
+        ruleset_version: persisted.versions.ruleset.clone(),
+        manifest_digest: persisted.versions.manifest_digest.clone(),
+        manifest_version: persisted.versions.manifest,
+        prng_algorithm: PRNG_ALGORITHM,
+        shuffle_algorithm: SHUFFLE_ALGORITHM,
+        sampling_algorithm: SAMPLING_ALGORITHM,
+        prng_counter: persisted.prng.counter,
+        players,
+    })
+}
+
+fn persisted_after_decision(
+    current: &PersistedSnapshot,
+    state: &InitialGameState,
+) -> PersistedSnapshot {
+    let mut next = current.clone();
+    next.state_version = state.state_version;
+    next.sequence = state.sequence;
+    next.status = match state.status {
+        GameStatus::InProgress => "in_progress".to_owned(),
+    };
+    next.turn.number = state.turn;
+    next.turn.phase = match state.phase {
+        GamePhase::DarkArts => "dark_arts".to_owned(),
+        GamePhase::HeroAction => "hero_action".to_owned(),
+    };
+    next.turn.active_position = state.active_position;
+    next.prng.counter = state.prng_counter;
+    next
+}
+
+fn persisted_event(events: &[GameEvent]) -> Result<(&'static str, String), ApiError> {
+    match events {
+        [
+            GameEvent::DarkArtsCompleted {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+            },
+        ] => serde_json::to_string(&serde_json::json!({
+            "event_version": 1,
+            "type": "dark_arts_completed",
+            "sequence": sequence,
+            "state_version": state_version,
+            "turn": turn,
+            "actor_position": actor_position,
+        }))
+        .map(|event| ("dark_arts_completed", event))
+        .map_err(|_| ApiError::internal()),
+        _ => Err(ApiError::internal()),
+    }
+}
+
 fn persisted_snapshot(
     state: &InitialGameState,
     participants: &[StoredRoomParticipant],
@@ -582,6 +907,7 @@ fn persisted_snapshot(
             number: state.turn,
             phase: match state.phase {
                 GamePhase::DarkArts => "dark_arts".to_owned(),
+                GamePhase::HeroAction => "hero_action".to_owned(),
             },
             active_position: state.active_position,
         },
@@ -598,7 +924,7 @@ fn persisted_snapshot(
             .collect(),
         prng: PersistedPrng {
             algorithm: state.prng_algorithm.to_owned(),
-            counter: 0,
+            counter: state.prng_counter,
         },
     }
 }

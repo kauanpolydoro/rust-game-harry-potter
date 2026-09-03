@@ -320,7 +320,10 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
         host_projection["participants"].as_array().map(Vec::len),
         Some(2)
     );
-    assert_eq!(host_projection["legal_actions"], json!([]));
+    assert_eq!(
+        host_projection["legal_actions"],
+        json!(["complete_dark_arts"])
+    );
     assert!(!host_projection.to_string().contains("seed"));
 
     let guest_response = room
@@ -630,5 +633,276 @@ async fn sealed_room_rejects_entry_hero_readiness_and_position_changes() {
         position_change
             .to_string()
             .contains("sealed room participants cannot change")
+    );
+}
+
+async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration: &str) {
+    let stored =
+        sqlx::query_as::<_, (i64, i64, i64, String, String, String, i64, i64, bool, bool)>(
+            r"
+            SELECT
+                games.state_version,
+                games.sequence,
+                games.prng_counter,
+                games.snapshot::text,
+                events.event_type,
+                events.payload::text,
+                receipts.accepted_state_version,
+                receipts.accepted_sequence,
+                games.expires_at = receipts.expires_at,
+                games.expires_at > $2::timestamptz
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            JOIN game_events AS events ON events.game_id = games.id
+            JOIN game_command_receipts AS receipts
+              ON receipts.game_id = games.id
+             AND receipts.command_id = events.command_id
+            WHERE rooms.code = $1
+            ",
+        )
+        .bind(&room.room_code)
+        .bind(initial_expiration)
+        .fetch_one(&room.database)
+        .await
+        .expect("every committed command artifact must be queryable together");
+    assert_eq!(stored.0, 2);
+    assert_eq!(stored.1, 1);
+    assert_eq!(stored.2, 0);
+    assert_eq!(stored.4, "dark_arts_completed");
+    assert_eq!(stored.6, 2);
+    assert_eq!(stored.7, 1);
+    assert!(stored.8, "the receipt and game must share one expiration");
+    assert!(stored.9, "an accepted action must renew retention");
+    let snapshot: Value = serde_json::from_str(&stored.3).expect("snapshot must be JSON");
+    let event: Value = serde_json::from_str(&stored.5).expect("event must be JSON");
+    assert_eq!(snapshot["state_version"], 2);
+    assert_eq!(snapshot["sequence"], 1);
+    assert_eq!(snapshot["turn"]["phase"], "hero_action");
+    assert_eq!(snapshot["prng"]["counter"], 0);
+    assert_eq!(event["sequence"], 1);
+    assert_eq!(event["state_version"], 2);
+}
+
+#[tokio::test]
+async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expiration() {
+    let room = ready_room().await;
+    let start_response = room
+        .app
+        .clone()
+        .oneshot(start_request(
+            &room.host_cookie,
+            &unique_key("authoritative-start"),
+            &room.manifest,
+            "adventure:001",
+        ))
+        .await
+        .expect("game start must receive a response");
+    assert_eq!(start_response.status(), StatusCode::CREATED);
+    let initial = response_json(start_response).await;
+    let initial_expiration = initial["game"]["expires_at"]
+        .as_str()
+        .expect("the initial expiration must be present")
+        .to_owned();
+    let command_id = uuid::Uuid::new_v4();
+
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": command_id.to_string(),
+                "expected_state_version": 1,
+                "type": "complete_dark_arts"
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the command must receive a response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL),
+        Some(&header::HeaderValue::from_static("no-store"))
+    );
+    let accepted = response_json(response).await;
+    assert_eq!(accepted["receipt"]["command_id"], command_id.to_string());
+    assert_eq!(accepted["receipt"]["status"], "accepted");
+    assert_eq!(accepted["receipt"]["accepted_state_version"], 2);
+    assert_eq!(accepted["receipt"]["accepted_sequence"], 1);
+    assert_eq!(accepted["projection"]["turn"]["phase"], "hero_action");
+    assert_eq!(accepted["projection"]["snapshot"]["state_version"], 2);
+    assert_eq!(accepted["projection"]["snapshot"]["sequence"], 1);
+    assert_eq!(accepted["projection"]["legal_actions"], json!([]));
+
+    assert_committed_command_artifacts(&room, &initial_expiration).await;
+
+    let recovered = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/games/current/commands/{command_id}"))
+                .header(header::COOKIE, &room.host_cookie)
+                .body(Body::empty())
+                .expect("the receipt lookup request must be valid"),
+        )
+        .await
+        .expect("the committed receipt must remain recoverable");
+    assert_eq!(recovered.status(), StatusCode::OK);
+    let recovered = response_json(recovered).await;
+    assert_eq!(recovered["receipt"], accepted["receipt"]);
+    assert_eq!(
+        recovered["projection"]["snapshot"],
+        accepted["projection"]["snapshot"]
+    );
+}
+
+#[tokio::test]
+async fn rejected_or_stale_intentions_leave_no_official_artifacts() {
+    let room = ready_room().await;
+    let start_response = room
+        .app
+        .clone()
+        .oneshot(start_request(
+            &room.host_cookie,
+            &unique_key("rejected-command-start"),
+            &room.manifest,
+            "adventure:001",
+        ))
+        .await
+        .expect("game start must receive a response");
+    assert_eq!(start_response.status(), StatusCode::CREATED);
+
+    let guest_response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": uuid::Uuid::new_v4().to_string(),
+                "expected_state_version": 1,
+                "type": "complete_dark_arts"
+            }),
+            Some(&room.guest_cookie),
+            None,
+        ))
+        .await
+        .expect("the unauthorized command must receive a response");
+    assert_eq!(guest_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(guest_response).await["error"]["code"],
+        "GAME_ACTION_NOT_ALLOWED"
+    );
+
+    let stale_command_id = uuid::Uuid::new_v4();
+    let stale_response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": stale_command_id.to_string(),
+                "expected_state_version": 2,
+                "type": "complete_dark_arts"
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the stale command must receive a response");
+    assert_eq!(stale_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(stale_response).await["error"]["code"],
+        "STALE_STATE_VERSION"
+    );
+
+    let artifacts = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            (SELECT count(*) FROM game_events WHERE game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the unchanged game must remain queryable");
+    assert_eq!(artifacts, (1, 0, 0, 0));
+
+    let missing_receipt = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/games/current/commands/{stale_command_id}"))
+                .header(header::COOKIE, &room.host_cookie)
+                .body(Body::empty())
+                .expect("the receipt lookup request must be valid"),
+        )
+        .await
+        .expect("the missing receipt lookup must receive a response");
+    assert_eq!(missing_receipt.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_expired_game_rejects_the_command_at_the_database_clock_boundary() {
+    let room = ready_room().await;
+    let start_response = room
+        .app
+        .clone()
+        .oneshot(start_request(
+            &room.host_cookie,
+            &unique_key("expired-command-start"),
+            &room.manifest,
+            "adventure:001",
+        ))
+        .await
+        .expect("game start must receive a response");
+    assert_eq!(start_response.status(), StatusCode::CREATED);
+    sqlx::query(
+        r"
+        UPDATE games
+        SET
+            last_game_action_at = clock_timestamp() - INTERVAL '8 days',
+            expires_at = clock_timestamp() - INTERVAL '1 day'
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&room.database)
+    .await
+    .expect("the test game must be expired");
+
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": uuid::Uuid::new_v4().to_string(),
+                "expected_state_version": 1,
+                "type": "complete_dark_arts"
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the expired command must receive a response");
+
+    assert_eq!(response.status(), StatusCode::GONE);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "GAME_EXPIRED"
     );
 }
