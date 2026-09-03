@@ -90,6 +90,15 @@ export const useRoomAccessStore = defineStore('roomAccess', {
     sessionExpected: sessionIsExpected(),
   }),
   actions: {
+    replaceGameProjection(projection: GameProjectionResponse): void {
+      if (this.game && this.game.game.id !== projection.game.id) {
+        return
+      }
+      this.game = projection
+      this.lobby = null
+      this.status = 'ready'
+      this.errorCode = null
+    },
     adoptCreatedRoom(room: CreateRoomResponse): void {
       this.lobby = room
       this.game = null

@@ -1,9 +1,12 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{
+        Path, Query, State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
+    http::{HeaderMap, StatusCode, header},
     response::Response,
     routing::{get, post},
 };
@@ -16,6 +19,7 @@ use game_domain::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::{
@@ -26,6 +30,10 @@ use crate::{
 mod postgres;
 
 const SEED_BYTES: usize = 32;
+const REALTIME_PROTOCOL_VERSION: u16 = 1;
+const REALTIME_SUBPROTOCOL: &str = "hogwarts.realtime.v1";
+const REALTIME_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const REALTIME_REPLAY_LIMIT: u64 = 100;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -35,6 +43,7 @@ pub(crate) fn router() -> Router<AppState> {
             "/api/games/current/commands/{command_id}",
             get(command_result),
         )
+        .route("/api/games/current/events", get(game_events))
 }
 
 #[derive(Clone)]
@@ -208,6 +217,18 @@ struct StoredCommandReceipt {
     expires_at: String,
 }
 
+#[derive(FromRow)]
+struct StoredGameEvent {
+    event_version: i16,
+    event_type: String,
+    command_id: Uuid,
+    actor_participant_id: Uuid,
+    actor_position: i16,
+    sequence: i64,
+    state_version: i64,
+    payload_json: String,
+}
+
 #[derive(Serialize)]
 pub(crate) struct GameProjectionResponse {
     game: GameSummary,
@@ -216,6 +237,7 @@ pub(crate) struct GameProjectionResponse {
     participant: GameParticipant,
     participants: Vec<GameParticipant>,
     legal_actions: Vec<String>,
+    choice: ChoiceSummary,
 }
 
 #[derive(Serialize)]
@@ -237,8 +259,14 @@ struct SnapshotSummary {
     snapshot_version: i16,
     state_version: i64,
     sequence: i64,
+    cursor: i64,
     digest: String,
     versions: GameVersions,
+}
+
+#[derive(Serialize)]
+struct ChoiceSummary {
+    status: &'static str,
 }
 
 #[derive(Serialize)]
@@ -333,6 +361,58 @@ struct PersistedPlayer {
 struct PersistedPrng {
     algorithm: String,
     counter: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RealtimeQuery {
+    cursor: Option<u64>,
+    snapshot_version: Option<u16>,
+}
+
+#[derive(Serialize)]
+struct RealtimeSnapshotMessage {
+    protocol_version: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    cursor: i64,
+    projection: GameProjectionResponse,
+}
+
+#[derive(Serialize)]
+struct RealtimeEventBatchMessage {
+    protocol_version: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    from_cursor: i64,
+    cursor: i64,
+    events: Vec<RealtimeGameEvent>,
+    projection: GameProjectionResponse,
+}
+
+#[derive(Serialize)]
+struct RealtimeGameEvent {
+    event_version: i16,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    sequence: i64,
+    state_version: i64,
+    turn: u32,
+    actor_position: i16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedGameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
 }
 
 pub(crate) fn content_options(state: &AppState) -> Vec<ContentManifestOption> {
@@ -579,6 +659,7 @@ async fn execute_game_command(
         .commit()
         .await
         .map_err(|_| ApiError::internal())?;
+    state.signal_game_event(stored.id);
 
     let projection = projection_for_participant(&state.database, participant_id)
         .await?
@@ -613,6 +694,277 @@ async fn command_result(
             projection,
         },
     ))
+}
+
+async fn game_events(
+    State(state): State<AppState>,
+    Query(query): Query<RealtimeQuery>,
+    headers: HeaderMap,
+    websocket: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    require_realtime_origin(&state, &headers)?;
+    if !websocket
+        .requested_protocols()
+        .any(|protocol| protocol.as_bytes() == REALTIME_SUBPROTOCOL.as_bytes())
+    {
+        return Err(ApiError::upgrade_required());
+    }
+
+    let participant_id = authenticated_participant(&state, &headers).await?;
+    let projection = projection_for_participant(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::game_action_not_allowed)?;
+    let game_id = Uuid::parse_str(&projection.game.id).map_err(|_| ApiError::internal())?;
+
+    Ok(websocket
+        .protocols([REALTIME_SUBPROTOCOL])
+        .max_message_size(4 * 1024)
+        .on_upgrade(move |socket| serve_game_events(socket, state, participant_id, game_id, query)))
+}
+
+fn require_realtime_origin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+    let mut origins = headers.get_all(header::ORIGIN).iter();
+    let origin = origins
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(ApiError::origin_not_allowed)?;
+    if origins.next().is_some() || origin != state.application_origin() {
+        return Err(ApiError::origin_not_allowed());
+    }
+    Ok(())
+}
+
+async fn serve_game_events(
+    mut socket: WebSocket,
+    state: AppState,
+    participant_id: Uuid,
+    game_id: Uuid,
+    query: RealtimeQuery,
+) {
+    let mut cursor = query.cursor.and_then(|value| i64::try_from(value).ok());
+    let mut snapshot_version = query.snapshot_version;
+    let force_initial_snapshot = query.cursor.is_none() || cursor.is_none();
+    if !synchronize_socket(
+        &mut socket,
+        &state,
+        participant_id,
+        game_id,
+        &mut cursor,
+        &mut snapshot_version,
+        force_initial_snapshot,
+    )
+    .await
+    {
+        return;
+    }
+
+    let mut signal = state.subscribe_to_game_events();
+    let mut poll = tokio::time::interval(REALTIME_POLL_INTERVAL);
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    poll.tick().await;
+
+    loop {
+        let should_synchronize = tokio::select! {
+            message = socket.recv() => {
+                match message {
+                    Some(
+                        Ok(Message::Close(_) | Message::Text(_) | Message::Binary(_)) | Err(_),
+                    )
+                    | None => return,
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => false,
+                }
+            }
+            notification = signal.recv() => {
+                match notification {
+                    Ok(changed_game_id) => changed_game_id == game_id,
+                    Err(
+                        broadcast::error::RecvError::Lagged(_)
+                        | broadcast::error::RecvError::Closed,
+                    ) => true,
+                }
+            }
+            _ = poll.tick() => true,
+        };
+
+        if should_synchronize
+            && !synchronize_socket(
+                &mut socket,
+                &state,
+                participant_id,
+                game_id,
+                &mut cursor,
+                &mut snapshot_version,
+                false,
+            )
+            .await
+        {
+            return;
+        }
+    }
+}
+
+async fn synchronize_socket(
+    socket: &mut WebSocket,
+    state: &AppState,
+    participant_id: Uuid,
+    game_id: Uuid,
+    cursor: &mut Option<i64>,
+    snapshot_version: &mut Option<u16>,
+    force_snapshot: bool,
+) -> bool {
+    let (observed_cursor, observed_snapshot_version) =
+        match postgres::game_cursor_for_participant(&state.database, participant_id, game_id).await
+        {
+            Ok(Some((observed_cursor, observed_snapshot_version))) => {
+                let Ok(observed_snapshot_version) = u16::try_from(observed_snapshot_version) else {
+                    return false;
+                };
+                (observed_cursor, observed_snapshot_version)
+            }
+            Ok(None) | Err(_) => return false,
+        };
+    if !force_snapshot
+        && *cursor == Some(observed_cursor)
+        && *snapshot_version == Some(observed_snapshot_version)
+    {
+        return true;
+    }
+
+    let projection = match projection_for_participant(&state.database, participant_id).await {
+        Ok(Some(projection)) if projection.game.id == game_id.to_string() => projection,
+        Ok(Some(_) | None) | Err(_) => return false,
+    };
+    let current_cursor = projection.snapshot.cursor;
+    let Ok(current_snapshot_version) = u16::try_from(projection.snapshot.snapshot_version) else {
+        return false;
+    };
+    let requested_cursor = *cursor;
+    let replay_distance = requested_cursor
+        .and_then(|value| current_cursor.checked_sub(value))
+        .and_then(|value| u64::try_from(value).ok());
+    let needs_snapshot = force_snapshot
+        || *snapshot_version != Some(current_snapshot_version)
+        || requested_cursor.is_none_or(|value| value > current_cursor)
+        || replay_distance.is_none_or(|distance| distance > REALTIME_REPLAY_LIMIT);
+
+    if needs_snapshot {
+        let message = RealtimeSnapshotMessage {
+            protocol_version: REALTIME_PROTOCOL_VERSION,
+            message_type: "snapshot",
+            cursor: current_cursor,
+            projection,
+        };
+        if !send_realtime_message(socket, &message).await {
+            return false;
+        }
+        *cursor = Some(current_cursor);
+        *snapshot_version = Some(current_snapshot_version);
+        return true;
+    }
+
+    let from_cursor = requested_cursor.expect("a compatible cursor was checked above");
+    if from_cursor == current_cursor {
+        return true;
+    }
+    let events = match postgres::game_events_for_participant(
+        &state.database,
+        participant_id,
+        game_id,
+        from_cursor,
+        current_cursor,
+    )
+    .await
+    {
+        Ok(stored) => stored
+            .iter()
+            .map(|event| realtime_event(event, participant_id))
+            .collect::<Result<Vec<_>, _>>(),
+        Err(error) => Err(error),
+    };
+    let Ok(events) = events else {
+        return false;
+    };
+    if !events_are_contiguous(&events, from_cursor, current_cursor) {
+        let message = RealtimeSnapshotMessage {
+            protocol_version: REALTIME_PROTOCOL_VERSION,
+            message_type: "snapshot",
+            cursor: current_cursor,
+            projection,
+        };
+        if !send_realtime_message(socket, &message).await {
+            return false;
+        }
+        *cursor = Some(current_cursor);
+        *snapshot_version = Some(current_snapshot_version);
+        return true;
+    }
+
+    let message = RealtimeEventBatchMessage {
+        protocol_version: REALTIME_PROTOCOL_VERSION,
+        message_type: "events",
+        from_cursor,
+        cursor: current_cursor,
+        events,
+        projection,
+    };
+    if !send_realtime_message(socket, &message).await {
+        return false;
+    }
+    *cursor = Some(current_cursor);
+    *snapshot_version = Some(current_snapshot_version);
+    true
+}
+
+fn realtime_event(
+    stored: &StoredGameEvent,
+    participant_id: Uuid,
+) -> Result<RealtimeGameEvent, ApiError> {
+    let payload: PersistedGameEvent =
+        serde_json::from_str(&stored.payload_json).map_err(|_| ApiError::internal())?;
+    let metadata_matches = i16::try_from(payload.event_version).ok() == Some(stored.event_version)
+        && payload.event_type == stored.event_type
+        && i64::try_from(payload.sequence).ok() == Some(stored.sequence)
+        && i64::try_from(payload.state_version).ok() == Some(stored.state_version)
+        && i16::from(payload.actor_position) == stored.actor_position;
+    if !metadata_matches || stored.event_type != "dark_arts_completed" {
+        return Err(ApiError::internal());
+    }
+
+    Ok(RealtimeGameEvent {
+        event_version: stored.event_version,
+        event_type: "dark_arts_completed",
+        sequence: stored.sequence,
+        state_version: stored.state_version,
+        turn: payload.turn,
+        actor_position: stored.actor_position,
+        command_id: (stored.actor_participant_id == participant_id)
+            .then(|| stored.command_id.to_string()),
+    })
+}
+
+fn events_are_contiguous(
+    events: &[RealtimeGameEvent],
+    from_cursor: i64,
+    current_cursor: i64,
+) -> bool {
+    let Some(expected_count) = current_cursor
+        .checked_sub(from_cursor)
+        .and_then(|count| usize::try_from(count).ok())
+    else {
+        return false;
+    };
+    events.len() == expected_count
+        && events
+            .iter()
+            .zip((from_cursor + 1)..=current_cursor)
+            .all(|(event, expected)| event.sequence == expected)
+}
+
+async fn send_realtime_message(socket: &mut WebSocket, value: &impl Serialize) -> bool {
+    let Ok(serialized) = serde_json::to_string(value) else {
+        return false;
+    };
+    socket.send(Message::Text(serialized.into())).await.is_ok()
 }
 
 pub(crate) async fn projection_for_participant(
@@ -676,6 +1028,7 @@ pub(crate) async fn projection_for_participant(
             snapshot_version: game.snapshot_version,
             state_version: game.state_version,
             sequence: game.sequence,
+            cursor: game.sequence,
             digest: game.state_digest,
             versions: GameVersions {
                 content: game.content_version,
@@ -698,6 +1051,7 @@ pub(crate) async fn projection_for_participant(
             .map(game_participant)
             .collect::<Result<Vec<_>, _>>()?,
         legal_actions,
+        choice: ChoiceSummary { status: "none" },
     }))
 }
 

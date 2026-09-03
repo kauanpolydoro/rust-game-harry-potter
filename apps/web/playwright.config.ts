@@ -25,6 +25,7 @@ export default defineConfig({
       command: 'cargo run -p harry-potter-server',
       cwd: repositoryRoot,
       env: {
+        APPLICATION_ORIGIN: 'http://127.0.0.1:4173',
         BIND_ADDRESS: '127.0.0.1:18080',
         DATABASE_URL:
           process.env.TEST_DATABASE_URL ??

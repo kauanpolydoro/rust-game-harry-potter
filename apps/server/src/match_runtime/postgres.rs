@@ -4,7 +4,8 @@ use uuid::Uuid;
 
 use super::{
     ApiError, ExecuteGameCommandRequest, SelectedContent, StartGameRequest, StoredCommandGame,
-    StoredCommandReceipt, StoredGame, StoredGameStart, StoredRoomActor, StoredRoomParticipant,
+    StoredCommandReceipt, StoredGame, StoredGameEvent, StoredGameStart, StoredRoomActor,
+    StoredRoomParticipant,
 };
 
 pub(super) struct NewGame<'a> {
@@ -527,6 +528,69 @@ pub(super) async fn command_receipt_for_actor(
     )
     .bind(participant_id)
     .bind(command_id)
+    .fetch_optional(database)
+    .await
+    .map_err(|_| ApiError::internal())
+}
+
+pub(super) async fn game_events_for_participant(
+    database: &PgPool,
+    participant_id: Uuid,
+    game_id: Uuid,
+    after_sequence: i64,
+    through_sequence: i64,
+) -> Result<Vec<StoredGameEvent>, ApiError> {
+    sqlx::query_as::<_, StoredGameEvent>(
+        r"
+        SELECT
+            events.event_version,
+            events.event_type,
+            events.command_id,
+            events.actor_participant_id,
+            actor.position AS actor_position,
+            events.sequence,
+            events.state_version,
+            events.payload::text AS payload_json
+        FROM game_events AS events
+        JOIN games ON games.id = events.game_id
+        JOIN participants AS viewer
+          ON viewer.room_id = games.room_id
+         AND viewer.id = $1
+        JOIN participants AS actor
+          ON actor.room_id = games.room_id
+         AND actor.id = events.actor_participant_id
+        WHERE events.game_id = $2
+          AND events.sequence > $3
+          AND events.sequence <= $4
+        ORDER BY events.sequence
+        ",
+    )
+    .bind(participant_id)
+    .bind(game_id)
+    .bind(after_sequence)
+    .bind(through_sequence)
+    .fetch_all(database)
+    .await
+    .map_err(|_| ApiError::internal())
+}
+
+pub(super) async fn game_cursor_for_participant(
+    database: &PgPool,
+    participant_id: Uuid,
+    game_id: Uuid,
+) -> Result<Option<(i64, i16)>, ApiError> {
+    sqlx::query_as::<_, (i64, i16)>(
+        r"
+        SELECT games.sequence, games.snapshot_version
+        FROM games
+        JOIN participants
+          ON participants.room_id = games.room_id
+         AND participants.id = $1
+        WHERE games.id = $2
+        ",
+    )
+    .bind(participant_id)
+    .bind(game_id)
     .fetch_optional(database)
     .await
     .map_err(|_| ApiError::internal())

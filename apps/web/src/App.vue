@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
+import { useGameSyncStore } from './stores/gameSync'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
 
 const health = useHealthStore()
 const gameCommand = useGameCommandStore()
+const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
 const entryMode = ref<'create' | 'join'>('create')
@@ -441,6 +443,19 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  game,
+  (current) => {
+    if (current) {
+      gameSync.connect(current)
+    } else {
+      gameSync.disconnect()
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => gameSync.disconnect())
 
 onMounted(async () => {
   await Promise.all([health.check(), roomAccess.restoreSession()])

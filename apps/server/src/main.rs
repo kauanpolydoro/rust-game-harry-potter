@@ -17,7 +17,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .max_connections(20)
         .acquire_timeout(Duration::from_secs(1))
         .connect_lazy(&database_url)?;
-    let state = AppState::new(database);
+    let mut state = AppState::new(database);
+    if let Ok(origin) = env::var("APPLICATION_ORIGIN") {
+        state = state.with_application_origin(origin);
+    }
     let initialization = tokio::spawn(initialize_until_ready(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(bind_address).await?;

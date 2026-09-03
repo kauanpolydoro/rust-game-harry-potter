@@ -175,6 +175,10 @@ enum ErrorCode {
     GameExpired,
     #[serde(rename = "COMMAND_NOT_FOUND")]
     CommandNotFound,
+    #[serde(rename = "ORIGIN_NOT_ALLOWED")]
+    OriginNotAllowed,
+    #[serde(rename = "UPGRADE_REQUIRED")]
+    UpgradeRequired,
     #[serde(rename = "INTERNAL_ERROR")]
     Internal,
 }
@@ -246,6 +250,10 @@ enum MessageKey {
     GameExpired,
     #[serde(rename = "game.command.not_found")]
     CommandNotFound,
+    #[serde(rename = "realtime.origin.not_allowed")]
+    OriginNotAllowed,
+    #[serde(rename = "realtime.upgrade.required")]
+    UpgradeRequired,
     #[serde(rename = "internal.error")]
     Internal,
 }
@@ -533,6 +541,26 @@ impl ApiError {
             category: ErrorCategory::NotFound,
             retry: RetryPolicy::AfterCorrection,
             message_key: MessageKey::CommandNotFound,
+        }
+    }
+
+    pub(crate) fn origin_not_allowed() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: ErrorCode::OriginNotAllowed,
+            category: ErrorCategory::Authorization,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::OriginNotAllowed,
+        }
+    }
+
+    pub(crate) fn upgrade_required() -> Self {
+        Self {
+            status: StatusCode::UPGRADE_REQUIRED,
+            code: ErrorCode::UpgradeRequired,
+            category: ErrorCategory::Validation,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::UpgradeRequired,
         }
     }
 
