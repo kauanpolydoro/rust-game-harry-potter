@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::{AppState, match_runtime};
 
 mod postgres;
 
@@ -28,6 +28,7 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/rooms/{room_code}/participants", post(join_room))
         .route("/api/session", get(restore_session))
         .route("/api/session/hero", put(select_hero))
+        .route("/api/session/readiness", put(set_readiness))
 }
 
 #[derive(Deserialize)]
@@ -50,6 +51,12 @@ struct SelectHeroRequest {
     hero_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetReadinessRequest {
+    ready: bool,
+}
+
 #[derive(Serialize)]
 struct FindRoomResponse {
     room: RoomSummary,
@@ -67,6 +74,7 @@ struct ParticipantSummary {
     display_name: String,
     role: String,
     position: i16,
+    ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     hero: Option<HeroSummary>,
 }
@@ -77,6 +85,7 @@ struct LobbyResponse {
     participant: ParticipantSummary,
     participants: Vec<ParticipantSummary>,
     heroes: Vec<HeroAvailability>,
+    content_options: Vec<match_runtime::ContentManifestOption>,
 }
 
 #[derive(Serialize)]
@@ -110,7 +119,7 @@ struct ErrorBody {
 #[derive(Default, Serialize)]
 struct ErrorDetails {}
 
-struct ApiError {
+pub(crate) struct ApiError {
     status: StatusCode,
     code: ErrorCode,
     category: ErrorCategory,
@@ -142,6 +151,20 @@ enum ErrorCode {
     HeroUnavailable,
     #[serde(rename = "SESSION_INVALID")]
     SessionInvalid,
+    #[serde(rename = "NOT_ROOM_HOST")]
+    NotRoomHost,
+    #[serde(rename = "ROOM_PARTICIPANT_COUNT_INVALID")]
+    RoomParticipantCountInvalid,
+    #[serde(rename = "ROOM_POSITIONS_INVALID")]
+    RoomPositionsInvalid,
+    #[serde(rename = "PARTICIPANT_HEROES_INVALID")]
+    ParticipantHeroesInvalid,
+    #[serde(rename = "PARTICIPANTS_NOT_READY")]
+    ParticipantsNotReady,
+    #[serde(rename = "CONTENT_NOT_PLAYABLE")]
+    ContentNotPlayable,
+    #[serde(rename = "ROOM_SEALED")]
+    RoomSealed,
     #[serde(rename = "INTERNAL_ERROR")]
     Internal,
 }
@@ -153,6 +176,7 @@ enum ErrorCategory {
     Conflict,
     NotFound,
     Authentication,
+    Authorization,
     Internal,
 }
 
@@ -188,6 +212,20 @@ enum MessageKey {
     HeroUnavailable,
     #[serde(rename = "session.invalid")]
     SessionInvalid,
+    #[serde(rename = "room.host.required")]
+    NotRoomHost,
+    #[serde(rename = "room.participant_count.invalid")]
+    RoomParticipantCountInvalid,
+    #[serde(rename = "room.positions.invalid")]
+    RoomPositionsInvalid,
+    #[serde(rename = "room.heroes.invalid")]
+    ParticipantHeroesInvalid,
+    #[serde(rename = "room.participants.not_ready")]
+    ParticipantsNotReady,
+    #[serde(rename = "content.not_playable")]
+    ContentNotPlayable,
+    #[serde(rename = "room.sealed")]
+    RoomSealed,
     #[serde(rename = "internal.error")]
     Internal,
 }
@@ -216,6 +254,7 @@ struct StoredParticipant {
     role: String,
     position: i16,
     hero_id: Option<String>,
+    ready: bool,
 }
 
 struct StoredLobby {
@@ -293,7 +332,7 @@ impl ApiError {
         }
     }
 
-    fn idempotency_conflict() -> Self {
+    pub(crate) fn idempotency_conflict() -> Self {
         Self {
             status: StatusCode::CONFLICT,
             code: ErrorCode::IdempotencyKeyReused,
@@ -313,7 +352,7 @@ impl ApiError {
         }
     }
 
-    fn room_unavailable() -> Self {
+    pub(crate) fn room_unavailable() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
             code: ErrorCode::RoomUnavailable,
@@ -353,7 +392,7 @@ impl ApiError {
         }
     }
 
-    fn session_invalid() -> Self {
+    pub(crate) fn session_invalid() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
             code: ErrorCode::SessionInvalid,
@@ -363,7 +402,77 @@ impl ApiError {
         }
     }
 
-    fn internal() -> Self {
+    pub(crate) fn not_room_host() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: ErrorCode::NotRoomHost,
+            category: ErrorCategory::Authorization,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::NotRoomHost,
+        }
+    }
+
+    pub(crate) fn invalid_participant_count() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::RoomParticipantCountInvalid,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::RoomParticipantCountInvalid,
+        }
+    }
+
+    pub(crate) fn invalid_positions() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::RoomPositionsInvalid,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::RoomPositionsInvalid,
+        }
+    }
+
+    pub(crate) fn invalid_participant_heroes() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::ParticipantHeroesInvalid,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::ParticipantHeroesInvalid,
+        }
+    }
+
+    pub(crate) fn participants_not_ready() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::ParticipantsNotReady,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::ParticipantsNotReady,
+        }
+    }
+
+    pub(crate) fn content_not_playable() -> Self {
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            code: ErrorCode::ContentNotPlayable,
+            category: ErrorCategory::Validation,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::ContentNotPlayable,
+        }
+    }
+
+    pub(crate) fn room_sealed() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::RoomSealed,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::RoomSealed,
+        }
+    }
+
+    pub(crate) fn internal() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: ErrorCode::Internal,
@@ -407,13 +516,7 @@ async fn create_room(
     validate_password(&request.recovery_password)?;
 
     if let Some(stored) = postgres::load_room_creation(&state.database, &idempotency_key).await? {
-        return replay_room_creation(
-            &state.database,
-            stored,
-            display_name,
-            request.recovery_password,
-        )
-        .await;
+        return replay_room_creation(&state, stored, display_name, request.recovery_password).await;
     }
 
     let password_hash = hash_password(request.recovery_password.clone()).await?;
@@ -442,13 +545,7 @@ async fn create_room(
         let stored = postgres::load_room_creation(&state.database, &idempotency_key)
             .await?
             .ok_or_else(ApiError::internal)?;
-        return replay_room_creation(
-            &state.database,
-            stored,
-            display_name,
-            request.recovery_password,
-        )
-        .await;
+        return replay_room_creation(&state, stored, display_name, request.recovery_password).await;
     }
 
     let stored = postgres::persist_room_creation(
@@ -465,7 +562,7 @@ async fn create_room(
         .await
         .map_err(|_| ApiError::internal())?;
 
-    room_created_response(&state.database, stored).await
+    room_created_response(&state, stored).await
 }
 
 async fn find_room(
@@ -504,14 +601,7 @@ async fn join_room(
     let hero = HeroId::parse(&request.hero_id)?;
 
     if let Some(stored) = postgres::load_room_join(&state.database, &idempotency_key).await? {
-        return replay_room_join(
-            &state.database,
-            stored,
-            &normalized_code,
-            display_name,
-            hero,
-        )
-        .await;
+        return replay_room_join(&state, stored, &normalized_code, display_name, hero).await;
     }
 
     let mut transaction = state
@@ -541,14 +631,7 @@ async fn join_room(
         let stored = postgres::load_room_join(&state.database, &idempotency_key)
             .await?
             .ok_or_else(ApiError::internal)?;
-        return replay_room_join(
-            &state.database,
-            stored,
-            &normalized_code,
-            display_name,
-            hero,
-        )
-        .await;
+        return replay_room_join(&state, stored, &normalized_code, display_name, hero).await;
     }
 
     let position = postgres::next_room_position(&mut transaction, room_id).await?;
@@ -574,22 +657,24 @@ async fn join_room(
         .await
         .map_err(|_| ApiError::internal())?;
 
-    room_joined_response(&state.database, stored).await
+    room_joined_response(&state, stored).await
 }
 
 async fn restore_session(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    let session_token = session_token(&headers)?;
-    let participant_id = postgres::participant_for_session(&state.database, session_token)
-        .await?
-        .ok_or_else(ApiError::session_invalid)?;
+    let participant_id = authenticated_participant(&state, &headers).await?;
+    if let Some(projection) =
+        match_runtime::projection_for_participant(&state.database, participant_id).await?
+    {
+        return Ok(no_store_json(StatusCode::OK, projection));
+    }
     let lobby = postgres::load_lobby(&state.database, participant_id)
         .await?
         .ok_or_else(ApiError::session_invalid)?;
 
-    Ok(no_store_json(StatusCode::OK, lobby_response(lobby)))
+    Ok(no_store_json(StatusCode::OK, lobby_response(&state, lobby)))
 }
 
 async fn select_hero(
@@ -597,19 +682,20 @@ async fn select_hero(
     headers: HeaderMap,
     Json(request): Json<SelectHeroRequest>,
 ) -> Result<Response, ApiError> {
-    let session_token = session_token(&headers)?;
     let hero = HeroId::parse(&request.hero_id)?;
-    let participant_id = postgres::participant_for_session(&state.database, session_token)
-        .await?
-        .ok_or_else(ApiError::session_invalid)?;
+    let participant_id = authenticated_participant(&state, &headers).await?;
     let mut transaction = state
         .database
         .begin()
         .await
         .map_err(|_| ApiError::internal())?;
-    let room_id = postgres::lock_participant_open_room(&mut transaction, participant_id)
-        .await?
-        .ok_or_else(ApiError::room_unavailable)?;
+    let (room_id, room_status, _) =
+        postgres::lock_participant_room(&mut transaction, participant_id)
+            .await?
+            .ok_or_else(ApiError::session_invalid)?;
+    if room_status != "open" {
+        return Err(ApiError::room_sealed());
+    }
 
     if postgres::room_hero_owned_by_other(&mut transaction, room_id, participant_id, hero.as_str())
         .await?
@@ -626,11 +712,45 @@ async fn select_hero(
         .await?
         .ok_or_else(ApiError::internal)?;
 
-    Ok(no_store_json(StatusCode::OK, lobby_response(lobby)))
+    Ok(no_store_json(StatusCode::OK, lobby_response(&state, lobby)))
+}
+
+async fn set_readiness(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SetReadinessRequest>,
+) -> Result<Response, ApiError> {
+    let participant_id = authenticated_participant(&state, &headers).await?;
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let (_, room_status, hero_id) =
+        postgres::lock_participant_room(&mut transaction, participant_id)
+            .await?
+            .ok_or_else(ApiError::session_invalid)?;
+    if room_status != "open" {
+        return Err(ApiError::room_sealed());
+    }
+    if request.ready && hero_id.is_none() {
+        return Err(ApiError::invalid_participant_heroes());
+    }
+
+    postgres::update_participant_readiness(&mut transaction, participant_id, request.ready).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let lobby = postgres::load_lobby(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+
+    Ok(no_store_json(StatusCode::OK, lobby_response(&state, lobby)))
 }
 
 async fn replay_room_join(
-    database: &sqlx::PgPool,
+    state: &AppState,
     stored: StoredRoomJoin,
     room_code: &str,
     display_name: &str,
@@ -643,22 +763,22 @@ async fn replay_room_join(
         return Err(ApiError::idempotency_conflict());
     }
 
-    room_joined_response(database, stored).await
+    room_joined_response(state, stored).await
 }
 
 async fn room_joined_response(
-    database: &sqlx::PgPool,
+    state: &AppState,
     stored: StoredRoomJoin,
 ) -> Result<Response, ApiError> {
-    let lobby = postgres::load_lobby(database, stored.participant_id)
+    let lobby = postgres::load_lobby(&state.database, stored.participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
-    let mut response = no_store_json(StatusCode::CREATED, lobby_response(lobby));
+    let mut response = no_store_json(StatusCode::CREATED, lobby_response(state, lobby));
     set_session_cookie(&mut response, &stored.session_token);
     Ok(response)
 }
 
-fn lobby_response(stored: StoredLobby) -> LobbyResponse {
+fn lobby_response(state: &AppState, stored: StoredLobby) -> LobbyResponse {
     let selected_heroes: Vec<String> = stored
         .participants
         .iter()
@@ -676,6 +796,7 @@ fn lobby_response(stored: StoredLobby) -> LobbyResponse {
                     display_name: summary.display_name.clone(),
                     role: summary.role.clone(),
                     position: summary.position,
+                    ready: summary.ready,
                     hero: summary.hero.as_ref().map(|hero| HeroSummary {
                         id: hero.id,
                         name: hero.name,
@@ -694,6 +815,7 @@ fn lobby_response(stored: StoredLobby) -> LobbyResponse {
         participant: current_participant.expect("the current participant belongs to the lobby"),
         participants,
         heroes: hero_availability(&selected_heroes),
+        content_options: match_runtime::content_options(state),
     }
 }
 
@@ -715,6 +837,7 @@ fn participant_summary(stored: StoredParticipant) -> ParticipantSummary {
         display_name: stored.display_name,
         role: stored.role,
         position: stored.position,
+        ready: stored.ready,
         hero: stored
             .hero_id
             .as_deref()
@@ -723,7 +846,7 @@ fn participant_summary(stored: StoredParticipant) -> ParticipantSummary {
     }
 }
 
-fn no_store_json(status: StatusCode, body: impl Serialize) -> Response {
+pub(crate) fn no_store_json(status: StatusCode, body: impl Serialize) -> Response {
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
@@ -755,8 +878,18 @@ fn session_token(headers: &HeaderMap) -> Result<&str, ApiError> {
         .ok_or_else(ApiError::session_invalid)
 }
 
+pub(crate) async fn authenticated_participant(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Uuid, ApiError> {
+    let token = session_token(headers)?;
+    postgres::participant_for_session(&state.database, token)
+        .await?
+        .ok_or_else(ApiError::session_invalid)
+}
+
 async fn replay_room_creation(
-    database: &sqlx::PgPool,
+    state: &AppState,
     stored: StoredRoomCreation,
     display_name: &str,
     password: String,
@@ -778,17 +911,17 @@ async fn replay_room_creation(
         return Err(ApiError::idempotency_conflict());
     }
 
-    room_created_response(database, stored).await
+    room_created_response(state, stored).await
 }
 
 async fn room_created_response(
-    database: &sqlx::PgPool,
+    state: &AppState,
     stored: StoredRoomCreation,
 ) -> Result<Response, ApiError> {
-    let lobby = postgres::load_lobby(database, stored.participant_id)
+    let lobby = postgres::load_lobby(&state.database, stored.participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
-    let mut response = no_store_json(StatusCode::CREATED, lobby_response(lobby));
+    let mut response = no_store_json(StatusCode::CREATED, lobby_response(state, lobby));
     set_session_cookie(&mut response, &stored.session_token);
     Ok(response)
 }
@@ -805,7 +938,7 @@ async fn hash_password(password: String) -> Result<String, ApiError> {
     .map_err(|()| ApiError::internal())
 }
 
-fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
+pub(crate) fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
     let key = headers
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())

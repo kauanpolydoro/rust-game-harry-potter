@@ -11,9 +11,115 @@ const availableHeroes = [
   { available: true, id: 'ron', name: 'Ron' },
 ]
 
-function hostRoomResponse() {
-  const participant = { display_name: 'Minerva', position: 1, role: 'host' }
+const contentOptions = [
+  {
+    adventures: [{ id: 'adventure:001', name: 'Game 1', playable: false }],
+    content_version: 'base-en-candidate-2026-09-02',
+    manifest_digest: `blake3:${'a'.repeat(64)}`,
+    manifest_version: 1,
+    playable: false,
+    ruleset_version: 'base-candidate-v1',
+  },
+]
+
+const playableContentOptions = [
+  {
+    adventures: [{ id: 'adventure:001', name: 'Game 1', playable: true }],
+    content_version: 'fixture-v1',
+    manifest_digest: `blake3:${'b'.repeat(64)}`,
+    manifest_version: 1,
+    playable: true,
+    ruleset_version: 'fixture-rules-v1',
+  },
+]
+
+function readyHostLobbyResponse() {
+  const host = {
+    display_name: 'Minerva',
+    hero: { id: 'harry', name: 'Harry' },
+    position: 1,
+    ready: true,
+    role: 'host',
+  }
   return {
+    content_options: playableContentOptions,
+    heroes: availableHeroes.map((hero) => ({ ...hero, available: false })),
+    participant: host,
+    participants: [
+      host,
+      {
+        display_name: 'Luna',
+        hero: { id: 'hermione', name: 'Hermione' },
+        position: 2,
+        ready: true,
+        role: 'guest',
+      },
+    ],
+    room: { code: '9HKGW4RT', status: 'open' },
+  }
+}
+
+function unreadyHostLobbyResponse() {
+  const lobby = readyHostLobbyResponse()
+  const host = { ...lobby.participant, ready: false }
+  return {
+    ...lobby,
+    participant: host,
+    participants: [host, lobby.participants[1]],
+  }
+}
+
+function gameProjectionResponse() {
+  return {
+    game: {
+      adventure: { id: 'adventure:001', name: 'Game 1' },
+      id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+      status: 'in_progress',
+    },
+    legal_actions: [],
+    participant: {
+      display_name: 'Minerva',
+      hero: { id: 'harry', name: 'Harry' },
+      position: 1,
+      role: 'host',
+    },
+    participants: [
+      {
+        display_name: 'Minerva',
+        hero: { id: 'harry', name: 'Harry' },
+        position: 1,
+        role: 'host',
+      },
+      {
+        display_name: 'Luna',
+        hero: { id: 'hermione', name: 'Hermione' },
+        position: 2,
+        role: 'guest',
+      },
+    ],
+    snapshot: {
+      digest: `blake3:${'c'.repeat(64)}`,
+      sequence: 0,
+      snapshot_version: 1,
+      state_version: 1,
+      versions: {
+        content: 'fixture-v1',
+        manifest: 1,
+        manifest_digest: `blake3:${'b'.repeat(64)}`,
+        prng: 'chacha20-v1',
+        ruleset: 'fixture-rules-v1',
+        sampling: 'rejection-sampling-v1',
+        shuffle: 'fisher-yates-v1',
+      },
+    },
+    turn: { active_position: 1, number: 1, phase: 'dark_arts' },
+  }
+}
+
+function hostRoomResponse() {
+  const participant = { display_name: 'Minerva', position: 1, ready: false, role: 'host' }
+  return {
+    content_options: contentOptions,
     heroes: availableHeroes,
     participant,
     participants: [participant],
@@ -26,16 +132,18 @@ function guestLobbyResponse() {
     display_name: 'Luna',
     hero: { id: 'hermione', name: 'Hermione' },
     position: 2,
+    ready: false,
     role: 'guest',
   }
   return {
+    content_options: contentOptions,
     heroes: availableHeroes.map((hero) => ({
       ...hero,
       available: hero.id !== 'hermione',
     })),
     participant: guest,
     participants: [
-      { display_name: 'Minerva', position: 1, role: 'host' },
+      { display_name: 'Minerva', position: 1, ready: false, role: 'host' },
       guest,
     ],
     room: { code: '9HKGW4RT', status: 'open' },
@@ -155,7 +263,7 @@ describe('application shell', () => {
     const successHeading = await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
     await waitFor(() => expect(successHeading).toHaveFocus())
     expect(screen.getByText('9HKGW4RT')).toBeVisible()
-    expect(screen.getByText('Minerva')).toBeVisible()
+    expect(screen.getAllByText('Minerva')[0]).toBeVisible()
     expect(request).toHaveBeenNthCalledWith(
       2,
       '/api/rooms',
@@ -172,7 +280,7 @@ describe('application shell', () => {
       (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers,
     ).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }))
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Copiar código' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Copiar código da sala' }))
     await screen.findByText('Código copiado.')
     expect(clipboard.writeText).toHaveBeenCalledWith('9HKGW4RT')
   })
@@ -519,6 +627,7 @@ describe('application shell', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            content_options: contentOptions,
             heroes: heroes.map((hero) => ({
               ...hero,
               available: hero.id !== 'hermione',
@@ -527,14 +636,16 @@ describe('application shell', () => {
               display_name: 'Luna',
               hero: { id: 'hermione', name: 'Hermione' },
               position: 2,
+              ready: false,
               role: 'guest',
             },
             participants: [
-              { display_name: 'Minerva', position: 1, role: 'host' },
+              { display_name: 'Minerva', position: 1, ready: false, role: 'host' },
               {
                 display_name: 'Luna',
                 hero: { id: 'hermione', name: 'Hermione' },
                 position: 2,
+                ready: false,
                 role: 'guest',
               },
             ],
@@ -558,8 +669,8 @@ describe('application shell', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Entrar na sala' }))
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
-    expect(screen.getByText('Luna')).toBeVisible()
-    expect(screen.getByText('Posição 2')).toBeVisible()
+    expect(screen.getAllByText('Luna')[0]).toBeVisible()
+    expect(screen.getAllByText('Posição 2')[0]).toBeVisible()
     expect(localStorage.getItem('hogwarts.session.expected')).toBe('true')
     expect(request).toHaveBeenNthCalledWith(
       2,
@@ -571,6 +682,168 @@ describe('application shell', () => {
       '/api/rooms/9HKGW4RT/participants',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('lets a ready host seal the room and renders only the redacted initial projection', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(readyHostLobbyResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games' && init?.method === 'POST') {
+        return Promise.resolve(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 201,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    expect(screen.getByLabelText('Aventura e conteúdo da partida')).toHaveValue(
+      `${playableContentOptions[0]?.manifest_digest}:adventure:001`,
+    )
+    expect(
+      screen.queryByText(
+        'Nenhum Manifesto jogável está publicado. Lacunas funcionais impedem o selo da sala.',
+      ),
+    ).not.toBeInTheDocument()
+    await fireEvent.click(screen.getByRole('button', { name: 'Selar sala e iniciar' }))
+
+    const heading = await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    await waitFor(() => expect(heading).toHaveFocus())
+    expect(screen.getByText('Artes das Trevas')).toBeVisible()
+    expect(screen.getByText('Snapshot inicial confirmado')).toBeVisible()
+    expect(screen.getByText('A seed permanece secreta enquanto a partida estiver em andamento.')).toBeVisible()
+    expect(document.body.textContent).not.toContain('0123456789abcdef0123456789abcdef')
+
+    const gameCall = request.mock.calls.find(([url]) => String(url) === '/api/games')
+    expect(gameCall?.[1]).toEqual(
+      expect.objectContaining({
+        body: JSON.stringify({
+          adventure_id: 'adventure:001',
+          manifest_digest: playableContentOptions[0]?.manifest_digest,
+          ruleset_version: 'fixture-rules-v1',
+        }),
+        credentials: 'same-origin',
+        method: 'POST',
+      }),
+    )
+    expect((gameCall?.[1] as RequestInit | undefined)?.headers).toEqual(
+      expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+    )
+  })
+
+  it('confirms readiness and moves focus to the newly available primary action', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(unreadyHostLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(readyHostLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const readyButton = await screen.findByRole('button', { name: 'Estou pronto' })
+    await fireEvent.click(readyButton)
+
+    const startButton = await screen.findByRole('button', { name: 'Selar sala e iniciar' })
+    await waitFor(() => expect(startButton).toHaveFocus())
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      '/api/session/readiness',
+      expect.objectContaining({ body: JSON.stringify({ ready: true }), method: 'PUT' }),
+    )
+  })
+
+  it('retries an uncertain start with the same idempotency key and locked selection', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(readyHostLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'INTERNAL_ERROR' } }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 500,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(gameProjectionResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 201,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Selar sala e iniciar' }))
+
+    expect(
+      await screen.findByText(
+        'A confirmação da partida falhou. Tente novamente com a mesma solicitação.',
+      ),
+    ).toBeVisible()
+    expect(screen.getByLabelText('Aventura e conteúdo da partida')).toBeDisabled()
+    expect(
+      screen.getByText('Escolha preservada para repetir a mesma solicitação com segurança.'),
+    ).toBeVisible()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Selar sala e iniciar' }))
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+
+    const gameCalls = request.mock.calls.filter(([url]) => String(url) === '/api/games')
+    expect(gameCalls).toHaveLength(2)
+    const firstHeaders = gameCalls[0]?.[1]?.headers as Record<string, string>
+    const secondHeaders = gameCalls[1]?.[1]?.headers as Record<string, string>
+    expect(secondHeaders['Idempotency-Key']).toBe(firstHeaders['Idempotency-Key'])
   })
 
   it('restores a guest position after the browser reloads', async () => {
@@ -594,9 +867,9 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
-    expect(screen.getByText('Luna')).toBeVisible()
-    expect(screen.getByText('Posição 2')).toBeVisible()
-    expect(screen.getByText('Hermione')).toBeVisible()
+    expect(screen.getAllByText('Luna')[0]).toBeVisible()
+    expect(screen.getAllByText('Posição 2')[0]).toBeVisible()
+    expect(screen.getAllByText('Hermione')[0]).toBeVisible()
     expect(request).toHaveBeenNthCalledWith(
       2,
       '/api/session',

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
-import type { HeroId } from './contracts/identity-access.generated'
+import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { type Availability, useHealthStore } from './stores/health'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
@@ -16,6 +16,7 @@ const roomCode = ref('')
 const selectedHero = ref<HeroId | ''>('')
 const passwordVisible = ref(false)
 const copyResult = ref<'idle' | 'copied' | 'failed'>('idle')
+const selectedContentKey = ref('')
 
 const statusPresentation = {
   checking: {
@@ -34,11 +35,42 @@ const statusPresentation = {
 
 const currentStatus = computed(() => statusPresentation[health.availability])
 const lobby = computed(() => roomAccess.lobby)
+const game = computed(() => roomAccess.game)
 const isHost = computed(() => lobby.value?.participant.role === 'host')
 const isRestoringSession = computed(() => roomAccess.status === 'restoring')
-const sessionNeedsRecovery = computed(() => roomAccess.sessionExpected && !lobby.value)
+const sessionNeedsRecovery = computed(
+  () => roomAccess.sessionExpected && !lobby.value && !game.value,
+)
 const lookupCode = computed(() => roomAccess.roomLookup?.room.code ?? '')
 const lookupHeroes = computed(() => roomAccess.roomLookup?.heroes ?? [])
+const adventureChoices = computed(() =>
+  (lobby.value?.content_options ?? []).flatMap((manifest) =>
+    manifest.adventures.map((adventure) => ({
+      key: `${manifest.manifest_digest}:${adventure.id}`,
+      adventure,
+      manifest,
+      playable: manifest.playable && adventure.playable,
+    })),
+  ),
+)
+const selectedContent = computed(() =>
+  adventureChoices.value.find((choice) => choice.key === selectedContentKey.value),
+)
+const lobbyIsReadyToSeal = computed(
+  () =>
+    Boolean(lobby.value) &&
+    (lobby.value?.participants.length ?? 0) >= 2 &&
+    lobby.value?.participants.every((participant) => participant.ready && participant.hero),
+)
+const canStartGame = computed(
+  () => Boolean(isHost.value && lobbyIsReadyToSeal.value && selectedContent.value?.playable),
+)
+const activeParticipant = computed(() =>
+  game.value?.participants.find(
+    (participant) => participant.position === game.value?.turn.active_position,
+  ),
+)
+const currentGameParticipantPosition = computed(() => game.value?.participant.position)
 const serviceHeading = computed(() => {
   if (isRestoringSession.value) {
     return 'Retomando sua sessão'
@@ -110,7 +142,20 @@ const lobbyError = computed(() => {
     case 'HERO_UNAVAILABLE':
       return 'Outro participante escolheu esse Herói primeiro. Atualize sua escolha.'
     case 'NETWORK_UNAVAILABLE':
-      return 'A confirmação não chegou. Tente confirmar o Herói novamente.'
+      return 'A confirmação não chegou. Repita a mesma ação para consultar o resultado.'
+    case 'INTERNAL_ERROR':
+    case 'UNEXPECTED_RESPONSE':
+      return 'A confirmação da partida falhou. Tente novamente com a mesma solicitação.'
+    case 'ROOM_SEALED':
+      return 'A sala já foi selada. Atualize para receber sua projeção inicial.'
+    case 'ROOM_PARTICIPANT_COUNT_INVALID':
+      return 'A sala precisa ter entre dois e quatro participantes.'
+    case 'PARTICIPANT_HEROES_INVALID':
+      return 'Cada participante precisa confirmar um Herói único.'
+    case 'PARTICIPANTS_NOT_READY':
+      return 'Todos os participantes precisam confirmar que estão prontos.'
+    case 'CONTENT_NOT_PLAYABLE':
+      return 'O conteúdo selecionado ainda possui lacunas funcionais e não pode iniciar uma partida.'
     case null:
       return null
     default:
@@ -137,6 +182,12 @@ const joinSubmitLabel = computed(() => {
     ? 'Tentar entrar novamente'
     : 'Entrar na sala'
 })
+
+function lobbyIsBusy(): boolean {
+  return ['selecting_hero', 'setting_readiness', 'starting_game', 'restoring'].includes(
+    roomAccess.status,
+  )
+}
 
 function retry(): void {
   if (health.availability !== 'checking') {
@@ -194,10 +245,44 @@ async function confirmHero(): Promise<void> {
   await focusAfterAction(roomAccess.errorCode)
 }
 
+async function toggleReadiness(): Promise<void> {
+  if (!lobby.value?.participant.hero) {
+    return
+  }
+  await roomAccess.setReadiness(!lobby.value.participant.ready)
+  await focusAfterAction(roomAccess.errorCode)
+}
+
+async function startGame(): Promise<void> {
+  const content = selectedContent.value
+  if (!content || !canStartGame.value) {
+    return
+  }
+  const input: StartGameRequest = {
+    adventure_id: content.adventure.id,
+    manifest_digest: content.manifest.manifest_digest,
+    ruleset_version: content.manifest.ruleset_version,
+  }
+  await roomAccess.startGame(input)
+  await nextTick()
+  document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
+}
+
+async function refreshLobby(): Promise<void> {
+  await roomAccess.refreshSession()
+  await nextTick()
+  document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
+}
+
 async function focusAfterAction(errorCode: string | null): Promise<void> {
   await nextTick()
   if (lobby.value) {
-    document.getElementById('room-success-heading')?.focus()
+    const nextAction =
+      errorCode === null
+        ? document.querySelector<HTMLButtonElement>('.action-dock .primary-button')
+        : null
+    const focusTarget = nextAction ?? document.getElementById('room-success-heading')
+    focusTarget?.focus()
   } else if (errorCode === 'INVALID_DISPLAY_NAME') {
     document.getElementById(entryMode.value === 'join' ? 'join-display-name' : 'display-name')?.focus()
   } else if (errorCode === 'WEAK_RECOVERY_PASSWORD') {
@@ -249,12 +334,21 @@ async function copyRoomCode(): Promise<void> {
 }
 
 watch([displayName, recoveryPassword], () => roomCreation.resetPendingRequest())
+watch(
+  adventureChoices,
+  (choices) => {
+    if (!choices.some((choice) => choice.key === selectedContentKey.value)) {
+      selectedContentKey.value = choices.find((choice) => choice.playable)?.key ?? ''
+    }
+  },
+  { immediate: true },
+)
 
 onMounted(async () => {
   await Promise.all([health.check(), roomAccess.restoreSession()])
-  if (lobby.value) {
+  if (lobby.value || game.value) {
     await nextTick()
-    document.getElementById('room-success-heading')?.focus()
+    document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
   }
 })
 </script>
@@ -292,10 +386,92 @@ onMounted(async () => {
     </section>
 
     <section
+      v-else-if="game"
+      class="room-success game-stage"
+      aria-labelledby="game-heading"
+    >
+      <div class="cue-rail" aria-hidden="true">
+        <span class="cue-number">4</span>
+        <span class="cue-line"></span>
+        <span class="cue-label">Partida selada</span>
+      </div>
+
+      <div class="room-stage room-stage--success">
+        <p class="service-confirmation" role="status">
+          <span class="state-signal" aria-hidden="true"></span>
+          Snapshot inicial confirmado
+        </p>
+        <h2 id="game-heading" tabindex="-1">Partida iniciada</h2>
+        <p class="stage-description">
+          A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
+        </p>
+
+        <dl class="game-situation">
+          <div>
+            <dt>Turno</dt>
+            <dd>{{ game.turn.number }}</dd>
+          </div>
+          <div>
+            <dt>Fase</dt>
+            <dd>{{ game.turn.phase === 'dark_arts' ? 'Artes das Trevas' : game.turn.phase }}</dd>
+          </div>
+          <div>
+            <dt>Participante ativo</dt>
+            <dd>{{ activeParticipant?.display_name ?? `Posição ${game.turn.active_position}` }}</dd>
+          </div>
+          <div>
+            <dt>Aventura</dt>
+            <dd>{{ game.game.adventure.name }}</dd>
+          </div>
+        </dl>
+
+        <div class="participant-lineup">
+          <h3>Posições seladas</h3>
+          <ol>
+            <li v-for="participant in game.participants" :key="participant.position">
+              <span>Posição {{ participant.position }}</span>
+              <strong>{{ participant.display_name }}</strong>
+              <span>{{ participant.hero.name }}</span>
+              <span v-if="participant.position === currentGameParticipantPosition">Você</span>
+            </li>
+          </ol>
+        </div>
+
+        <details class="snapshot-details">
+          <summary>Ver versões do Snapshot</summary>
+          <dl>
+            <div>
+              <dt>Estado</dt>
+              <dd>v{{ game.snapshot.state_version }} · sequência {{ game.snapshot.sequence }}</dd>
+            </div>
+            <div>
+              <dt>Ruleset</dt>
+              <dd>{{ game.snapshot.versions.ruleset }}</dd>
+            </div>
+            <div>
+              <dt>Manifesto</dt>
+              <dd>v{{ game.snapshot.versions.manifest }}</dd>
+            </div>
+            <div>
+              <dt>Digest</dt>
+              <dd class="digest-value">{{ game.snapshot.digest }}</dd>
+            </div>
+            <div>
+              <dt>PRNG</dt>
+              <dd>{{ game.snapshot.versions.prng }}</dd>
+            </div>
+          </dl>
+        </details>
+        <p class="seed-note">A seed permanece secreta enquanto a partida estiver em andamento.</p>
+      </div>
+    </section>
+
+    <section
       v-else-if="lobby"
       class="room-success"
       aria-labelledby="room-success-heading"
       aria-live="polite"
+      :aria-busy="lobbyIsBusy()"
     >
       <div class="cue-rail" aria-hidden="true">
         <span class="cue-number">3</span>
@@ -337,6 +513,10 @@ onMounted(async () => {
             <dt>Sessão</dt>
             <dd>Protegida neste navegador</dd>
           </div>
+          <div>
+            <dt>Prontidão</dt>
+            <dd>{{ lobby.participant.ready ? 'Confirmada' : 'Pendente' }}</dd>
+          </div>
         </dl>
 
         <form
@@ -369,7 +549,7 @@ onMounted(async () => {
           </fieldset>
           <button
             class="secondary-button"
-            :disabled="!selectedHero || roomAccess.status === 'selecting_hero'"
+            :disabled="!selectedHero || lobbyIsBusy()"
             type="submit"
           >
             {{ roomAccess.status === 'selecting_hero' ? 'Confirmando Herói' : 'Confirmar Herói' }}
@@ -381,16 +561,65 @@ onMounted(async () => {
           <h3>Participantes</h3>
           <ol>
             <li v-for="participant in lobby.participants" :key="participant.position">
-              Posição {{ participant.position }} · {{ participant.display_name }} ·
-              {{ participant.hero?.name ?? 'Herói pendente' }}
+              <span>Posição {{ participant.position }}</span>
+              <strong>{{ participant.display_name }}</strong>
+              <span>{{ participant.hero?.name ?? 'Herói pendente' }}</span>
+              <span :class="participant.ready ? 'ready-label' : 'pending-label'">
+                {{ participant.ready ? 'Pronto' : 'Preparando' }}
+              </span>
             </li>
           </ol>
+        </div>
+
+        <div v-if="isHost" class="content-selection">
+          <label for="adventure-selection">Aventura e conteúdo da partida</label>
+          <select
+            id="adventure-selection"
+            v-model="selectedContentKey"
+            :disabled="lobbyIsBusy() || Boolean(roomAccess.pendingStartInput)"
+          >
+            <option value="" disabled>Selecione conteúdo jogável</option>
+            <template v-for="choice in adventureChoices" :key="choice.key">
+              <option v-if="choice.playable" :value="choice.key">
+                {{ choice.adventure.name }} · {{ choice.manifest.ruleset_version }}
+              </option>
+              <option v-else disabled :value="choice.key">
+                {{ choice.adventure.name }} · {{ choice.manifest.ruleset_version }} · não jogável
+              </option>
+            </template>
+          </select>
+          <p v-if="selectedContent">
+            Manifesto v{{ selectedContent.manifest.manifest_version }} ·
+            {{ selectedContent.manifest.content_version }}
+          </p>
+          <p v-if="roomAccess.pendingStartInput" class="pending-selection-note">
+            Escolha preservada para repetir a mesma solicitação com segurança.
+          </p>
+          <p v-if="!selectedContent" class="content-warning" role="status">
+            Nenhum Manifesto jogável está publicado. Lacunas funcionais impedem o selo da sala.
+          </p>
+        </div>
+
+        <div class="lobby-utilities">
+          <button class="text-button" type="button" @click="copyRoomCode()">
+            {{ copyResult === 'copied' ? 'Copiar código novamente' : 'Copiar código da sala' }}
+          </button>
+          <button
+            v-if="lobby.participant.ready"
+            class="text-button"
+            type="button"
+            :disabled="lobbyIsBusy()"
+            @click="toggleReadiness()"
+          >
+            Reabrir minha preparação
+          </button>
         </div>
 
         <p v-if="copyResult === 'copied'" class="copy-feedback" role="status">Código copiado.</p>
         <p v-else-if="copyResult === 'failed'" class="copy-feedback copy-feedback--error" role="alert">
           Não foi possível copiar. Selecione o código e copie manualmente.
         </p>
+        <p v-if="lobbyError" class="form-error lobby-error" role="alert">{{ lobbyError }}</p>
       </div>
     </section>
 
@@ -634,17 +863,42 @@ onMounted(async () => {
       >
         {{ isRestoringSession ? 'Retomando sessão' : 'Tentar retomar sessão' }}
       </button>
+      <p v-else-if="game" class="continuity-note">
+        <span aria-hidden="true"></span>
+        Estado inicial oficial recebido. A seed não foi enviada ao navegador.
+      </p>
       <button
-        v-else-if="lobby && isHost"
+        v-else-if="lobby && lobby.participant.hero && !lobby.participant.ready"
         class="primary-button"
+        :disabled="lobbyIsBusy()"
         type="button"
-        @click="copyRoomCode()"
+        @click="toggleReadiness()"
       >
-        {{ copyResult === 'copied' ? 'Copiar novamente' : 'Copiar código' }}
+        {{ roomAccess.status === 'setting_readiness' ? 'Confirmando prontidão' : 'Estou pronto' }}
+      </button>
+      <button
+        v-else-if="lobby && isHost && canStartGame"
+        class="primary-button"
+        :disabled="lobbyIsBusy()"
+        type="button"
+        @click="startGame()"
+      >
+        {{ roomAccess.status === 'starting_game' ? 'Selando sala' : 'Selar sala e iniciar' }}
+      </button>
+      <button
+        v-else-if="lobby && lobby.participant.ready"
+        class="primary-button"
+        :disabled="lobbyIsBusy()"
+        type="button"
+        @click="refreshLobby()"
+      >
+        {{
+          roomAccess.status === 'restoring' ? 'Atualizando sala' : 'Atualizar estado da sala'
+        }}
       </button>
       <p v-else-if="lobby" class="continuity-note">
         <span aria-hidden="true"></span>
-        Sua posição continuará protegida nesta sessão.
+        Escolha um Herói antes de confirmar sua prontidão.
       </p>
       <button
         v-else-if="entryMode === 'create'"

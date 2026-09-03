@@ -33,6 +33,27 @@
         "hero_id": { "$ref": "#/$defs/HeroId" }
       }
     },
+    "SetReadinessRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ready"],
+      "properties": {
+        "ready": { "type": "boolean" }
+      }
+    },
+    "StartGameRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adventure_id", "manifest_digest", "ruleset_version"],
+      "properties": {
+        "adventure_id": { "type": "string", "minLength": 1 },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^blake3:[0-9a-f]{64}$"
+        },
+        "ruleset_version": { "type": "string", "minLength": 1 }
+      }
+    },
     "RoomSummary": {
       "type": "object",
       "additionalProperties": false,
@@ -67,18 +88,55 @@
     "ParticipantSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "role", "position"],
+      "required": ["display_name", "role", "position", "ready"],
       "properties": {
         "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
         "role": { "type": "string", "enum": ["host", "guest"] },
         "position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "ready": { "type": "boolean" },
         "hero": { "$ref": "#/$defs/HeroSummary" }
+      }
+    },
+    "AdventureOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "playable"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "playable": { "type": "boolean" }
+      }
+    },
+    "ContentManifestOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_digest",
+        "manifest_version",
+        "content_version",
+        "ruleset_version",
+        "playable",
+        "adventures"
+      ],
+      "properties": {
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^blake3:[0-9a-f]{64}$"
+        },
+        "manifest_version": { "type": "integer", "minimum": 1 },
+        "content_version": { "type": "string", "minLength": 1 },
+        "ruleset_version": { "type": "string", "minLength": 1 },
+        "playable": { "type": "boolean" },
+        "adventures": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AdventureOption" }
+        }
       }
     },
     "CreateRoomResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["room", "participant", "participants", "heroes"],
+      "required": ["room", "participant", "participants", "heroes", "content_options"],
       "properties": {
         "room": { "$ref": "#/$defs/RoomSummary" },
         "participant": { "$ref": "#/$defs/ParticipantSummary" },
@@ -89,6 +147,10 @@
         "heroes": {
           "type": "array",
           "items": { "$ref": "#/$defs/HeroAvailability" }
+        },
+        "content_options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentManifestOption" }
         }
       }
     },
@@ -107,7 +169,7 @@
     "LobbyResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["room", "participant", "participants", "heroes"],
+      "required": ["room", "participant", "participants", "heroes", "content_options"],
       "properties": {
         "room": { "$ref": "#/$defs/RoomSummary" },
         "participant": { "$ref": "#/$defs/ParticipantSummary" },
@@ -118,6 +180,106 @@
         "heroes": {
           "type": "array",
           "items": { "$ref": "#/$defs/HeroAvailability" }
+        },
+        "content_options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentManifestOption" }
+        }
+      }
+    },
+    "GameAdventure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "GameSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "adventure"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "status": { "type": "string", "enum": ["in_progress"] },
+        "adventure": { "$ref": "#/$defs/GameAdventure" }
+      }
+    },
+    "GameVersions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content",
+        "ruleset",
+        "manifest",
+        "manifest_digest",
+        "prng",
+        "shuffle",
+        "sampling"
+      ],
+      "properties": {
+        "content": { "type": "string", "minLength": 1 },
+        "ruleset": { "type": "string", "minLength": 1 },
+        "manifest": { "type": "integer", "minimum": 1 },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^blake3:[0-9a-f]{64}$"
+        },
+        "prng": { "type": "string", "enum": ["chacha20-v1"] },
+        "shuffle": { "type": "string", "enum": ["fisher-yates-v1"] },
+        "sampling": { "type": "string", "enum": ["rejection-sampling-v1"] }
+      }
+    },
+    "SnapshotSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_version", "state_version", "sequence", "digest", "versions"],
+      "properties": {
+        "snapshot_version": { "type": "integer", "minimum": 1 },
+        "state_version": { "type": "integer", "minimum": 1 },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "digest": { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" },
+        "versions": { "$ref": "#/$defs/GameVersions" }
+      }
+    },
+    "TurnSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "phase", "active_position"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "phase": { "type": "string", "enum": ["dark_arts"] },
+        "active_position": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "GameParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "role", "position", "hero"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "role": { "type": "string", "enum": ["host", "guest"] },
+        "position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "hero": { "$ref": "#/$defs/HeroSummary" }
+      }
+    },
+    "GameProjectionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["game", "snapshot", "turn", "participant", "participants", "legal_actions"],
+      "properties": {
+        "game": { "$ref": "#/$defs/GameSummary" },
+        "snapshot": { "$ref": "#/$defs/SnapshotSummary" },
+        "turn": { "$ref": "#/$defs/TurnSummary" },
+        "participant": { "$ref": "#/$defs/GameParticipant" },
+        "participants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/GameParticipant" }
+        },
+        "legal_actions": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },

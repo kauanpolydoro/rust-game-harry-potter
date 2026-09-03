@@ -48,6 +48,8 @@ button {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
+select:focus-visible,
+summary:focus-visible,
 .hero-option:has(input:focus-visible),
 .room-stage h2:focus-visible {
   outline: 3px solid var(--focus);
@@ -491,6 +493,179 @@ input {
   color: var(--chalk-muted);
   font-size: 0.78rem;
   line-height: 1.45;
+}
+
+.participant-lineup li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid rgb(111 99 63 / 45%);
+}
+
+.participant-lineup li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.participant-lineup li strong {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.participant-lineup li span:nth-child(even) {
+  text-align: right;
+}
+
+.ready-label {
+  color: var(--ready);
+}
+
+.pending-label,
+.content-warning {
+  color: var(--warning);
+}
+
+.content-selection {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--brass-quiet);
+}
+
+.content-selection label {
+  color: var(--chalk);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.content-selection select {
+  width: 100%;
+  min-height: 3.25rem;
+  padding-inline: 0.9rem 2.5rem;
+  border: 1px solid var(--brass-quiet);
+  border-radius: 0.75rem;
+  background: var(--ink-raised);
+  color: var(--chalk);
+  cursor: pointer;
+}
+
+.content-selection select:hover {
+  border-color: var(--brass);
+}
+
+.content-selection select:disabled,
+.content-selection select:disabled:hover {
+  border-color: var(--brass-quiet);
+  color: var(--chalk-muted);
+  cursor: wait;
+}
+
+.content-selection p {
+  margin: 0;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.content-selection .content-warning {
+  color: var(--warning);
+}
+
+.content-selection .pending-selection-note {
+  color: var(--ready);
+}
+
+.lobby-utilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 1rem;
+}
+
+.lobby-utilities .text-button {
+  padding-inline: 0;
+}
+
+.text-button:disabled {
+  color: var(--chalk-muted);
+  cursor: wait;
+}
+
+.lobby-error {
+  margin-top: 1rem;
+}
+
+.game-situation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 2.25rem 0 0;
+  padding-block: 1.25rem;
+  border-block: 1px solid var(--brass-quiet);
+}
+
+.game-situation div,
+.snapshot-details dl div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.game-situation dt,
+.snapshot-details dt {
+  color: var(--chalk-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.game-situation dd,
+.snapshot-details dd {
+  margin: 0;
+  color: var(--chalk);
+}
+
+.game-situation dd {
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.snapshot-details {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--brass-quiet);
+}
+
+.snapshot-details summary {
+  min-height: 2.75rem;
+  padding-block: 0.85rem;
+  color: var(--brass);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.snapshot-details dl {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0.5rem 0 1rem;
+}
+
+.seed-note {
+  margin: 0 0 1rem;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.digest-value {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 
 .room-code-block {

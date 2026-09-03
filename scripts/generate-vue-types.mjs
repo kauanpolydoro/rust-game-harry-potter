@@ -114,6 +114,7 @@ const supportedEvents = new Set(['click', 'submit'])
 const supportedElements = new Set([
   'button',
   'dd',
+  'details',
   'div',
   'dl',
   'dt',
@@ -131,10 +132,14 @@ const supportedElements = new Set([
   'main',
   'ol',
   'output',
+  'option',
   'p',
   'section',
+  'select',
   'small',
   'span',
+  'strong',
+  'summary',
   'template',
 ])
 const booleanishAriaAttributes = new Set([
@@ -292,6 +297,12 @@ function validateStaticAttribute(tag, attribute, filename, contract) {
     return
   }
   if (name === 'required' && tag === 'input' && value === '') {
+    return
+  }
+  if (name === 'value' && tag === 'option') {
+    return
+  }
+  if (name === 'disabled' && tag === 'option' && value === '') {
     return
   }
   if (name === 'tabindex' && value === '-1') {

@@ -22,6 +22,16 @@ export interface SelectHeroRequest {
   hero_id: HeroId
 }
 
+export interface SetReadinessRequest {
+  ready: boolean
+}
+
+export interface StartGameRequest {
+  adventure_id: string
+  manifest_digest: string
+  ruleset_version: string
+}
+
 export interface RoomSummary {
   code: string
   status: OpenRoomStatus
@@ -42,7 +52,23 @@ export interface ParticipantSummary {
   display_name: string
   role: ParticipantRole
   position: number
+  ready: boolean
   hero?: HeroSummary
+}
+
+export interface AdventureOption {
+  id: string
+  name: string
+  playable: boolean
+}
+
+export interface ContentManifestOption {
+  manifest_digest: string
+  manifest_version: number
+  content_version: string
+  ruleset_version: string
+  playable: boolean
+  adventures: Array<AdventureOption>
 }
 
 export interface CreateRoomResponse {
@@ -50,6 +76,7 @@ export interface CreateRoomResponse {
   participant: ParticipantSummary
   participants: Array<ParticipantSummary>
   heroes: Array<HeroAvailability>
+  content_options: Array<ContentManifestOption>
 }
 
 export interface FindRoomResponse {
@@ -62,6 +89,58 @@ export interface LobbyResponse {
   participant: ParticipantSummary
   participants: Array<ParticipantSummary>
   heroes: Array<HeroAvailability>
+  content_options: Array<ContentManifestOption>
+}
+
+export interface GameAdventure {
+  id: string
+  name: string
+}
+
+export interface GameSummary {
+  id: string
+  status: "in_progress"
+  adventure: GameAdventure
+}
+
+export interface GameVersions {
+  content: string
+  ruleset: string
+  manifest: number
+  manifest_digest: string
+  prng: "chacha20-v1"
+  shuffle: "fisher-yates-v1"
+  sampling: "rejection-sampling-v1"
+}
+
+export interface SnapshotSummary {
+  snapshot_version: number
+  state_version: number
+  sequence: number
+  digest: string
+  versions: GameVersions
+}
+
+export interface TurnSummary {
+  number: number
+  phase: "dark_arts"
+  active_position: number
+}
+
+export interface GameParticipant {
+  display_name: string
+  role: "host" | "guest"
+  position: number
+  hero: HeroSummary
+}
+
+export interface GameProjectionResponse {
+  game: GameSummary
+  snapshot: SnapshotSummary
+  turn: TurnSummary
+  participant: GameParticipant
+  participants: Array<GameParticipant>
+  legal_actions: Array<string>
 }
 
 export interface ErrorResponse {
@@ -80,7 +159,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function isCreateRoomResponse(value: unknown): value is CreateRoomResponse {
-  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes"].includes(key)) && isRecord(value["room"]) && Object.keys(value["room"]).every((key) => ["code","status"].includes(key)) && typeof value["room"]["code"] === 'string' && new RegExp("^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$").test(value["room"]["code"]) && typeof value["room"]["status"] === 'string' && (value["room"]["status"] === "open") && isRecord(value["participant"]) && Object.keys(value["participant"]).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof value["participant"]["display_name"] === 'string' && [...value["participant"]["display_name"]].length >= 1 && [...value["participant"]["display_name"]].length <= 40 && typeof value["participant"]["role"] === 'string' && (value["participant"]["role"] === "host" || value["participant"]["role"] === "guest") && typeof value["participant"]["position"] === 'number' && Number.isInteger(value["participant"]["position"]) && value["participant"]["position"] >= 1 && value["participant"]["position"] <= 4 && (!Object.hasOwn(value["participant"], "hero") || (isRecord(value["participant"]["hero"]) && Object.keys(value["participant"]["hero"]).every((key) => ["id","name"].includes(key)) && typeof value["participant"]["hero"]["id"] === 'string' && (value["participant"]["hero"]["id"] === "harry" || value["participant"]["hero"]["id"] === "hermione" || value["participant"]["hero"]["id"] === "neville" || value["participant"]["hero"]["id"] === "ron") && typeof value["participant"]["hero"]["name"] === 'string' && [...value["participant"]["hero"]["name"]].length >= 1)) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof entry["display_name"] === 'string' && [...entry["display_name"]].length >= 1 && [...entry["display_name"]].length <= 40 && typeof entry["role"] === 'string' && (entry["role"] === "host" || entry["role"] === "guest") && typeof entry["position"] === 'number' && Number.isInteger(entry["position"]) && entry["position"] >= 1 && entry["position"] <= 4 && (!Object.hasOwn(entry, "hero") || (isRecord(entry["hero"]) && Object.keys(entry["hero"]).every((key) => ["id","name"].includes(key)) && typeof entry["hero"]["id"] === 'string' && (entry["hero"]["id"] === "harry" || entry["hero"]["id"] === "hermione" || entry["hero"]["id"] === "neville" || entry["hero"]["id"] === "ron") && typeof entry["hero"]["name"] === 'string' && [...entry["hero"]["name"]].length >= 1))) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["id","name","available"].includes(key)) && typeof entry["id"] === 'string' && (entry["id"] === "harry" || entry["id"] === "hermione" || entry["id"] === "neville" || entry["id"] === "ron") && typeof entry["name"] === 'string' && [...entry["name"]].length >= 1 && typeof entry["available"] === 'boolean')
+  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes","content_options"].includes(key)) && isRecord(value["room"]) && Object.keys(value["room"]).every((key) => ["code","status"].includes(key)) && typeof value["room"]["code"] === 'string' && new RegExp("^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$").test(value["room"]["code"]) && typeof value["room"]["status"] === 'string' && (value["room"]["status"] === "open") && isRecord(value["participant"]) && Object.keys(value["participant"]).every((key) => ["display_name","role","position","ready","hero"].includes(key)) && typeof value["participant"]["display_name"] === 'string' && [...value["participant"]["display_name"]].length >= 1 && [...value["participant"]["display_name"]].length <= 40 && typeof value["participant"]["role"] === 'string' && (value["participant"]["role"] === "host" || value["participant"]["role"] === "guest") && typeof value["participant"]["position"] === 'number' && Number.isInteger(value["participant"]["position"]) && value["participant"]["position"] >= 1 && value["participant"]["position"] <= 4 && typeof value["participant"]["ready"] === 'boolean' && (!Object.hasOwn(value["participant"], "hero") || (isRecord(value["participant"]["hero"]) && Object.keys(value["participant"]["hero"]).every((key) => ["id","name"].includes(key)) && typeof value["participant"]["hero"]["id"] === 'string' && (value["participant"]["hero"]["id"] === "harry" || value["participant"]["hero"]["id"] === "hermione" || value["participant"]["hero"]["id"] === "neville" || value["participant"]["hero"]["id"] === "ron") && typeof value["participant"]["hero"]["name"] === 'string' && [...value["participant"]["hero"]["name"]].length >= 1)) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["display_name","role","position","ready","hero"].includes(key)) && typeof entry["display_name"] === 'string' && [...entry["display_name"]].length >= 1 && [...entry["display_name"]].length <= 40 && typeof entry["role"] === 'string' && (entry["role"] === "host" || entry["role"] === "guest") && typeof entry["position"] === 'number' && Number.isInteger(entry["position"]) && entry["position"] >= 1 && entry["position"] <= 4 && typeof entry["ready"] === 'boolean' && (!Object.hasOwn(entry, "hero") || (isRecord(entry["hero"]) && Object.keys(entry["hero"]).every((key) => ["id","name"].includes(key)) && typeof entry["hero"]["id"] === 'string' && (entry["hero"]["id"] === "harry" || entry["hero"]["id"] === "hermione" || entry["hero"]["id"] === "neville" || entry["hero"]["id"] === "ron") && typeof entry["hero"]["name"] === 'string' && [...entry["hero"]["name"]].length >= 1))) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["id","name","available"].includes(key)) && typeof entry["id"] === 'string' && (entry["id"] === "harry" || entry["id"] === "hermione" || entry["id"] === "neville" || entry["id"] === "ron") && typeof entry["name"] === 'string' && [...entry["name"]].length >= 1 && typeof entry["available"] === 'boolean') && Array.isArray(value["content_options"]) && value["content_options"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["manifest_digest","manifest_version","content_version","ruleset_version","playable","adventures"].includes(key)) && typeof entry["manifest_digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(entry["manifest_digest"]) && typeof entry["manifest_version"] === 'number' && Number.isInteger(entry["manifest_version"]) && entry["manifest_version"] >= 1 && typeof entry["content_version"] === 'string' && [...entry["content_version"]].length >= 1 && typeof entry["ruleset_version"] === 'string' && [...entry["ruleset_version"]].length >= 1 && typeof entry["playable"] === 'boolean' && Array.isArray(entry["adventures"]) && entry["adventures"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["id","name","playable"].includes(key)) && typeof entry["id"] === 'string' && [...entry["id"]].length >= 1 && typeof entry["name"] === 'string' && [...entry["name"]].length >= 1 && typeof entry["playable"] === 'boolean'))
 }
 
 export function isFindRoomResponse(value: unknown): value is FindRoomResponse {
@@ -88,5 +167,9 @@ export function isFindRoomResponse(value: unknown): value is FindRoomResponse {
 }
 
 export function isLobbyResponse(value: unknown): value is LobbyResponse {
-  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes"].includes(key)) && isRecord(value["room"]) && Object.keys(value["room"]).every((key) => ["code","status"].includes(key)) && typeof value["room"]["code"] === 'string' && new RegExp("^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$").test(value["room"]["code"]) && typeof value["room"]["status"] === 'string' && (value["room"]["status"] === "open") && isRecord(value["participant"]) && Object.keys(value["participant"]).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof value["participant"]["display_name"] === 'string' && [...value["participant"]["display_name"]].length >= 1 && [...value["participant"]["display_name"]].length <= 40 && typeof value["participant"]["role"] === 'string' && (value["participant"]["role"] === "host" || value["participant"]["role"] === "guest") && typeof value["participant"]["position"] === 'number' && Number.isInteger(value["participant"]["position"]) && value["participant"]["position"] >= 1 && value["participant"]["position"] <= 4 && (!Object.hasOwn(value["participant"], "hero") || (isRecord(value["participant"]["hero"]) && Object.keys(value["participant"]["hero"]).every((key) => ["id","name"].includes(key)) && typeof value["participant"]["hero"]["id"] === 'string' && (value["participant"]["hero"]["id"] === "harry" || value["participant"]["hero"]["id"] === "hermione" || value["participant"]["hero"]["id"] === "neville" || value["participant"]["hero"]["id"] === "ron") && typeof value["participant"]["hero"]["name"] === 'string' && [...value["participant"]["hero"]["name"]].length >= 1)) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof entry["display_name"] === 'string' && [...entry["display_name"]].length >= 1 && [...entry["display_name"]].length <= 40 && typeof entry["role"] === 'string' && (entry["role"] === "host" || entry["role"] === "guest") && typeof entry["position"] === 'number' && Number.isInteger(entry["position"]) && entry["position"] >= 1 && entry["position"] <= 4 && (!Object.hasOwn(entry, "hero") || (isRecord(entry["hero"]) && Object.keys(entry["hero"]).every((key) => ["id","name"].includes(key)) && typeof entry["hero"]["id"] === 'string' && (entry["hero"]["id"] === "harry" || entry["hero"]["id"] === "hermione" || entry["hero"]["id"] === "neville" || entry["hero"]["id"] === "ron") && typeof entry["hero"]["name"] === 'string' && [...entry["hero"]["name"]].length >= 1))) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["id","name","available"].includes(key)) && typeof entry["id"] === 'string' && (entry["id"] === "harry" || entry["id"] === "hermione" || entry["id"] === "neville" || entry["id"] === "ron") && typeof entry["name"] === 'string' && [...entry["name"]].length >= 1 && typeof entry["available"] === 'boolean')
+  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes","content_options"].includes(key)) && isRecord(value["room"]) && Object.keys(value["room"]).every((key) => ["code","status"].includes(key)) && typeof value["room"]["code"] === 'string' && new RegExp("^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$").test(value["room"]["code"]) && typeof value["room"]["status"] === 'string' && (value["room"]["status"] === "open") && isRecord(value["participant"]) && Object.keys(value["participant"]).every((key) => ["display_name","role","position","ready","hero"].includes(key)) && typeof value["participant"]["display_name"] === 'string' && [...value["participant"]["display_name"]].length >= 1 && [...value["participant"]["display_name"]].length <= 40 && typeof value["participant"]["role"] === 'string' && (value["participant"]["role"] === "host" || value["participant"]["role"] === "guest") && typeof value["participant"]["position"] === 'number' && Number.isInteger(value["participant"]["position"]) && value["participant"]["position"] >= 1 && value["participant"]["position"] <= 4 && typeof value["participant"]["ready"] === 'boolean' && (!Object.hasOwn(value["participant"], "hero") || (isRecord(value["participant"]["hero"]) && Object.keys(value["participant"]["hero"]).every((key) => ["id","name"].includes(key)) && typeof value["participant"]["hero"]["id"] === 'string' && (value["participant"]["hero"]["id"] === "harry" || value["participant"]["hero"]["id"] === "hermione" || value["participant"]["hero"]["id"] === "neville" || value["participant"]["hero"]["id"] === "ron") && typeof value["participant"]["hero"]["name"] === 'string' && [...value["participant"]["hero"]["name"]].length >= 1)) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["display_name","role","position","ready","hero"].includes(key)) && typeof entry["display_name"] === 'string' && [...entry["display_name"]].length >= 1 && [...entry["display_name"]].length <= 40 && typeof entry["role"] === 'string' && (entry["role"] === "host" || entry["role"] === "guest") && typeof entry["position"] === 'number' && Number.isInteger(entry["position"]) && entry["position"] >= 1 && entry["position"] <= 4 && typeof entry["ready"] === 'boolean' && (!Object.hasOwn(entry, "hero") || (isRecord(entry["hero"]) && Object.keys(entry["hero"]).every((key) => ["id","name"].includes(key)) && typeof entry["hero"]["id"] === 'string' && (entry["hero"]["id"] === "harry" || entry["hero"]["id"] === "hermione" || entry["hero"]["id"] === "neville" || entry["hero"]["id"] === "ron") && typeof entry["hero"]["name"] === 'string' && [...entry["hero"]["name"]].length >= 1))) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["id","name","available"].includes(key)) && typeof entry["id"] === 'string' && (entry["id"] === "harry" || entry["id"] === "hermione" || entry["id"] === "neville" || entry["id"] === "ron") && typeof entry["name"] === 'string' && [...entry["name"]].length >= 1 && typeof entry["available"] === 'boolean') && Array.isArray(value["content_options"]) && value["content_options"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["manifest_digest","manifest_version","content_version","ruleset_version","playable","adventures"].includes(key)) && typeof entry["manifest_digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(entry["manifest_digest"]) && typeof entry["manifest_version"] === 'number' && Number.isInteger(entry["manifest_version"]) && entry["manifest_version"] >= 1 && typeof entry["content_version"] === 'string' && [...entry["content_version"]].length >= 1 && typeof entry["ruleset_version"] === 'string' && [...entry["ruleset_version"]].length >= 1 && typeof entry["playable"] === 'boolean' && Array.isArray(entry["adventures"]) && entry["adventures"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["id","name","playable"].includes(key)) && typeof entry["id"] === 'string' && [...entry["id"]].length >= 1 && typeof entry["name"] === 'string' && [...entry["name"]].length >= 1 && typeof entry["playable"] === 'boolean'))
+}
+
+export function isGameProjectionResponse(value: unknown): value is GameProjectionResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions"].includes(key)) && isRecord(value["game"]) && Object.keys(value["game"]).every((key) => ["id","status","adventure"].includes(key)) && typeof value["game"]["id"] === 'string' && typeof value["game"]["status"] === 'string' && (value["game"]["status"] === "in_progress") && isRecord(value["game"]["adventure"]) && Object.keys(value["game"]["adventure"]).every((key) => ["id","name"].includes(key)) && typeof value["game"]["adventure"]["id"] === 'string' && [...value["game"]["adventure"]["id"]].length >= 1 && typeof value["game"]["adventure"]["name"] === 'string' && [...value["game"]["adventure"]["name"]].length >= 1 && isRecord(value["snapshot"]) && Object.keys(value["snapshot"]).every((key) => ["snapshot_version","state_version","sequence","digest","versions"].includes(key)) && typeof value["snapshot"]["snapshot_version"] === 'number' && Number.isInteger(value["snapshot"]["snapshot_version"]) && value["snapshot"]["snapshot_version"] >= 1 && typeof value["snapshot"]["state_version"] === 'number' && Number.isInteger(value["snapshot"]["state_version"]) && value["snapshot"]["state_version"] >= 1 && typeof value["snapshot"]["sequence"] === 'number' && Number.isInteger(value["snapshot"]["sequence"]) && value["snapshot"]["sequence"] >= 0 && typeof value["snapshot"]["digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["snapshot"]["digest"]) && isRecord(value["snapshot"]["versions"]) && Object.keys(value["snapshot"]["versions"]).every((key) => ["content","ruleset","manifest","manifest_digest","prng","shuffle","sampling"].includes(key)) && typeof value["snapshot"]["versions"]["content"] === 'string' && [...value["snapshot"]["versions"]["content"]].length >= 1 && typeof value["snapshot"]["versions"]["ruleset"] === 'string' && [...value["snapshot"]["versions"]["ruleset"]].length >= 1 && typeof value["snapshot"]["versions"]["manifest"] === 'number' && Number.isInteger(value["snapshot"]["versions"]["manifest"]) && value["snapshot"]["versions"]["manifest"] >= 1 && typeof value["snapshot"]["versions"]["manifest_digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["snapshot"]["versions"]["manifest_digest"]) && typeof value["snapshot"]["versions"]["prng"] === 'string' && (value["snapshot"]["versions"]["prng"] === "chacha20-v1") && typeof value["snapshot"]["versions"]["shuffle"] === 'string' && (value["snapshot"]["versions"]["shuffle"] === "fisher-yates-v1") && typeof value["snapshot"]["versions"]["sampling"] === 'string' && (value["snapshot"]["versions"]["sampling"] === "rejection-sampling-v1") && isRecord(value["turn"]) && Object.keys(value["turn"]).every((key) => ["number","phase","active_position"].includes(key)) && typeof value["turn"]["number"] === 'number' && Number.isInteger(value["turn"]["number"]) && value["turn"]["number"] >= 1 && typeof value["turn"]["phase"] === 'string' && (value["turn"]["phase"] === "dark_arts") && typeof value["turn"]["active_position"] === 'number' && Number.isInteger(value["turn"]["active_position"]) && value["turn"]["active_position"] >= 1 && value["turn"]["active_position"] <= 4 && isRecord(value["participant"]) && Object.keys(value["participant"]).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof value["participant"]["display_name"] === 'string' && [...value["participant"]["display_name"]].length >= 1 && [...value["participant"]["display_name"]].length <= 40 && typeof value["participant"]["role"] === 'string' && (value["participant"]["role"] === "host" || value["participant"]["role"] === "guest") && typeof value["participant"]["position"] === 'number' && Number.isInteger(value["participant"]["position"]) && value["participant"]["position"] >= 1 && value["participant"]["position"] <= 4 && isRecord(value["participant"]["hero"]) && Object.keys(value["participant"]["hero"]).every((key) => ["id","name"].includes(key)) && typeof value["participant"]["hero"]["id"] === 'string' && (value["participant"]["hero"]["id"] === "harry" || value["participant"]["hero"]["id"] === "hermione" || value["participant"]["hero"]["id"] === "neville" || value["participant"]["hero"]["id"] === "ron") && typeof value["participant"]["hero"]["name"] === 'string' && [...value["participant"]["hero"]["name"]].length >= 1 && Array.isArray(value["participants"]) && value["participants"].every((entry) => isRecord(entry) && Object.keys(entry).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof entry["display_name"] === 'string' && [...entry["display_name"]].length >= 1 && [...entry["display_name"]].length <= 40 && typeof entry["role"] === 'string' && (entry["role"] === "host" || entry["role"] === "guest") && typeof entry["position"] === 'number' && Number.isInteger(entry["position"]) && entry["position"] >= 1 && entry["position"] <= 4 && isRecord(entry["hero"]) && Object.keys(entry["hero"]).every((key) => ["id","name"].includes(key)) && typeof entry["hero"]["id"] === 'string' && (entry["hero"]["id"] === "harry" || entry["hero"]["id"] === "hermione" || entry["hero"]["id"] === "neville" || entry["hero"]["id"] === "ron") && typeof entry["hero"]["name"] === 'string' && [...entry["hero"]["name"]].length >= 1) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string')
 }
