@@ -3,10 +3,15 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, ExecuteGameCommandRequest, SelectedContent, StartGameRequest, StoredCommandGame,
-    StoredCommandReceipt, StoredGame, StoredGameEvent, StoredGameStart, StoredRoomActor,
-    StoredRoomParticipant,
+    ApiError, SelectedContent, StoredCommandGame, StoredCommandReceipt, StoredGame,
+    StoredGameEvent, StoredGameStart, StoredRoomActor, StoredRoomParticipant,
 };
+
+pub(super) struct GameStartClaim<'a> {
+    pub(super) adventure_id: &'a str,
+    pub(super) manifest_digest: &'a str,
+    pub(super) ruleset_version: &'a str,
+}
 
 pub(super) struct NewGame<'a> {
     pub(super) id: Uuid,
@@ -22,7 +27,7 @@ pub(super) struct NewGameCommand<'a> {
     pub(super) game_id: Uuid,
     pub(super) actor_participant_id: Uuid,
     pub(super) command_id: Uuid,
-    pub(super) request: &'a ExecuteGameCommandRequest,
+    pub(super) expected_state_version: u64,
     pub(super) command_type: &'a str,
     pub(super) payload_digest: &'a str,
     pub(super) state: &'a game_domain::InitialGameState,
@@ -30,6 +35,12 @@ pub(super) struct NewGameCommand<'a> {
     pub(super) snapshot_json: &'a str,
     pub(super) event_type: &'a str,
     pub(super) event_json: &'a str,
+}
+
+struct PersistedCommandCounters {
+    state_version: i64,
+    sequence: i64,
+    prng_counter: i64,
 }
 
 pub(super) async fn publish_manifest(
@@ -119,7 +130,7 @@ pub(super) async fn lock_room_actor(
     .bind(participant_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn room_participants(
@@ -137,7 +148,7 @@ pub(super) async fn room_participants(
     .bind(room_id)
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn claim_game_start(
@@ -145,7 +156,7 @@ pub(super) async fn claim_game_start(
     idempotency_key: &str,
     game_id: Uuid,
     actor: &StoredRoomActor,
-    request: &StartGameRequest,
+    request: GameStartClaim<'_>,
 ) -> Result<bool, ApiError> {
     sqlx::query_scalar::<_, String>(
         r"
@@ -167,13 +178,13 @@ pub(super) async fn claim_game_start(
     .bind(game_id)
     .bind(actor.room_id)
     .bind(actor.participant_id)
-    .bind(&request.adventure_id)
-    .bind(&request.manifest_digest)
-    .bind(&request.ruleset_version)
+    .bind(request.adventure_id)
+    .bind(request.manifest_digest)
+    .bind(request.ruleset_version)
     .fetch_optional(&mut **transaction)
     .await
     .map(|claim| claim.is_some())
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn persist_game(
@@ -216,23 +227,38 @@ pub(super) async fn persist_game(
     .bind(&game.content.adventure_id)
     .bind(&game.content.adventure_name)
     .bind(&game.content.manifest_digest)
-    .bind(i16::try_from(game.state.manifest_version).map_err(|_| ApiError::internal())?)
-    .bind(&game.state.content_version)
-    .bind(&game.state.ruleset_version)
-    .bind(i16::try_from(game.state.snapshot_version).map_err(|_| ApiError::internal())?)
-    .bind(i64::try_from(game.state.state_version).map_err(|_| ApiError::internal())?)
-    .bind(i64::try_from(game.state.sequence).map_err(|_| ApiError::internal())?)
+    .bind(
+        i16::try_from(game.state.manifest_version())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
+    .bind(game.state.content_version())
+    .bind(game.state.ruleset_version())
+    .bind(
+        i16::try_from(game.state.snapshot_version())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
+    .bind(
+        i64::try_from(game.state.state_version())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
+    .bind(
+        i64::try_from(game.state.sequence())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
     .bind(game.state_digest)
     .bind(game.snapshot_json)
-    .bind(game.state.prng_algorithm)
+    .bind(game.state.prng_algorithm())
     .bind(game.seed.as_slice())
-    .bind(i64::try_from(game.state.prng_counter).map_err(|_| ApiError::internal())?)
-    .bind(game.state.shuffle_algorithm)
-    .bind(game.state.sampling_algorithm)
+    .bind(
+        i64::try_from(game.state.prng_counter())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
+    .bind(game.state.shuffle_algorithm())
+    .bind(game.state.sampling_algorithm())
     .execute(&mut **transaction)
     .await
     .map(|_| ())
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn seal_room(
@@ -244,7 +270,7 @@ pub(super) async fn seal_room(
             .bind(room_id)
             .execute(&mut **transaction)
             .await
-            .map_err(|_| ApiError::internal())?;
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?;
     if result.rows_affected() != 1 {
         return Err(ApiError::room_sealed());
     }
@@ -265,7 +291,7 @@ pub(super) async fn load_game_start(
     .bind(idempotency_key)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn load_game_start_in(
@@ -282,7 +308,7 @@ pub(super) async fn load_game_start_in(
     .bind(idempotency_key)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn game_for_participant(
@@ -313,7 +339,8 @@ pub(super) async fn game_for_participant(
                 to_char(games.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
                 ' ',
                 'T'
-            ) || 'Z' AS expires_at
+            ) || 'Z' AS expires_at,
+            clock_timestamp() >= games.expires_at AS expired
         FROM games
         JOIN participants ON participants.room_id = games.room_id
         WHERE participants.id = $1
@@ -322,7 +349,7 @@ pub(super) async fn game_for_participant(
     .bind(participant_id)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn lock_game_for_actor(
@@ -359,14 +386,32 @@ pub(super) async fn lock_game_for_actor(
     .bind(participant_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn persist_game_command(
     transaction: &mut Transaction<'_, Postgres>,
     command: NewGameCommand<'_>,
 ) -> Result<StoredCommandReceipt, ApiError> {
-    let expires_at = sqlx::query_scalar::<_, String>(
+    let counters = PersistedCommandCounters {
+        state_version: i64::try_from(command.state.state_version())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+        sequence: i64::try_from(command.state.sequence())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+        prng_counter: i64::try_from(command.state.prng_counter())
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    };
+    let (room_id, expires_at) = update_game_after_command(transaction, &command, &counters).await?;
+    insert_game_event(transaction, &command, room_id, &counters).await?;
+    insert_command_receipt(transaction, &command, room_id, &expires_at, &counters).await
+}
+
+async fn update_game_after_command(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &NewGameCommand<'_>,
+    counters: &PersistedCommandCounters,
+) -> Result<(Uuid, String), ApiError> {
+    let (room_id, expires_at) = sqlx::query_as::<_, (Uuid, String)>(
         r"
         UPDATE games
         SET
@@ -378,27 +423,38 @@ pub(super) async fn persist_game_command(
             last_game_action_at = clock_timestamp(),
             expires_at = clock_timestamp() + INTERVAL '7 days'
         WHERE id = $1
-        RETURNING replace(
-            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
-            ' ',
-            'T'
-        ) || 'Z'
+        RETURNING
+            room_id,
+            replace(
+                to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z'
         ",
     )
     .bind(command.game_id)
-    .bind(i64::try_from(command.state.state_version).map_err(|_| ApiError::internal())?)
-    .bind(i64::try_from(command.state.sequence).map_err(|_| ApiError::internal())?)
+    .bind(counters.state_version)
+    .bind(counters.sequence)
     .bind(command.state_digest)
     .bind(command.snapshot_json)
-    .bind(i64::try_from(command.state.prng_counter).map_err(|_| ApiError::internal())?)
+    .bind(counters.prng_counter)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("persist game state after command", error))?;
+    Ok((room_id, expires_at))
+}
 
+async fn insert_game_event(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &NewGameCommand<'_>,
+    room_id: Uuid,
+    counters: &PersistedCommandCounters,
+) -> Result<(), ApiError> {
     sqlx::query(
         r"
         INSERT INTO game_events (
             game_id,
+            room_id,
             sequence,
             event_type,
             command_id,
@@ -406,24 +462,35 @@ pub(super) async fn persist_game_command(
             state_version,
             payload
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
         ",
     )
     .bind(command.game_id)
-    .bind(i64::try_from(command.state.sequence).map_err(|_| ApiError::internal())?)
+    .bind(room_id)
+    .bind(counters.sequence)
     .bind(command.event_type)
     .bind(command.command_id)
     .bind(command.actor_participant_id)
-    .bind(i64::try_from(command.state.state_version).map_err(|_| ApiError::internal())?)
+    .bind(counters.state_version)
     .bind(command.event_json)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("append game event", error))?;
+    Ok(())
+}
 
+async fn insert_command_receipt(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &NewGameCommand<'_>,
+    room_id: Uuid,
+    expires_at: &str,
+    counters: &PersistedCommandCounters,
+) -> Result<StoredCommandReceipt, ApiError> {
     sqlx::query_as::<_, StoredCommandReceipt>(
         r"
         INSERT INTO game_command_receipts (
             game_id,
+            room_id,
             command_id,
             actor_participant_id,
             command_type,
@@ -433,7 +500,7 @@ pub(super) async fn persist_game_command(
             accepted_sequence,
             expires_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)
         RETURNING
             command_id,
             actor_participant_id,
@@ -450,20 +517,21 @@ pub(super) async fn persist_game_command(
         ",
     )
     .bind(command.game_id)
+    .bind(room_id)
     .bind(command.command_id)
     .bind(command.actor_participant_id)
     .bind(command.command_type)
     .bind(
-        i64::try_from(command.request.expected_state_version)
+        i64::try_from(command.expected_state_version)
             .map_err(|_| ApiError::stale_state_version())?,
     )
     .bind(command.payload_digest)
-    .bind(i64::try_from(command.state.state_version).map_err(|_| ApiError::internal())?)
-    .bind(i64::try_from(command.state.sequence).map_err(|_| ApiError::internal())?)
-    .bind(&expires_at)
+    .bind(counters.state_version)
+    .bind(counters.sequence)
+    .bind(expires_at)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("persist command receipt", error))
 }
 
 pub(super) async fn command_receipt_in(
@@ -495,7 +563,7 @@ pub(super) async fn command_receipt_in(
     .bind(command_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn command_receipt_for_actor(
@@ -530,7 +598,7 @@ pub(super) async fn command_receipt_for_actor(
     .bind(command_id)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn game_events_for_participant(
@@ -571,7 +639,7 @@ pub(super) async fn game_events_for_participant(
     .bind(through_sequence)
     .fetch_all(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn game_cursor_for_participant(
@@ -593,7 +661,7 @@ pub(super) async fn game_cursor_for_participant(
     .bind(game_id)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
 pub(super) async fn game_participants(
@@ -618,5 +686,5 @@ pub(super) async fn game_participants(
     .bind(game_id)
     .fetch_all(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }

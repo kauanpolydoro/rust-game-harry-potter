@@ -2,8 +2,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, StoredLobby, StoredParticipant, StoredRoomCreation, StoredRoomJoin, random_hex_token,
-    random_room_code,
+    ApiError, StoredLobby, StoredParticipant, StoredRoomCreation, StoredRoomJoin, random_room_code,
 };
 
 pub(super) struct NewRoomJoin<'a> {
@@ -43,7 +42,7 @@ pub(super) async fn claim_room_creation(
     .fetch_optional(&mut **transaction)
     .await
     .map(|claim| claim.is_some())
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn find_open_room(
@@ -56,7 +55,7 @@ pub(super) async fn find_open_room(
     .bind(room_code)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn selected_room_heroes(
@@ -77,7 +76,7 @@ pub(super) async fn selected_room_heroes(
     .bind(room_code)
     .fetch_all(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn lock_open_room(
@@ -90,7 +89,7 @@ pub(super) async fn lock_open_room(
     .bind(room_code)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn claim_room_join(
@@ -120,7 +119,7 @@ pub(super) async fn claim_room_join(
     .fetch_optional(&mut **transaction)
     .await
     .map(|claim| claim.is_some())
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn next_room_position(
@@ -132,7 +131,9 @@ pub(super) async fn next_room_position(
             .bind(room_id)
             .fetch_one(&mut **transaction)
             .await
-            .map_err(|_| ApiError::internal())?;
+            .map_err(|error| {
+                ApiError::internal_with("identity access PostgreSQL operation", error)
+            })?;
 
     i16::try_from(participant_count + 1)
         .ok()
@@ -152,7 +153,7 @@ pub(super) async fn room_has_hero(
     .bind(hero_id)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn lock_participant_room(
@@ -171,7 +172,7 @@ pub(super) async fn lock_participant_room(
     .bind(participant_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn room_hero_owned_by_other(
@@ -196,7 +197,7 @@ pub(super) async fn room_hero_owned_by_other(
     .bind(participant_id)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn update_participant_hero(
@@ -210,7 +211,7 @@ pub(super) async fn update_participant_hero(
         .execute(&mut **transaction)
         .await
         .map(|_| ())
-        .map_err(|_| ApiError::internal())
+        .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn update_participant_readiness(
@@ -224,22 +225,22 @@ pub(super) async fn update_participant_readiness(
         .execute(&mut **transaction)
         .await
         .map(|_| ())
-        .map_err(|_| ApiError::internal())
+        .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn persist_room_join(
     transaction: &mut Transaction<'_, Postgres>,
     room_join: NewRoomJoin<'_>,
+    session_token: &str,
 ) -> Result<StoredRoomJoin, ApiError> {
     let guest_identity_id = Uuid::new_v4();
     let device_session_id = Uuid::new_v4();
-    let session_token = random_hex_token()?;
 
     sqlx::query("INSERT INTO guest_identities (id) VALUES ($1)")
         .bind(guest_identity_id)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| ApiError::internal())?;
+        .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     sqlx::query(
         r"
@@ -263,20 +264,24 @@ pub(super) async fn persist_room_join(
     .bind(room_join.hero_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     sqlx::query(
         r"
-        INSERT INTO guest_sessions (id, guest_identity_id, token)
-        VALUES ($1, $2, $3)
+        INSERT INTO guest_sessions (id, guest_identity_id, token_digest)
+        VALUES (
+            $1,
+            $2,
+            'sha256:' || encode(sha256(convert_to($3, 'UTF8')), 'hex')
+        )
         ",
     )
     .bind(room_join.guest_session_id)
     .bind(guest_identity_id)
-    .bind(&session_token)
+    .bind(session_token)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     sqlx::query(
         r"
@@ -289,14 +294,13 @@ pub(super) async fn persist_room_join(
     .bind(room_join.participant_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     Ok(StoredRoomJoin {
         participant_id: room_join.participant_id,
         room_code: room_join.room_code.to_owned(),
         display_name: room_join.display_name.to_owned(),
         hero_id: room_join.hero_id.to_owned(),
-        session_token,
     })
 }
 
@@ -310,8 +314,7 @@ pub(super) async fn load_room_join(
             participants.id AS participant_id,
             rooms.code AS room_code,
             participants.display_name,
-            participants.hero_id,
-            guest_sessions.token AS session_token
+            participants.hero_id
         FROM room_join_requests
         JOIN rooms ON rooms.id = room_join_requests.room_id
         JOIN participants ON participants.id = room_join_requests.participant_id
@@ -322,27 +325,7 @@ pub(super) async fn load_room_join(
     .bind(idempotency_key)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
-}
-
-pub(super) async fn participant_for_session(
-    database: &PgPool,
-    session_token: &str,
-) -> Result<Option<Uuid>, ApiError> {
-    sqlx::query_scalar::<_, Uuid>(
-        r"
-        SELECT device_sessions.participant_id
-        FROM guest_sessions
-        JOIN device_sessions ON device_sessions.guest_session_id = guest_sessions.id
-        WHERE guest_sessions.token = $1
-          AND guest_sessions.expires_at > clock_timestamp()
-          AND device_sessions.status = 'active'
-        ",
-    )
-    .bind(session_token)
-    .fetch_optional(database)
-    .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
 pub(super) async fn load_lobby(
@@ -360,7 +343,7 @@ pub(super) async fn load_lobby(
     .bind(current_participant_id)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
     let Some((room_code, room_status)) = room else {
         return Ok(None);
     };
@@ -376,7 +359,7 @@ pub(super) async fn load_lobby(
     .bind(current_participant_id)
     .fetch_all(database)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     Ok(Some(StoredLobby {
         room_code,
@@ -393,16 +376,16 @@ pub(super) async fn persist_room_creation(
     guest_session_id: Uuid,
     display_name: &str,
     password_hash: &str,
+    session_token: &str,
 ) -> Result<StoredRoomCreation, ApiError> {
     let guest_identity_id = Uuid::new_v4();
     let device_session_id = Uuid::new_v4();
-    let session_token = random_hex_token()?;
 
     sqlx::query("INSERT INTO guest_identities (id) VALUES ($1)")
         .bind(guest_identity_id)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| ApiError::internal())?;
+        .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     insert_room(transaction, room_id, participant_id, password_hash).await?;
 
@@ -418,20 +401,24 @@ pub(super) async fn persist_room_creation(
     .bind(display_name)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     sqlx::query(
         r"
-        INSERT INTO guest_sessions (id, guest_identity_id, token)
-        VALUES ($1, $2, $3)
+        INSERT INTO guest_sessions (id, guest_identity_id, token_digest)
+        VALUES (
+            $1,
+            $2,
+            'sha256:' || encode(sha256(convert_to($3, 'UTF8')), 'hex')
+        )
         ",
     )
     .bind(guest_session_id)
     .bind(guest_identity_id)
-    .bind(&session_token)
+    .bind(session_token)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     sqlx::query(
         r"
@@ -444,13 +431,12 @@ pub(super) async fn persist_room_creation(
     .bind(participant_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
     Ok(StoredRoomCreation {
         participant_id,
         display_name: display_name.to_owned(),
         recovery_password_hash: password_hash.to_owned(),
-        session_token,
     })
 }
 
@@ -476,7 +462,7 @@ async fn insert_room(
         .bind(password_hash)
         .fetch_optional(&mut **transaction)
         .await
-        .map_err(|_| ApiError::internal())?;
+        .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
         if let Some(code) = inserted {
             return Ok(code);
@@ -493,8 +479,7 @@ pub(super) async fn load_room_creation(
         SELECT
             participants.id AS participant_id,
             participants.display_name,
-            rooms.recovery_password_hash,
-            guest_sessions.token AS session_token
+            rooms.recovery_password_hash
         FROM room_creation_requests
         JOIN rooms ON rooms.id = room_creation_requests.room_id
         JOIN participants ON participants.id = room_creation_requests.participant_id
@@ -505,5 +490,63 @@ pub(super) async fn load_room_creation(
     .bind(idempotency_key)
     .fetch_optional(database)
     .await
-    .map_err(|_| ApiError::internal())
+    .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
+}
+
+pub(super) async fn ensure_room_creation_session_token(
+    database: &PgPool,
+    idempotency_key: &str,
+    session_token: &str,
+) -> Result<i64, ApiError> {
+    sqlx::query_scalar(
+        r"
+        UPDATE guest_sessions
+        SET token_digest = 'sha256:' || encode(sha256(convert_to($2, 'UTF8')), 'hex')
+        FROM room_creation_requests, device_sessions
+        WHERE room_creation_requests.idempotency_key = $1
+          AND guest_sessions.id = room_creation_requests.guest_session_id
+          AND device_sessions.guest_session_id = guest_sessions.id
+          AND device_sessions.status = 'active'
+          AND guest_sessions.expires_at > clock_timestamp()
+        RETURNING GREATEST(
+            0,
+            FLOOR(EXTRACT(EPOCH FROM (guest_sessions.expires_at - clock_timestamp())))::BIGINT
+        )
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(session_token)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("ensure room creation session grant", error))?
+    .ok_or_else(ApiError::session_invalid)
+}
+
+pub(super) async fn ensure_room_join_session_token(
+    database: &PgPool,
+    idempotency_key: &str,
+    session_token: &str,
+) -> Result<i64, ApiError> {
+    sqlx::query_scalar(
+        r"
+        UPDATE guest_sessions
+        SET token_digest = 'sha256:' || encode(sha256(convert_to($2, 'UTF8')), 'hex')
+        FROM room_join_requests, device_sessions
+        WHERE room_join_requests.idempotency_key = $1
+          AND guest_sessions.id = room_join_requests.guest_session_id
+          AND device_sessions.guest_session_id = guest_sessions.id
+          AND device_sessions.status = 'active'
+          AND guest_sessions.expires_at > clock_timestamp()
+        RETURNING GREATEST(
+            0,
+            FLOOR(EXTRACT(EPOCH FROM (guest_sessions.expires_at - clock_timestamp())))::BIGINT
+        )
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(session_token)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("ensure room join session grant", error))?
+    .ok_or_else(ApiError::session_invalid)
 }

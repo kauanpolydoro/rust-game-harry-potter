@@ -2,11 +2,14 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, Response, StatusCode, header},
 };
-use game_content::{ContentManifest, import_base_bundle};
+use game_content::{
+    ContentManifest, ProvenanceSource, RuleId, SourceKind, import_base_bundle,
+    import_base_bundle_with_runtime_rules,
+};
 use harry_potter_server::{AppState, build_router, initialize};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use std::{fmt::Write as _, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, fmt::Write as _, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::Barrier,
@@ -15,6 +18,7 @@ use tower::ServiceExt;
 
 struct ReadyRoom {
     app: axum::Router,
+    state: AppState,
     database: PgPool,
     room_code: String,
     host_cookie: String,
@@ -23,59 +27,7 @@ struct ReadyRoom {
 }
 
 fn playable_manifest() -> ContentManifest {
-    let entries = (0..171)
-        .map(|index| {
-            if index == 0 {
-                return json!({
-                    "id": "adventure:001",
-                    "kind": "adventure",
-                    "set": "base",
-                    "copies": 2,
-                    "introduced_in": 1,
-                    "names": { "en": "Game 1" },
-                    "provenance": {
-                        "id": ["fixture-source"],
-                        "kind": ["fixture-source"],
-                        "set": ["fixture-source"],
-                        "copies": ["fixture-source"],
-                        "introduced_in": ["fixture-source"],
-                        "names.en": ["fixture-source"]
-                    },
-                    "required_functional_fields": ["setup", "precedence"],
-                    "functional": {
-                        "setup": {
-                            "confidence": "adaptation",
-                            "sources": ["fixture-source"],
-                            "rule": "rule:setup"
-                        },
-                        "precedence": {
-                            "confidence": "adaptation",
-                            "sources": ["fixture-source"],
-                            "rule": "rule:precedence"
-                        }
-                    }
-                });
-            }
-
-            json!({
-                "id": format!("fixture:entry-{index:03}"),
-                "kind": "turn_order",
-                "set": "base",
-                "copies": if index < 81 { 2 } else { 1 },
-                "introduced_in": 1,
-                "names": { "en": format!("Fixture {index}") },
-                "provenance": {
-                    "id": ["fixture-source"],
-                    "kind": ["fixture-source"],
-                    "set": ["fixture-source"],
-                    "copies": ["fixture-source"],
-                    "introduced_in": ["fixture-source"],
-                    "names.en": ["fixture-source"]
-                },
-                "required_functional_fields": []
-            })
-        })
-        .collect::<Vec<_>>();
+    let entries = (0..171).map(playable_fixture_entry).collect::<Vec<_>>();
     let bundle = serde_json::to_vec(&json!({
         "schema_version": 1,
         "content_version": "fixture-v1",
@@ -86,15 +38,111 @@ fn playable_manifest() -> ContentManifest {
             "uri": "https://example.invalid/fixture",
             "kind": "adaptation"
         }],
-        "rules": [
-            { "id": "rule:setup", "effect": { "type": "no_op" } },
-            { "id": "rule:precedence", "effect": { "type": "no_op" } }
-        ],
+        "rules": [{
+            "id": "rule:functional",
+            "effect": {
+                "type": "apply",
+                "target": {
+                    "zone": "hero_hand",
+                    "cardinality": { "min": 1, "max": 1 }
+                },
+                "operation": { "type": "discard" }
+            }
+        }],
         "entries": entries
     }))
     .expect("the playable fixture must serialize");
 
-    import_base_bundle(&bundle).expect("the playable fixture must import")
+    import_base_bundle_with_runtime_rules(
+        &bundle,
+        &[ProvenanceSource {
+            id: "fixture-source".to_owned(),
+            uri: "https://example.invalid/fixture".to_owned(),
+            kind: SourceKind::Adaptation,
+        }],
+        &BTreeSet::from([
+            RuleId::parse("rule:functional").expect("fixture rule ID should be valid")
+        ]),
+    )
+    .expect("the playable fixture must import")
+}
+
+fn playable_fixture_entry(index: usize) -> Value {
+    let (id, kind, required_fields): (String, &str, &[&str]) = match index {
+        0 => (
+            "adventure:001".to_owned(),
+            "adventure",
+            &["precedence", "setup"],
+        ),
+        1 => ("fixture:catalog".to_owned(), "catalog", &[]),
+        2 => ("fixture:dark-arts".to_owned(), "dark_arts", &["effect"]),
+        3 => ("fixture:hero".to_owned(), "hero", &["ability"]),
+        4 => (
+            "fixture:hogwarts-card".to_owned(),
+            "hogwarts_card",
+            &["cost", "effect"],
+        ),
+        5 => (
+            "fixture:horcrux".to_owned(),
+            "horcrux",
+            &["effect", "precedence", "reward"],
+        ),
+        6 => (
+            "fixture:location".to_owned(),
+            "location",
+            &["control_limit", "dark_arts_count", "effect"],
+        ),
+        7 => (
+            "fixture:proficiency".to_owned(),
+            "proficiency",
+            &["ability"],
+        ),
+        8 => ("fixture:ruleset".to_owned(), "ruleset", &["precedence"]),
+        9 => (
+            "fixture:starter-card".to_owned(),
+            "starter_card",
+            &["effect"],
+        ),
+        10 => ("fixture:turn-order".to_owned(), "turn_order", &[]),
+        11 => (
+            "fixture:villain".to_owned(),
+            "villain",
+            &["effect", "health", "reward"],
+        ),
+        _ => (format!("fixture:entry-{index:03}"), "turn_order", &[]),
+    };
+    let functional = required_fields
+        .iter()
+        .map(|field| {
+            (
+                (*field).to_owned(),
+                json!({
+                    "confidence": "adaptation",
+                    "sources": ["fixture-source"],
+                    "rule": "rule:functional"
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+
+    json!({
+        "id": id,
+        "kind": kind,
+        "set": "base",
+        "copies": if index < 81 { 2 } else { 1 },
+        "introduced_in": 1,
+        "names": { "en": if index == 0 { "Game 1".to_owned() } else { format!("Fixture {index}") } },
+        "provenance": {
+            "id": ["fixture-source"],
+            "kind": ["fixture-source"],
+            "set": ["fixture-source"],
+            "copies": ["fixture-source"],
+            "introduced_in": ["fixture-source"],
+            "names.en": ["fixture-source"]
+        },
+        "required_functional_fields": required_fields,
+        "functional": functional
+    })
 }
 
 async fn database() -> PgPool {
@@ -106,24 +154,72 @@ async fn database() -> PgPool {
         .expect("the integration PostgreSQL database must be available")
 }
 
-async fn test_app(manifest: ContentManifest) -> (axum::Router, PgPool) {
+async fn test_app(manifest: ContentManifest) -> (axum::Router, PgPool, AppState) {
     let database = database().await;
     let state = AppState::with_content_manifests(database.clone(), vec![manifest]);
     initialize(&state)
         .await
         .expect("database initialization must succeed");
-    (build_router(state), database)
+    (build_router(state.clone()), database, state)
 }
 
-fn unique_key(prefix: &str) -> String {
-    format!(
-        "{prefix}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the system clock must be after the Unix epoch")
-            .as_nanos()
+fn unique_key(_prefix: &str) -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+fn assert_database_error_code(error: &sqlx::Error, expected: &str) {
+    let actual = error
+        .as_database_error()
+        .and_then(sqlx::error::DatabaseError::code)
+        .map(std::borrow::Cow::into_owned);
+    assert_eq!(actual.as_deref(), Some(expected));
+}
+
+async fn insert_test_event(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    game_id: uuid::Uuid,
+    room_id: uuid::Uuid,
+    command_id: uuid::Uuid,
+    actor_id: uuid::Uuid,
+) {
+    sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES (
+            $1,
+            $2,
+            1,
+            'dark_arts_completed',
+            $3,
+            $4,
+            2,
+            jsonb_build_object(
+                'event_version', 1,
+                'type', 'dark_arts_completed',
+                'sequence', 1,
+                'state_version', 2,
+                'turn', 1,
+                'actor_position', 1
+            )
+        )
+        ",
     )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(command_id)
+    .bind(actor_id)
+    .execute(&mut **transaction)
+    .await
+    .expect("the official event must be inserted for the integrity test");
 }
 
 fn json_request(
@@ -292,7 +388,7 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
 
 async fn ready_room() -> ReadyRoom {
     let manifest = playable_manifest();
-    let (app, database) = test_app(manifest.clone()).await;
+    let (app, database, state) = test_app(manifest.clone()).await;
     let (room_code, host_cookie) = create_room(&app).await;
     assert_eq!(
         select_hero(&app, &host_cookie, "harry").await.status(),
@@ -310,6 +406,7 @@ async fn ready_room() -> ReadyRoom {
 
     ReadyRoom {
         app,
+        state,
         database,
         room_code,
         host_cookie,
@@ -487,7 +584,7 @@ async fn concurrent_identical_start_retries_create_exactly_one_game() {
 #[tokio::test]
 async fn start_validates_host_count_heroes_readiness_and_authorization() {
     let manifest = playable_manifest();
-    let (app, _) = test_app(manifest.clone()).await;
+    let (app, _, _) = test_app(manifest.clone()).await;
 
     let (_, lone_host) = create_room(&app).await;
     assert_eq!(
@@ -577,7 +674,7 @@ async fn candidate_content_with_functional_gaps_cannot_start_a_game() {
         "../../../content/bundles/base-en-candidate-2026-09-02.json"
     ))
     .expect("the candidate bundle must import");
-    let (candidate_app, _) = test_app(candidate.clone()).await;
+    let (candidate_app, _, _) = test_app(candidate.clone()).await;
     let (candidate_code, candidate_host) = create_room(&candidate_app).await;
     assert_eq!(
         select_hero(&candidate_app, &candidate_host, "harry")
@@ -800,6 +897,396 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
         recovered["projection"]["snapshot"],
         accepted["projection"]["snapshot"]
     );
+}
+
+#[tokio::test]
+async fn committed_events_and_receipts_are_append_only() {
+    let room = ready_room().await;
+    start_ready_game(&room, "append-only-start").await;
+    let response = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the command must receive a response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    for statement in [
+        r#"
+        UPDATE game_events
+        SET payload = payload || '{"tampered": true}'::jsonb
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        "#,
+        r"
+        DELETE FROM game_events
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ",
+        r"
+        UPDATE game_command_receipts
+        SET command_type = command_type || '_tampered'
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ",
+        r"
+        DELETE FROM game_command_receipts
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ",
+    ] {
+        let error = sqlx::query(statement)
+            .bind(&room.room_code)
+            .execute(&room.database)
+            .await
+            .expect_err("official history must reject direct mutation");
+        assert_database_error_code(&error, "55000");
+    }
+
+    let game_delete = sqlx::query(
+        r"
+        DELETE FROM games
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&room.database)
+    .await
+    .expect_err("a game with official history must not be deleted through a cascade");
+    assert_database_error_code(&game_delete, "23503");
+
+    let artifact_counts = sqlx::query_as::<_, (i64, i64)>(
+        r"
+        SELECT
+            (SELECT COUNT(*) FROM game_events WHERE game_id = games.id),
+            (SELECT COUNT(*) FROM game_command_receipts WHERE game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the protected history must remain queryable");
+    assert_eq!(artifact_counts, (1, 1));
+}
+
+#[tokio::test]
+async fn an_event_actor_must_belong_to_the_games_room() {
+    let room = ready_room().await;
+    let other_room = ready_room().await;
+    start_ready_game(&room, "event-actor-room-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the actor integrity transaction must start");
+    let (game_id, room_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid)>(
+        r"
+        UPDATE games
+        SET sequence = 1,
+            state_version = 2
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        RETURNING id, room_id
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test game cursor must advance inside the transaction");
+    let other_actor = sqlx::query_scalar::<_, uuid::Uuid>(
+        r"
+        SELECT participants.id
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE rooms.code = $1
+          AND participants.role = 'host'
+        ",
+    )
+    .bind(&other_room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the unrelated actor must exist");
+
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, 1, 'dark_arts_completed', $3, $4, 2, '{}'::jsonb)
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(other_actor)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("an event actor from another room must be rejected");
+    assert_database_error_code(&error, "23503");
+    transaction
+        .rollback()
+        .await
+        .expect("the actor integrity transaction must roll back");
+}
+
+#[tokio::test]
+async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
+    let room = ready_room().await;
+    start_ready_game(&room, "event-envelope-start").await;
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            SELECT id, room_id, started_by_participant_id
+            FROM games
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the test game must exist");
+
+    for (row_state_version, payload_state_version, expected_message) in [
+        (3_i64, 3_i64, "state version must match"),
+        (2_i64, 3_i64, "payload metadata must match"),
+    ] {
+        let mut transaction = room
+            .database
+            .begin()
+            .await
+            .expect("the event coherence transaction must start");
+        sqlx::query("UPDATE games SET sequence = 1, state_version = 2 WHERE id = $1")
+            .bind(game_id)
+            .execute(&mut *transaction)
+            .await
+            .expect("the test snapshot must advance inside the transaction");
+        let error = sqlx::query(
+            r"
+            INSERT INTO game_events (
+                game_id,
+                room_id,
+                sequence,
+                event_type,
+                command_id,
+                actor_participant_id,
+                state_version,
+                payload
+            )
+            VALUES (
+                $1,
+                $2,
+                1,
+                'dark_arts_completed',
+                $3,
+                $4,
+                $5,
+                jsonb_build_object(
+                    'event_version', 1,
+                    'type', 'dark_arts_completed',
+                    'sequence', 1,
+                    'state_version', $6,
+                    'turn', 1,
+                    'actor_position', 1
+                )
+            )
+            ",
+        )
+        .bind(game_id)
+        .bind(room_id)
+        .bind(uuid::Uuid::new_v4())
+        .bind(actor_id)
+        .bind(row_state_version)
+        .bind(payload_state_version)
+        .execute(&mut *transaction)
+        .await
+        .expect_err("incoherent event metadata must be rejected");
+        assert_database_error_code(&error, "23514");
+        assert!(error.to_string().contains(expected_message));
+        transaction
+            .rollback()
+            .await
+            .expect("the rejected event transaction must roll back");
+    }
+}
+
+#[tokio::test]
+async fn a_receipt_must_identify_the_actor_and_version_of_its_event() {
+    let room = ready_room().await;
+    let other_room = ready_room().await;
+    start_ready_game(&room, "receipt-event-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the receipt integrity transaction must start");
+    let (game_id, actor_id, room_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            UPDATE games
+            SET sequence = 1,
+                state_version = 2
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            RETURNING id, started_by_participant_id, room_id
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test game cursor must advance inside the transaction");
+    let other_actor = sqlx::query_scalar::<_, uuid::Uuid>(
+        r"
+        SELECT participants.id
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE rooms.code = $1
+          AND participants.role = 'host'
+        ",
+    )
+    .bind(&other_room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the unrelated actor must exist");
+    let command_id = uuid::Uuid::new_v4();
+    insert_test_event(&mut transaction, game_id, room_id, command_id, actor_id).await;
+
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_command_receipts (
+            game_id,
+            room_id,
+            command_id,
+            actor_participant_id,
+            command_type,
+            expected_state_version,
+            payload_digest,
+            accepted_state_version,
+            accepted_sequence,
+            expires_at
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            'complete_dark_arts',
+            1,
+            'blake3:0000000000000000000000000000000000000000000000000000000000000000',
+            2,
+            1,
+            clock_timestamp() + INTERVAL '7 days'
+        )
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(command_id)
+    .bind(other_actor)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("a receipt must not claim a different event actor");
+    assert_database_error_code(&error, "23503");
+    transaction
+        .rollback()
+        .await
+        .expect("the receipt integrity transaction must roll back");
+}
+
+#[tokio::test]
+async fn unsupported_persisted_versions_are_rejected_at_the_database_boundary() {
+    let room = ready_room().await;
+    start_ready_game(&room, "persisted-version-start").await;
+
+    let mut snapshot_transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the Snapshot version transaction must start");
+    let error = sqlx::query(
+        r"
+        UPDATE games
+        SET snapshot_version = 999
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&mut *snapshot_transaction)
+    .await
+    .expect_err("an unsupported persisted Snapshot version must be rejected");
+    assert_database_error_code(&error, "23514");
+    snapshot_transaction
+        .rollback()
+        .await
+        .expect("the Snapshot version transaction must roll back");
+
+    let mut event_transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the event version transaction must start");
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            UPDATE games
+            SET sequence = 1,
+                state_version = 2
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            RETURNING id, room_id, started_by_participant_id
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *event_transaction)
+    .await
+    .expect("the test game cursor must advance inside the transaction");
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_version,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, 1, 999, 'dark_arts_completed', $3, $4, 2, '{}'::jsonb)
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(actor_id)
+    .execute(&mut *event_transaction)
+    .await
+    .expect_err("an unsupported persisted event version must be rejected");
+    assert_database_error_code(&error, "23514");
+    event_transaction
+        .rollback()
+        .await
+        .expect("the event version transaction must roll back");
 }
 
 #[tokio::test]
@@ -1220,6 +1707,25 @@ async fn an_expired_game_rejects_the_command_at_the_database_clock_boundary() {
     .await
     .expect("the test game must be expired");
 
+    let projection_response = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header(header::COOKIE, &room.host_cookie)
+                .body(Body::empty())
+                .expect("the session request must be valid"),
+        )
+        .await
+        .expect("the expired game projection must receive a response");
+    assert_eq!(projection_response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(projection_response).await["legal_actions"],
+        json!([]),
+        "an expired game must not advertise a command that the server rejects"
+    );
+
     let response = room
         .app
         .clone()
@@ -1252,24 +1758,7 @@ struct RawWebSocket {
 impl RawWebSocket {
     async fn read_text(&mut self) -> String {
         loop {
-            let header = self.read_exact(2).await;
-            let opcode = header[0] & 0x0f;
-            assert_eq!(header[1] & 0x80, 0, "server frames must not be masked");
-            let mut length = u64::from(header[1] & 0x7f);
-            if length == 126 {
-                let extended = self.read_exact(2).await;
-                length = u64::from(u16::from_be_bytes([extended[0], extended[1]]));
-            } else if length == 127 {
-                let extended = self.read_exact(8).await;
-                length = u64::from_be_bytes(
-                    extended
-                        .try_into()
-                        .expect("a 64-bit WebSocket length must contain eight bytes"),
-                );
-            }
-            let payload = self
-                .read_exact(usize::try_from(length).expect("test frames must fit in memory"))
-                .await;
+            let (opcode, payload) = self.read_frame().await;
             match opcode {
                 1 => return String::from_utf8(payload).expect("text frames must contain UTF-8"),
                 8 => panic!("the WebSocket closed before a text message arrived"),
@@ -1277,6 +1766,45 @@ impl RawWebSocket {
                 other => panic!("unexpected WebSocket opcode {other}"),
             }
         }
+    }
+
+    async fn read_close_code(&mut self) -> u16 {
+        loop {
+            let (opcode, payload) = self.read_frame().await;
+            match opcode {
+                8 => {
+                    assert!(
+                        payload.len() >= 2,
+                        "the close frame must contain a status code"
+                    );
+                    return u16::from_be_bytes([payload[0], payload[1]]);
+                }
+                9 | 10 => {}
+                other => panic!("expected a close frame, received opcode {other}"),
+            }
+        }
+    }
+
+    async fn read_frame(&mut self) -> (u8, Vec<u8>) {
+        let header = self.read_exact(2).await;
+        let opcode = header[0] & 0x0f;
+        assert_eq!(header[1] & 0x80, 0, "server frames must not be masked");
+        let mut length = u64::from(header[1] & 0x7f);
+        if length == 126 {
+            let extended = self.read_exact(2).await;
+            length = u64::from(u16::from_be_bytes([extended[0], extended[1]]));
+        } else if length == 127 {
+            let extended = self.read_exact(8).await;
+            length = u64::from_be_bytes(
+                extended
+                    .try_into()
+                    .expect("a 64-bit WebSocket length must contain eight bytes"),
+            );
+        }
+        let payload = self
+            .read_exact(usize::try_from(length).expect("test frames must fit in memory"))
+            .await;
+        (opcode, payload)
     }
 
     async fn read_exact(&mut self, length: usize) -> Vec<u8> {
@@ -1421,6 +1949,86 @@ async fn websocket_handshake_requires_the_session_exact_origin_and_current_proto
 }
 
 #[tokio::test]
+async fn a_websocket_opened_during_shutdown_closes_without_waiting_for_another_signal() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-shutdown").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    room.state.begin_shutdown();
+
+    let (status, _, mut socket) = websocket_handshake(
+        address,
+        "/api/games/current/events?snapshot_version=1",
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+
+    assert_eq!(status, 101);
+    let close_code =
+        tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_close_code())
+            .await
+            .expect("shutdown must close the WebSocket promptly");
+    assert_eq!(close_code, 1012);
+    server.abort();
+}
+
+#[tokio::test]
+async fn shutdown_closes_an_active_websocket_with_a_restart_code() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-active-shutdown").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let (status, _, mut socket) = websocket_handshake(
+        address,
+        "/api/games/current/events?snapshot_version=1",
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_text())
+        .await
+        .expect("the initial snapshot must arrive");
+
+    room.state.begin_shutdown();
+
+    let close_code =
+        tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_close_code())
+            .await
+            .expect("shutdown must close an active WebSocket promptly");
+    assert_eq!(close_code, 1012);
+    server.abort();
+}
+
+#[tokio::test]
+async fn an_idle_websocket_receives_the_configured_heartbeat() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-heartbeat").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let (status, _, mut socket) = websocket_handshake(
+        address,
+        "/api/games/current/events?snapshot_version=1",
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_text())
+        .await
+        .expect("the initial snapshot must arrive");
+
+    let (opcode, payload) =
+        tokio::time::timeout(std::time::Duration::from_secs(22), socket.read_frame())
+            .await
+            .expect("an idle connection must receive a timely heartbeat");
+    assert_eq!(opcode, 9);
+    assert!(payload.is_empty());
+    server.abort();
+}
+
+#[tokio::test]
 async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participant() {
     let room = ready_room().await;
     start_ready_game(&room, "realtime-snapshot").await;
@@ -1477,6 +2085,52 @@ async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participan
 }
 
 #[tokio::test]
+async fn a_revoked_session_closes_its_existing_websocket_before_delivering_an_event() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-revocation").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let (status, _, mut guest_socket) = websocket_handshake(
+        address,
+        "/api/games/current/events",
+        Some(&room.guest_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let _ = guest_socket.read_text().await;
+
+    sqlx::query(
+        r"
+        UPDATE device_sessions
+        SET status = 'revoked'
+        FROM participants, rooms
+        WHERE device_sessions.participant_id = participants.id
+          AND participants.room_id = rooms.id
+          AND rooms.code = $1
+          AND participants.role = 'guest'
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&room.database)
+    .await
+    .expect("the guest session must be revocable");
+
+    let command = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the host command must receive a response");
+    assert_eq!(command.status(), StatusCode::OK);
+    let close_code = tokio::time::timeout(Duration::from_secs(2), guest_socket.read_close_code())
+        .await
+        .expect("the revoked socket must be closed promptly");
+    assert_eq!(close_code, 1008);
+    server.abort();
+}
+
+#[tokio::test]
 async fn an_incompatible_snapshot_version_or_cursor_gap_receives_a_full_snapshot() {
     let room = ready_room().await;
     start_ready_game(&room, "realtime-resync").await;
@@ -1516,22 +2170,25 @@ async fn database_rejects_a_gap_in_the_official_event_sequence() {
         .begin()
         .await
         .expect("the gap test transaction must start");
-    let (game_id, participant_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid)>(
-        r"
+    let (game_id, room_id, participant_id) =
+        sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+            r"
         UPDATE games
-        SET sequence = 2
+        SET sequence = 2,
+            state_version = 3
         WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
-        RETURNING id, started_by_participant_id
+        RETURNING id, room_id, started_by_participant_id
         ",
-    )
-    .bind(&room.room_code)
-    .fetch_one(&mut *transaction)
-    .await
-    .expect("the test Snapshot cursor must advance inside the transaction");
+        )
+        .bind(&room.room_code)
+        .fetch_one(&mut *transaction)
+        .await
+        .expect("the test Snapshot cursor must advance inside the transaction");
     let error = sqlx::query(
         r"
         INSERT INTO game_events (
             game_id,
+            room_id,
             sequence,
             event_type,
             command_id,
@@ -1539,10 +2196,11 @@ async fn database_rejects_a_gap_in_the_official_event_sequence() {
             state_version,
             payload
         )
-        VALUES ($1, 2, 'dark_arts_completed', $2, $3, 2, '{}'::jsonb)
+        VALUES ($1, $2, 2, 'dark_arts_completed', $3, $4, 2, '{}'::jsonb)
         ",
     )
     .bind(game_id)
+    .bind(room_id)
     .bind(uuid::Uuid::new_v4())
     .bind(participant_id)
     .execute(&mut *transaction)
