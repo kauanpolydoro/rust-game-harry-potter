@@ -43,29 +43,30 @@ const _hoisted_14 = {
   "aria-labelledby": "room-setup-heading"
 }
 const _hoisted_15 = { class: "room-stage" }
-const _hoisted_16 = { class: "field" }
-const _hoisted_17 = ["aria-invalid"]
-const _hoisted_18 = {
+const _hoisted_16 = ["aria-busy"]
+const _hoisted_17 = { class: "field" }
+const _hoisted_18 = ["aria-invalid", "readonly"]
+const _hoisted_19 = {
   id: "display-name-error",
   class: "field-error",
   role: "alert"
 }
-const _hoisted_19 = { class: "field" }
-const _hoisted_20 = { class: "password-control" }
-const _hoisted_21 = ["aria-invalid", "type"]
-const _hoisted_22 = {
+const _hoisted_20 = { class: "field" }
+const _hoisted_21 = { class: "password-control" }
+const _hoisted_22 = ["aria-invalid", "type", "readonly"]
+const _hoisted_23 = {
   id: "password-error",
   class: "field-error",
   role: "alert"
 }
-const _hoisted_23 = {
+const _hoisted_24 = {
   key: 0,
   class: "form-error",
   role: "alert"
 }
-const _hoisted_24 = { class: "action-dock" }
-const _hoisted_25 = ["aria-disabled"]
-const _hoisted_26 = ["disabled"]
+const _hoisted_25 = { class: "action-dock" }
+const _hoisted_26 = ["aria-disabled"]
+const _hoisted_27 = ["disabled"]
 
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
@@ -136,7 +137,9 @@ async function createRoom(): Promise<void> {
   })
 
   await nextTick()
-  if (roomCreation.errorCode === 'INVALID_DISPLAY_NAME') {
+  if (roomCreation.roomCreation) {
+    document.getElementById('room-success-heading')?.focus()
+  } else if (roomCreation.errorCode === 'INVALID_DISPLAY_NAME') {
     document.getElementById('display-name')?.focus()
   } else if (roomCreation.errorCode === 'WEAK_RECOVERY_PASSWORD') {
     document.getElementById('recovery-password')?.focus()
@@ -166,6 +169,7 @@ watch([displayName, recoveryPassword], () => roomCreation.resetPendingRequest())
 onMounted(() => health.check())
 
 void ((health.availability === 'checking') satisfies boolean | 'true' | 'false')
+void ((roomCreation.status === 'submitting') satisfies boolean | 'true' | 'false')
 void ((Boolean(displayNameError)) satisfies boolean | 'true' | 'false')
 void ((Boolean(passwordError)) satisfies boolean | 'true' | 'false')
 void ((health.availability === 'checking') satisfies boolean | 'true' | 'false')
@@ -228,7 +232,10 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                 }),
                 _createTextVNode(" Servidor pronto ")
               ], -1 /* CACHED */)),
-              _cache[12] || (_cache[12] = _createElementVNode("h2", { id: "room-success-heading" }, "Sala pronta", -1 /* CACHED */)),
+              _cache[12] || (_cache[12] = _createElementVNode("h2", {
+                id: "room-success-heading",
+                tabindex: "-1"
+              }, "Sala pronta", -1 /* CACHED */)),
               _cache[13] || (_cache[13] = _createElementVNode("p", { class: "stage-description" }, " Este código localiza a sala para o grupo, mas não recupera nenhuma participação. ", -1 /* CACHED */)),
               _createElementVNode("div", _hoisted_9, [
                 _cache[8] || (_cache[8] = _createElementVNode("span", { id: "room-code-label" }, "Código da sala", -1 /* CACHED */)),
@@ -276,9 +283,10 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
               _createElementVNode("form", {
                 id: "create-room",
                 class: "room-form",
+                "aria-busy": _unref(roomCreation).status === 'submitting',
                 onSubmit: _cache[3] || (_cache[3] = _withModifiers(($event: any) => (createRoom()), ["prevent"]))
               }, [
-                _createElementVNode("div", _hoisted_16, [
+                _createElementVNode("div", _hoisted_17, [
                   _cache[15] || (_cache[15] = _createElementVNode("label", { for: "display-name" }, "Seu nome", -1 /* CACHED */)),
                   _withDirectives(_createElementVNode("input", {
                     "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event: any) => ((displayName).value = $event)),
@@ -288,16 +296,17 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                     id: "display-name",
                     maxlength: "40",
                     name: "display-name",
+                    readonly: _unref(roomCreation).status === 'submitting',
                     required: "",
                     type: "text"
-                  }, null, 8 /* PROPS */, _hoisted_17), [
+                  }, null, 8 /* PROPS */, _hoisted_18), [
                     [_vModelText, displayName.value]
                   ]),
-                  _createElementVNode("p", _hoisted_18, _toDisplayString(displayNameError.value), 1 /* TEXT */)
+                  _createElementVNode("p", _hoisted_19, _toDisplayString(displayNameError.value), 1 /* TEXT */)
                 ]),
-                _createElementVNode("div", _hoisted_19, [
+                _createElementVNode("div", _hoisted_20, [
                   _cache[16] || (_cache[16] = _createElementVNode("label", { for: "recovery-password" }, "Senha de recuperação", -1 /* CACHED */)),
-                  _createElementVNode("div", _hoisted_20, [
+                  _createElementVNode("div", _hoisted_21, [
                     _withDirectives(_createElementVNode("input", {
                       "onUpdate:modelValue": _cache[1] || (_cache[1] = ($event: any) => ((recoveryPassword).value = $event)),
                       "aria-invalid": Boolean(passwordError.value),
@@ -308,8 +317,9 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                       maxlength: "128",
                       minlength: "12",
                       name: "recovery-password",
+                      readonly: _unref(roomCreation).status === 'submitting',
                       required: ""
-                    }, null, 8 /* PROPS */, _hoisted_21), [
+                    }, null, 8 /* PROPS */, _hoisted_22), [
                       [_vModelDynamic, recoveryPassword.value]
                     ]),
                     _createElementVNode("button", {
@@ -324,14 +334,14 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
                   id: "password-guidance",
                   class: "field-guidance"
                 }, " Use ao menos 12 caracteres e evite frases previsíveis. A senha não será exibida de novo. ", -1 /* CACHED */)),
-                _createElementVNode("p", _hoisted_22, _toDisplayString(passwordError.value), 1 /* TEXT */),
+                _createElementVNode("p", _hoisted_23, _toDisplayString(passwordError.value), 1 /* TEXT */),
                 (formError.value)
-                  ? (_openBlock(), _createElementBlock("p", _hoisted_23, _toDisplayString(formError.value), 1 /* TEXT */))
+                  ? (_openBlock(), _createElementBlock("p", _hoisted_24, _toDisplayString(formError.value), 1 /* TEXT */))
                   : _createCommentVNode("v-if", true)
-              ], 32 /* NEED_HYDRATION */)
+              ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_16)
             ])
           ])),
-    _createElementVNode("footer", _hoisted_24, [
+    _createElementVNode("footer", _hoisted_25, [
       (_unref(health).availability !== 'ready')
         ? (_openBlock(), _createElementBlock("button", {
             key: 0,
@@ -339,7 +349,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
             type: "button",
             "aria-disabled": _unref(health).availability === 'checking',
             onClick: _cache[4] || (_cache[4] = ($event: any) => (retry()))
-          }, _toDisplayString(_unref(health).availability === 'checking' ? 'Verificando servidor' : 'Tentar novamente'), 9 /* TEXT, PROPS */, _hoisted_25))
+          }, _toDisplayString(_unref(health).availability === 'checking' ? 'Verificando servidor' : 'Tentar novamente'), 9 /* TEXT, PROPS */, _hoisted_26))
         : (_unref(roomCreation).roomCreation)
           ? (_openBlock(), _createElementBlock("button", {
               key: 1,
@@ -357,7 +367,7 @@ return (_ctx: __VueTemplateContext,_cache: any) => {
             ? 'Criando sala'
             : _unref(roomCreation).status === 'failed'
               ? 'Tentar criar novamente'
-              : 'Criar sala privada'), 9 /* TEXT, PROPS */, _hoisted_26))
+              : 'Criar sala privada'), 9 /* TEXT, PROPS */, _hoisted_27))
     ])
   ]))
 }

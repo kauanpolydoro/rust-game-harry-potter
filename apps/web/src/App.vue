@@ -63,7 +63,9 @@ async function createRoom(): Promise<void> {
   })
 
   await nextTick()
-  if (roomCreation.errorCode === 'INVALID_DISPLAY_NAME') {
+  if (roomCreation.roomCreation) {
+    document.getElementById('room-success-heading')?.focus()
+  } else if (roomCreation.errorCode === 'INVALID_DISPLAY_NAME') {
     document.getElementById('display-name')?.focus()
   } else if (roomCreation.errorCode === 'WEAK_RECOVERY_PASSWORD') {
     document.getElementById('recovery-password')?.focus()
@@ -140,7 +142,7 @@ onMounted(() => health.check())
           <span class="state-signal" aria-hidden="true"></span>
           Servidor pronto
         </p>
-        <h2 id="room-success-heading">Sala pronta</h2>
+        <h2 id="room-success-heading" tabindex="-1">Sala pronta</h2>
         <p class="stage-description">
           Este código localiza a sala para o grupo, mas não recupera nenhuma participação.
         </p>
@@ -184,7 +186,12 @@ onMounted(() => health.check())
           Você será o anfitrião e continuará reconhecido neste navegador, sem criar uma conta.
         </p>
 
-        <form id="create-room" class="room-form" @submit.prevent="createRoom()">
+        <form
+          id="create-room"
+          class="room-form"
+          :aria-busy="roomCreation.status === 'submitting'"
+          @submit.prevent="createRoom()"
+        >
           <div class="field">
             <label for="display-name">Seu nome</label>
             <input
@@ -195,6 +202,7 @@ onMounted(() => health.check())
               id="display-name"
               maxlength="40"
               name="display-name"
+              :readonly="roomCreation.status === 'submitting'"
               required
               type="text"
             />
@@ -214,6 +222,7 @@ onMounted(() => health.check())
                 maxlength="128"
                 minlength="12"
                 name="recovery-password"
+                :readonly="roomCreation.status === 'submitting'"
                 required
               />
               <button

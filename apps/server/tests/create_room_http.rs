@@ -79,7 +79,37 @@ async fn room_creation_rejects_a_long_but_repetitive_recovery_password() {
         .oneshot(room_creation_request(
             "repetitive-password-example",
             "Minerva",
-            "aaaaaaaaaaaa",
+            "minervaminerva",
+        ))
+        .await
+        .expect("the room router must respond");
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
+}
+
+#[tokio::test]
+async fn room_creation_rejects_a_password_based_recovery_phrase() {
+    let response = build_router(test_state().await)
+        .oneshot(room_creation_request(
+            "common-password-phrase-example",
+            "Minerva",
+            "passwordpassword",
+        ))
+        .await
+        .expect("the room router must respond");
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
+}
+
+#[tokio::test]
+async fn room_creation_rejects_a_sequential_recovery_password() {
+    let response = build_router(test_state().await)
+        .oneshot(room_creation_request(
+            "sequential-password-example",
+            "Minerva",
+            "abcdefghijkl",
         ))
         .await
         .expect("the room router must respond");

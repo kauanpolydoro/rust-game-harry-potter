@@ -64,10 +64,10 @@ struct ErrorEnvelope {
 
 #[derive(Serialize)]
 struct ErrorBody {
-    code: &'static str,
-    category: &'static str,
-    retry: &'static str,
-    message_key: &'static str,
+    code: ErrorCode,
+    category: ErrorCategory,
+    retry: RetryPolicy,
+    message_key: MessageKey,
     details: ErrorDetails,
     correlation_id: String,
 }
@@ -77,10 +77,63 @@ struct ErrorDetails {}
 
 struct ApiError {
     status: StatusCode,
-    code: &'static str,
-    category: &'static str,
-    retry: &'static str,
-    message_key: &'static str,
+    code: ErrorCode,
+    category: ErrorCategory,
+    retry: RetryPolicy,
+    message_key: MessageKey,
+}
+
+#[derive(Serialize)]
+enum ErrorCode {
+    #[serde(rename = "IDEMPOTENCY_KEY_REQUIRED")]
+    IdempotencyKeyRequired,
+    #[serde(rename = "INVALID_IDEMPOTENCY_KEY")]
+    InvalidIdempotencyKey,
+    #[serde(rename = "INVALID_DISPLAY_NAME")]
+    InvalidDisplayName,
+    #[serde(rename = "WEAK_RECOVERY_PASSWORD")]
+    WeakRecoveryPassword,
+    #[serde(rename = "IDEMPOTENCY_KEY_REUSED")]
+    IdempotencyKeyReused,
+    #[serde(rename = "ROOM_NOT_FOUND")]
+    RoomNotFound,
+    #[serde(rename = "INTERNAL_ERROR")]
+    Internal,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ErrorCategory {
+    Validation,
+    Conflict,
+    NotFound,
+    Internal,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RetryPolicy {
+    AfterCorrection,
+    WithNewIdempotencyKey,
+    SafeToRetry,
+}
+
+#[derive(Serialize)]
+enum MessageKey {
+    #[serde(rename = "request.idempotency_key.required")]
+    IdempotencyKeyRequired,
+    #[serde(rename = "request.idempotency_key.invalid")]
+    InvalidIdempotencyKey,
+    #[serde(rename = "participant.display_name.invalid")]
+    InvalidDisplayName,
+    #[serde(rename = "room.recovery_password.weak")]
+    WeakRecoveryPassword,
+    #[serde(rename = "request.idempotency_key.reused")]
+    IdempotencyKeyReused,
+    #[serde(rename = "room.not_found")]
+    RoomNotFound,
+    #[serde(rename = "internal.error")]
+    Internal,
 }
 
 #[derive(FromRow)]
@@ -93,12 +146,12 @@ struct StoredRoomCreation {
 }
 
 impl ApiError {
-    fn invalid_request(code: &'static str, message_key: &'static str) -> Self {
+    fn invalid_request(code: ErrorCode, message_key: MessageKey) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             code,
-            category: "validation",
-            retry: "after_correction",
+            category: ErrorCategory::Validation,
+            retry: RetryPolicy::AfterCorrection,
             message_key,
         }
     }
@@ -106,40 +159,40 @@ impl ApiError {
     fn weak_password() -> Self {
         Self {
             status: StatusCode::UNPROCESSABLE_ENTITY,
-            code: "WEAK_RECOVERY_PASSWORD",
-            category: "validation",
-            retry: "after_correction",
-            message_key: "room.recovery_password.weak",
+            code: ErrorCode::WeakRecoveryPassword,
+            category: ErrorCategory::Validation,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::WeakRecoveryPassword,
         }
     }
 
     fn idempotency_conflict() -> Self {
         Self {
             status: StatusCode::CONFLICT,
-            code: "IDEMPOTENCY_KEY_REUSED",
-            category: "conflict",
-            retry: "with_new_idempotency_key",
-            message_key: "request.idempotency_key.reused",
+            code: ErrorCode::IdempotencyKeyReused,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::WithNewIdempotencyKey,
+            message_key: MessageKey::IdempotencyKeyReused,
         }
     }
 
     fn room_not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            code: "ROOM_NOT_FOUND",
-            category: "not_found",
-            retry: "after_correction",
-            message_key: "room.not_found",
+            code: ErrorCode::RoomNotFound,
+            category: ErrorCategory::NotFound,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::RoomNotFound,
         }
     }
 
     fn internal() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "INTERNAL_ERROR",
-            category: "internal",
-            retry: "safe_to_retry",
-            message_key: "internal.error",
+            code: ErrorCode::Internal,
+            category: ErrorCategory::Internal,
+            retry: RetryPolicy::SafeToRetry,
+            message_key: MessageKey::Internal,
         }
     }
 }
@@ -320,8 +373,8 @@ fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
             ApiError::invalid_request(
-                "IDEMPOTENCY_KEY_REQUIRED",
-                "request.idempotency_key.required",
+                ErrorCode::IdempotencyKeyRequired,
+                MessageKey::IdempotencyKeyRequired,
             )
         })?;
 
@@ -331,8 +384,8 @@ fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
             .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte))
     {
         return Err(ApiError::invalid_request(
-            "INVALID_IDEMPOTENCY_KEY",
-            "request.idempotency_key.invalid",
+            ErrorCode::InvalidIdempotencyKey,
+            MessageKey::InvalidIdempotencyKey,
         ));
     }
 
@@ -346,8 +399,8 @@ fn validate_display_name(display_name: &str) -> Result<&str, ApiError> {
         || normalized.chars().any(char::is_control)
     {
         return Err(ApiError::invalid_request(
-            "INVALID_DISPLAY_NAME",
-            "participant.display_name.invalid",
+            ErrorCode::InvalidDisplayName,
+            MessageKey::InvalidDisplayName,
         ));
     }
 
@@ -363,19 +416,24 @@ fn validate_password(password: &str) -> Result<(), ApiError> {
 }
 
 fn weak_password(password: &str) -> bool {
-    const COMMON_PASSWORDS: [&str; 5] = [
+    const COMMON_FRAGMENTS: [&str; 7] = [
         "password",
-        "password123",
-        "123456789012",
-        "qwertyuiop12",
+        "qwerty",
+        "123456",
+        "abcdef",
+        "senha",
         "harrypotter",
+        "hogwarts",
     ];
+    let normalized = password.to_lowercase();
 
     password.chars().count() < 12
         || distinct_character_count(password, 4) < 4
-        || COMMON_PASSWORDS
+        || COMMON_FRAGMENTS
             .iter()
-            .any(|candidate| password.eq_ignore_ascii_case(candidate))
+            .any(|candidate| normalized.contains(candidate))
+        || is_repeated_pattern(password)
+        || contains_ascii_sequence(&normalized, 4)
 }
 
 fn distinct_character_count(value: &str, limit: usize) -> usize {
@@ -389,6 +447,29 @@ fn distinct_character_count(value: &str, limit: usize) -> usize {
         }
     }
     distinct.len()
+}
+
+fn is_repeated_pattern(value: &str) -> bool {
+    let characters: Vec<char> = value.chars().collect();
+    (1..=characters.len() / 2).any(|pattern_length| {
+        characters.len().is_multiple_of(pattern_length)
+            && characters
+                .iter()
+                .enumerate()
+                .all(|(index, character)| *character == characters[index % pattern_length])
+    })
+}
+
+fn contains_ascii_sequence(value: &str, minimum_length: usize) -> bool {
+    let bytes = value.as_bytes();
+    bytes.windows(minimum_length).any(|window| {
+        window
+            .windows(2)
+            .all(|pair| pair[1].is_ascii_alphanumeric() && pair[1] == pair[0].wrapping_add(1))
+            || window
+                .windows(2)
+                .all(|pair| pair[1].is_ascii_alphanumeric() && pair[0] == pair[1].wrapping_add(1))
+    })
 }
 
 fn random_room_code() -> Result<String, ApiError> {

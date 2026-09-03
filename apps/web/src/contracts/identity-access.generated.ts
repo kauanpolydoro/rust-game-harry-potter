@@ -26,7 +26,11 @@ export interface CreateRoomResponse {
   participant: ParticipantSummary
 }
 
-export interface ApiErrorResponse {
+export interface FindRoomResponse {
+  room: RoomSummary
+}
+
+export interface ErrorResponse {
   error: {
     code: string
     category: string

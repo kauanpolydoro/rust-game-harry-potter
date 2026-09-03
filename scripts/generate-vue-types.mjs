@@ -105,6 +105,7 @@ const supportedBindings = new Set([
   'aria-invalid',
   'class',
   'disabled',
+  'readonly',
   'type',
 ])
 const supportedEvents = new Set(['click', 'submit'])
@@ -270,6 +271,9 @@ function validateStaticAttribute(tag, attribute, filename, contract) {
     return
   }
   if (name === 'required' && tag === 'input' && value === '') {
+    return
+  }
+  if (name === 'tabindex' && value === '-1') {
     return
   }
   if (name === 'form' && tag === 'button' && validId.test(value)) {

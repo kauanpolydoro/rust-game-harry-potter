@@ -47,7 +47,8 @@ button {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+.room-stage h2:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 4px;
 }
