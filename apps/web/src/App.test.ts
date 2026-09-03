@@ -1017,6 +1017,63 @@ describe('application shell', () => {
     })
   })
 
+  it('resynchronizes a stale game and waits for a new human decision', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    let sessionRequests = 0
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        sessionRequests += 1
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              sessionRequests === 1 ? gameProjectionResponse() : completedGameProjectionResponse(),
+            ),
+            {
+              headers: { 'Content-Type': 'application/json' },
+              status: 200,
+            },
+          ),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: { code: 'STALE_STATE_VERSION' } }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    const pinia = createPinia()
+    const gameCommand = useGameCommandStore(pinia)
+    render(App, { global: { plugins: [pinia] } })
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+
+    expect(await screen.findByText('Estado oficial atualizado')).toBeVisible()
+    expect(screen.getByText('Ação do Herói')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Concluir Artes das Trevas' })).not.toBeInTheDocument()
+    expect(gameCommand.status).toBe('resynced')
+    expect(gameCommand.pendingIntent).toBeNull()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+    expect(sessionRequests).toBe(2)
+    expect(
+      request.mock.calls.filter(([url]) => String(url) === '/api/games/current/commands'),
+    ).toHaveLength(1)
+  })
+
   it('recovers an accepted command after the response is lost and the app reloads', async () => {
     localStorage.setItem('hogwarts.session.expected', 'true')
     const firstRequest = vi.fn().mockImplementation((input: RequestInfo | URL) => {

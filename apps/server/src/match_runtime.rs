@@ -199,8 +199,10 @@ struct StoredCommandGame {
 #[derive(FromRow)]
 struct StoredCommandReceipt {
     command_id: Uuid,
+    actor_participant_id: Uuid,
     command_type: String,
     expected_state_version: i64,
+    payload_digest: String,
     accepted_state_version: i64,
     accepted_sequence: i64,
     expires_at: String,
@@ -500,6 +502,8 @@ async fn execute_game_command(
     let participant_id = authenticated_participant(&state, &headers).await?;
     let command_id =
         Uuid::parse_str(&request.command_id).map_err(|_| ApiError::invalid_command_id())?;
+    let request_json = serde_json::to_vec(&request).map_err(|_| ApiError::internal())?;
+    let payload_digest = format!("blake3:{}", blake3::hash(&request_json).to_hex());
     let mut transaction = state
         .database
         .begin()
@@ -510,6 +514,29 @@ async fn execute_game_command(
         .ok_or_else(ApiError::game_action_not_allowed)?;
     if stored.expired {
         return Err(ApiError::game_expired());
+    }
+    if let Some(receipt) =
+        postgres::command_receipt_in(&mut transaction, stored.id, command_id).await?
+    {
+        transaction
+            .rollback()
+            .await
+            .map_err(|_| ApiError::internal())?;
+        if receipt.actor_participant_id != participant_id
+            || receipt.payload_digest != payload_digest
+        {
+            return Err(ApiError::idempotency_conflict());
+        }
+        let projection = projection_for_participant(&state.database, participant_id)
+            .await?
+            .ok_or_else(ApiError::internal)?;
+        return Ok(no_store_json(
+            StatusCode::OK,
+            ExecuteGameCommandResponse {
+                receipt: receipt_response(receipt),
+                projection,
+            },
+        ));
     }
 
     let persisted: PersistedSnapshot =
@@ -530,8 +557,6 @@ async fn execute_game_command(
     let next_snapshot = persisted_after_decision(&persisted, &decision.state);
     let snapshot_json = serde_json::to_string(&next_snapshot).map_err(|_| ApiError::internal())?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
-    let request_json = serde_json::to_vec(&request).map_err(|_| ApiError::internal())?;
-    let payload_digest = format!("blake3:{}", blake3::hash(&request_json).to_hex());
     let (event_type, event_json) = persisted_event(&decision.events)?;
     let receipt = postgres::persist_game_command(
         &mut transaction,
