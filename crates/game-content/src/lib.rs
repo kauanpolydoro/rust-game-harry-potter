@@ -1,0 +1,29 @@
+//! Candidate content import and validation.
+
+#![forbid(unsafe_code)]
+
+use std::fmt;
+
+mod ids;
+mod manifest;
+mod schema;
+
+pub use ids::{CardInstanceId, CatalogId, InvalidId, RuleId};
+pub use manifest::{
+    ContentGap, ContentManifest, ContentSet, EntryKind, FunctionalConfidence, FunctionalField,
+    FunctionalProvenance, ManifestEntry, ProvenanceSource, SourceKind,
+};
+pub use schema::import_base_bundle;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportFailure {
+    pub(crate) message: String,
+}
+
+impl fmt::Display for ImportFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ImportFailure {}

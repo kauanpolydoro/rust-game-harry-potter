@@ -1,0 +1,5822 @@
+{
+  "schema_version": 1,
+  "content_version": "base-en-candidate-2026-09-02",
+  "ruleset_version": "base-candidate-v1",
+  "locale": "en",
+  "sources": [
+    {
+      "id": "project-spec",
+      "uri": "https://github.com/kauanpolydoro/rust-game-harry-potter/issues/1",
+      "kind": "adaptation"
+    },
+    {
+      "id": "official-product",
+      "uri": "https://theop.games/products/harry-potter-hogwarts-battle-a-cooperative-deck-building-game",
+      "kind": "official"
+    },
+    {
+      "id": "xanderman-config",
+      "uri": "https://github.com/xanderman/hogwarts-battle/tree/4cf4e2547e4ba399c8f24e021317e78dd047e5e5/config",
+      "kind": "candidate"
+    },
+    {
+      "id": "xanderman-implementation",
+      "uri": "https://github.com/xanderman/hogwarts-battle/tree/4cf4e2547e4ba399c8f24e021317e78dd047e5e5",
+      "kind": "candidate"
+    },
+    {
+      "id": "eccabay-cards",
+      "uri": "https://github.com/eccabay/hp-text-game/blob/b32d78bbccf3f204723568a0f7ff08980f4d3bbb/cards/hogwarts/hogwarts_deck.py",
+      "kind": "candidate"
+    }
+  ],
+  "rules": [],
+  "entries": [
+    {
+      "id": "hogwarts-card:001",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Albus Dumbledore"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:002",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Descendo"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:003",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 1,
+      "names": {
+        "en": "Essence of Dittany"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:004",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Golden Snitch"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:005",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 1,
+      "names": {
+        "en": "Incendio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:006",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Lumos"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:007",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Oliver Wood"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:008",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 1,
+      "names": {
+        "en": "Quidditch Gear"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:009",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 6,
+      "introduced_in": 1,
+      "names": {
+        "en": "Reparo"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:010",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Rubeus Hagrid"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:011",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Sorting Hat"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:012",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Sunshine, Daisy, Butter Mellow, Turn This Stupid, Fat Rat Yellow!"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:013",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 1,
+      "names": {
+        "en": "Wingardium Leviosa"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:014",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Arthur Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:015",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Dobby"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:016",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Expelliarmus"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:017",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Fawkes"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:018",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Finite"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:019",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Gilderoy Lockhart"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:020",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Ginny Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:021",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Molly Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:022",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Nimbus 2001"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:023",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Polyjuice Potion"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:024",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 3,
+      "names": {
+        "en": "Butterbeer"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:025",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 3,
+      "names": {
+        "en": "Chocolate Frog"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:026",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Crystal Ball"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:027",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Expecto Patronum"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:028",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Marauder's Map"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:029",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Petrificus Totalus"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:030",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Remus Lupin"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:031",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Sybill Trelawney"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:032",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 4,
+      "names": {
+        "en": "Accio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:033",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Cedric Diggory"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:034",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Filius Flitwick"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:035",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Fleur Delacour"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:036",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 6,
+      "introduced_in": 4,
+      "names": {
+        "en": "Hogwarts: A History"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:037",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Mad-Eye Moody"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:038",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Minerva McGonagall"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:039",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Pensieve"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:040",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Pomona Sprout"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:041",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 4,
+      "names": {
+        "en": "Protego"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:042",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Severus Snape"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:043",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Triwizard Cup"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:044",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Viktor Krum"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:045",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Cho Chang"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:046",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Fred Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:047",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "George Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:048",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Kingsley Shacklebolt"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:049",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Luna Lovegood"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:050",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Nymphadora Tonks"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:051",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 5,
+      "names": {
+        "en": "O.W.L.S."
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:052",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 5,
+      "names": {
+        "en": "Stupefy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:053",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Advanced Potion-Making"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:054",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 6,
+      "names": {
+        "en": "Bezoar"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:055",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 6,
+      "names": {
+        "en": "Confundus"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:056",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Deluminator"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:057",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Elder Wand"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:058",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 6,
+      "names": {
+        "en": "Felix Felicis"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:059",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Horace Slughorn"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "hogwarts-card:060",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Sword of Gryffindor"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:001",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 1,
+      "names": {
+        "en": "Expulso"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:002",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Flipendo"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:003",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 1,
+      "names": {
+        "en": "He Who Must Not Be Named"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:004",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Petrification"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:005",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Hand of Glory"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:006",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Obliviate"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:007",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Poison"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:008",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Relashio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:009",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Dementor's Kiss"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:010",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Opugno"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:011",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Tarantallegra"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:012",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 4,
+      "names": {
+        "en": "Avada Kedavra"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:013",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 4,
+      "names": {
+        "en": "Crucio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:014",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 4,
+      "names": {
+        "en": "Heir of Slytherin"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:015",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 4,
+      "names": {
+        "en": "Imperio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:016",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 4,
+      "names": {
+        "en": "Morsmordre"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:017",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Regeneration"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:018",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 5,
+      "names": {
+        "en": "Educational Decree"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:019",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Legilimency"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:020",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 6,
+      "names": {
+        "en": "Sectumsempra"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "dark-arts:021",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Fiendfyre"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "villain:001",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Crabbe & Goyle"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:002",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Draco Malfoy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:003",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Quirinus Quirrell"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:004",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Basilisk"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:005",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Lucius Malfoy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:006",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Tom Riddle"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:007",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Dementor"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:008",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Peter Pettigrew"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:009",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Barty Crouch Jr."
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:010",
+      "kind": "villain",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 4,
+      "names": {
+        "en": "Death Eater"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:011",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Dolores Umbridge"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:012",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Voldemort - Game 5"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:013",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Bellatrix Lestrange"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:014",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Fenrir Greyback"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:015",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Voldemort - Game 6"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "villain:016",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Voldemort - Game 7"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ]
+    },
+    {
+      "id": "location:001",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Diagon Alley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:002",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Mirror of Erised"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:003",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Forbidden Forest"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:004",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Quidditch Pitch"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:005",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Chamber of Secrets"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:006",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Hogwarts Express"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:007",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Hogsmeade Village"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:008",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Shrieking Shack"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:009",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Quidditch World Cup"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:010",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Triwizard Tournament"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:011",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 4,
+      "names": {
+        "en": "Graveyard"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:012",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Azkaban"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:013",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Hall of Prophecy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:014",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 5,
+      "names": {
+        "en": "Ministry of Magic"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:015",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Knockturn Alley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:016",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "The Burrow"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:017",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Astronomy Tower"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:018",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Godric's Hollow"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:019",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Gringotts"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:020",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Room of Requirement"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "location:021",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Hogwarts Castle"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:001",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 28,
+      "introduced_in": 1,
+      "names": {
+        "en": "Alohomora"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:002",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Invisibility Cloak"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:003",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Firebolt"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:004",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Hedwig"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:005",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Every Flavour Beans"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:006",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Cleansweep 11"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:007",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Pigwidgeon"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:008",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Time-Turner"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:009",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "The Tales of Beedle the Bard"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:010",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Crookshanks"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:011",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Remembrall"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:012",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Mandrake"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "starter:013",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Trevor"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ]
+    },
+    {
+      "id": "hero:001",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Harry - Game 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:002",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Harry - Game 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:003",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Harry - Game 7"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:004",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Hermione - Game 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:005",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Hermione - Game 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:006",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Hermione - Game 7"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:007",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Neville - Game 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:008",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Neville - Game 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:009",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Neville - Game 7"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:010",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Ron - Game 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:011",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Ron - Game 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "hero:012",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Ron - Game 7"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:001",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Flying Lessons"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:002",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Charms"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:003",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Transfiguration"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:004",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Herbology"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:005",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Defense Against the Dark Arts"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:006",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Arithmancy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:007",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Potions"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:008",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "History of Magic"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "proficiency:009",
+      "kind": "proficiency",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 6,
+      "names": {
+        "en": "Divination"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ]
+    },
+    {
+      "id": "horcrux:001",
+      "kind": "horcrux",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Diary"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "effect",
+        "reward",
+        "precedence"
+      ]
+    },
+    {
+      "id": "horcrux:002",
+      "kind": "horcrux",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Ring"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "effect",
+        "reward",
+        "precedence"
+      ]
+    },
+    {
+      "id": "horcrux:003",
+      "kind": "horcrux",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Locket"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "effect",
+        "reward",
+        "precedence"
+      ]
+    },
+    {
+      "id": "horcrux:004",
+      "kind": "horcrux",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Cup"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "effect",
+        "reward",
+        "precedence"
+      ]
+    },
+    {
+      "id": "horcrux:005",
+      "kind": "horcrux",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Diadem"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "effect",
+        "reward",
+        "precedence"
+      ]
+    },
+    {
+      "id": "horcrux:006",
+      "kind": "horcrux",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 7,
+      "names": {
+        "en": "Nagini"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ]
+      },
+      "required_functional_fields": [
+        "effect",
+        "reward",
+        "precedence"
+      ]
+    },
+    {
+      "id": "turn-order:001",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "turn-order:002",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 2"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "turn-order:003",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "turn-order:004",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 4"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "catalog:base-v1",
+      "kind": "catalog",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 1,
+      "names": {
+        "en": "Base English Candidate Catalog"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "ruleset:base-v1",
+      "kind": "ruleset",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 1,
+      "names": {
+        "en": "Base Candidate Ruleset"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:001",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 1,
+      "names": {
+        "en": "Game 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:002",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 2,
+      "names": {
+        "en": "Game 2"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:003",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 3,
+      "names": {
+        "en": "Game 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:004",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 4,
+      "names": {
+        "en": "Game 4"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:005",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 5,
+      "names": {
+        "en": "Game 5"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:006",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 6,
+      "names": {
+        "en": "Game 6"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    },
+    {
+      "id": "adventure:007",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 7,
+      "names": {
+        "en": "Game 7"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ]
+    }
+  ]
+}
