@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/vue'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/vue'
 import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +7,7 @@ import App from './App.vue'
 describe('application shell', () => {
   afterEach(() => {
     cleanup()
+    sessionStorage.clear()
     vi.unstubAllGlobals()
   })
 
@@ -25,7 +26,9 @@ describe('application shell', () => {
 
     await screen.findByText('Servidor pronto')
     expect(screen.getByRole('status')).toHaveTextContent('Servidor pronto')
-    expect(screen.getByRole('heading', { level: 2, name: 'Servidor pronto' })).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' }),
+    ).toBeVisible()
   })
 
   it('shows an unavailable state and lets the player retry', async () => {
@@ -76,5 +79,400 @@ describe('application shell', () => {
       }),
     )
     await screen.findByText('Servidor pronto')
+  })
+
+  it('creates a private room and shows the committed room code', async () => {
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) }
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard }))
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participant: { display_name: 'Minerva', role: 'host' },
+            room: { code: '9HKGW4RT', status: 'open' },
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 201,
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+
+    const successHeading = await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    await waitFor(() => expect(successHeading).toHaveFocus())
+    expect(screen.getByText('9HKGW4RT')).toBeVisible()
+    expect(screen.getByText('Minerva')).toBeVisible()
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      '/api/rooms',
+      expect.objectContaining({
+        body: JSON.stringify({
+          display_name: 'Minerva',
+          recovery_password: 'a long uncommon passphrase',
+        }),
+        credentials: 'same-origin',
+        method: 'POST',
+      }),
+    )
+    expect(
+      (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers,
+    ).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }))
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Copiar código' }))
+    await screen.findByText('Código copiado.')
+    expect(clipboard.writeText).toHaveBeenCalledWith('9HKGW4RT')
+  })
+
+  it('reuses the same idempotency key after an uncertain server failure', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              category: 'internal',
+              code: 'INTERNAL_ERROR',
+              correlation_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+              details: {},
+              message_key: 'internal.error',
+              retry: 'safe_to_retry',
+            },
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 503,
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participant: { display_name: 'Minerva', role: 'host' },
+            room: { code: '9HKGW4RT', status: 'open' },
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 201,
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+    await screen.findByRole('button', { name: 'Tentar criar novamente' })
+
+    const firstKey = (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers
+    await fireEvent.click(screen.getByRole('button', { name: 'Tentar criar novamente' }))
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    const retryKey = (request.mock.calls[2]?.[1] as RequestInit | undefined)?.headers
+
+    expect(retryKey).toEqual(firstKey)
+  })
+
+  it('recovers the pending idempotency key after an uncertain failure and reload', async () => {
+    const readyResponse = (): Response =>
+      new Response(JSON.stringify({ status: 'ready' }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      })
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(readyResponse())
+      .mockRejectedValueOnce(new TypeError('response lost after commit'))
+      .mockResolvedValueOnce(readyResponse())
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participant: { display_name: 'Minerva', role: 'host' },
+            room: { code: '9HKGW4RT', status: 'open' },
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 201,
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+    await screen.findByRole('button', { name: 'Tentar criar novamente' })
+    const firstKey = (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers
+    const persistedIntent = JSON.parse(
+      sessionStorage.getItem('hogwarts.room-creation.pending-intent') ?? 'null',
+    ) as unknown
+    expect(persistedIntent).toEqual({
+      commandType: 'create_room',
+      createdAt: expect.any(String),
+      idempotencyKey: expect.any(String),
+    })
+    expect(JSON.stringify(persistedIntent)).not.toContain('Minerva')
+    expect(JSON.stringify(persistedIntent)).not.toContain('a long uncommon passphrase')
+
+    cleanup()
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    expect(screen.getByLabelText('Seu nome')).toHaveValue('')
+    expect(screen.getByLabelText('Seu nome')).not.toHaveAttribute('readonly')
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Retomar criação pendente' }))
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    const retryKey = (request.mock.calls[3]?.[1] as RequestInit | undefined)?.headers
+
+    expect(retryKey).toEqual(firstKey)
+  })
+
+  it('keeps a recovered intent until the host resumes or explicitly discards it', async () => {
+    const readyResponse = (): Response =>
+      new Response(JSON.stringify({ status: 'ready' }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      })
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(readyResponse())
+      .mockRejectedValueOnce(new TypeError('response lost after commit'))
+      .mockResolvedValueOnce(readyResponse())
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              category: 'conflict',
+              code: 'IDEMPOTENCY_KEY_REUSED',
+              correlation_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+              details: {},
+              message_key: 'request.idempotency_key.reused',
+              retry: 'with_new_idempotency_key',
+            },
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participant: { display_name: 'Minerva', role: 'host' },
+            room: { code: '9HKGW4RT', status: 'open' },
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 201 },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+    await screen.findByRole('button', { name: 'Tentar criar novamente' })
+    const firstKey = (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers
+
+    cleanup()
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByText('Existe uma criação pendente neste navegador.')
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Pomona')
+    await fireEvent.update(screen.getByLabelText('Senha de recuperação'), 'a different passphrase')
+    await fireEvent.click(screen.getByRole('button', { name: 'Retomar criação pendente' }))
+
+    await screen.findByText(
+      'O nome ou a senha não correspondem à criação pendente. Reinsira os mesmos dados ou descarte a tentativa.',
+    )
+    expect(screen.getByRole('button', { name: 'Descartar e começar outra' })).toBeVisible()
+    expect(screen.getByLabelText('Senha de recuperação')).not.toHaveAttribute('readonly')
+    const mismatchedKey = (request.mock.calls[3]?.[1] as RequestInit | undefined)?.headers
+
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Retomar criação pendente' }))
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    const recoveredKey = (request.mock.calls[4]?.[1] as RequestInit | undefined)?.headers
+
+    expect(mismatchedKey).toEqual(firstKey)
+    expect(recoveredKey).toEqual(firstKey)
+  })
+
+  it('keeps the submitted payload immutable while confirmation is pending', async () => {
+    let completeCreation = (_response: Response): void => undefined
+    const creationResponse = new Promise<Response>((resolve) => {
+      completeCreation = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+        .mockReturnValueOnce(creationResponse),
+    )
+
+    render(App, { global: { plugins: [createPinia()] } })
+    const name = await screen.findByLabelText('Seu nome')
+    const password = screen.getByLabelText('Senha de recuperação')
+    await fireEvent.update(name, 'Minerva')
+    await fireEvent.update(password, 'a long uncommon passphrase')
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+
+    expect(name).toHaveAttribute('readonly')
+    expect(password).toHaveAttribute('readonly')
+
+    completeCreation(
+      new Response(
+        JSON.stringify({
+          participant: { display_name: 'Minerva', role: 'host' },
+          room: { code: '9HKGW4RT', status: 'open' },
+        }),
+        { headers: { 'Content-Type': 'application/json' }, status: 201 },
+      ),
+    )
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+  })
+
+  it('fails closed when a successful response violates the room contract', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participant: { display_name: '', role: 'host' },
+            room: { code: 'not-a-room-code', status: 'open' },
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 201 },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+
+    expect(
+      await screen.findByText('Não foi possível criar a sala. Revise os dados e tente novamente.'),
+    ).toHaveAttribute('role', 'alert')
+    expect(screen.queryByRole('heading', { level: 2, name: 'Sala pronta' })).not.toBeInTheDocument()
+  })
+
+  it('lets the host inspect the recovery password before creating the room', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      ),
+    )
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const password = await screen.findByLabelText('Senha de recuperação')
+    expect(password).toHaveAttribute('type', 'password')
+    await fireEvent.click(screen.getByRole('button', { name: 'Mostrar senha' }))
+    expect(password).toHaveAttribute('type', 'text')
+    expect(screen.getByRole('button', { name: 'Ocultar senha' })).toBeVisible()
+  })
+
+  it('associates a weak-password error with the password field and focuses it', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              category: 'validation',
+              code: 'WEAK_RECOVERY_PASSWORD',
+              correlation_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+              details: {},
+              message_key: 'room.recovery_password.weak',
+              retry: 'after_correction',
+            },
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 422,
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    const password = screen.getByLabelText('Senha de recuperação')
+    await fireEvent.update(password, 'passwordpassword')
+    await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
+
+    await screen.findByText('Escolha uma senha mais longa e menos previsível.')
+    expect(password).toHaveAttribute('aria-invalid', 'true')
+    await waitFor(() => expect(password).toHaveFocus())
   })
 })

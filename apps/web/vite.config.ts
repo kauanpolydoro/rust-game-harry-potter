@@ -6,7 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/health': process.env.HEALTH_PROXY_TARGET ?? 'http://127.0.0.1:8080',
+      '/api': process.env.BACKEND_PROXY_TARGET ?? 'http://127.0.0.1:8080',
+      '/health': process.env.BACKEND_PROXY_TARGET ?? 'http://127.0.0.1:8080',
     },
   },
 })

@@ -22,7 +22,7 @@ npm ci
 
 export DATABASE_URL="${DATABASE_URL:-postgres://hogwarts:local-development-only@127.0.0.1:55432/hogwarts}"
 export BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1:8080}"
-export HEALTH_PROXY_TARGET="${HEALTH_PROXY_TARGET:-http://$BIND_ADDRESS}"
+export BACKEND_PROXY_TARGET="${BACKEND_PROXY_TARGET:-http://$BIND_ADDRESS}"
 
 processes=()
 

@@ -3,6 +3,7 @@ name: Batalha de Hogwarts
 description: Mesa cooperativa mobile-first conduzida como uma sequência de deixas oficiais.
 colors:
   ink: "#08131d"
+  ink-raised: "#0d1b27"
   chalk: "#f4f0e7"
   chalk-muted: "#b7c0c5"
   brass: "#c7a35b"
@@ -90,6 +91,14 @@ components:
   continuity-note:
     textColor: "{colors.chalk-muted}"
     typography: "{typography.label}"
+  form-field:
+    backgroundColor: "{colors.ink-raised}"
+    textColor: "{colors.chalk}"
+    rounded: "{rounded.control}"
+  password-toggle:
+    backgroundColor: "transparent"
+    textColor: "{colors.chalk}"
+    rounded: "{rounded.control}"
 ---
 
 # Design System: Batalha de Hogwarts
@@ -124,13 +133,14 @@ A paleta combina uma base azul-noite quase preta com giz quente e latão envelhe
 ### Neutral
 
 - **Azul-noite fosco** (`ink`): cobre o documento, o painel principal e o fundo dos marcadores de deixa.
+- **Azul-noite elevado** (`ink-raised`): diferencia campos editáveis do painel sem criar cartões ou profundidade independente.
 - **Giz quente** (`chalk`): carrega títulos e também clareia a ação de recuperação no hover.
 - **Giz frio atenuado** (`chalk-muted`): sustenta descrições, metadados, notas e estados ainda não confirmados.
 
 ### Functional
 
-- **Verde de confirmação** (`ready`): identifica exclusivamente a disponibilidade confirmada do serviço.
-- **Âmbar de atenção** (`warning`): identifica indisponibilidade e confirma o estado pressionado da recuperação.
+- **Verde de confirmação** (`ready`): identifica disponibilidade confirmada e ações concluídas com sucesso.
+- **Âmbar de atenção** (`warning`): identifica indisponibilidade, validação, falhas recuperáveis e o estado pressionado de ações.
 - **Azul de foco** (`focus`): torna o foco por teclado inequivocamente visível sobre a base escura.
 
 **The Regra do Latão Raro Rule.** O latão estrutura a leitura e marca a ação principal, mas não preenche superfícies inteiras fora do controle de recuperação.
@@ -183,7 +193,7 @@ A profundidade pertence ao painel inteiro, enquanto a hierarquia interna depende
 ## Shapes
 
 O vocabulário mistura geometria ortogonal de régua com sinais circulares de estado.
-Numeração, divisores e marcas de direção mantêm cantos retos, enquanto apenas o controle de recuperação recebe uma curva de `0.75rem`.
+Numeração, divisores e marcas de direção mantêm cantos retos, enquanto controles de entrada e ação recebem uma curva de `0.75rem`.
 Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo compacto, criando silhuetas funcionais sem ornamentação.
 
 **The Regra do Contraste de Silhueta Rule.** Cantos arredondados indicam interação ou estado; a estrutura da mesa continua reta e precisa.
@@ -217,6 +227,20 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 - **Focus:** contorno azul de `3px` com afastamento de `4px`.
 - **Checking:** fundo transparente, texto atenuado, cursor de espera e foco preservado enquanto a confirmação está pendente.
 
+### Form Fields
+
+- **Surface:** azul-noite elevado, contorno de latão quieto e altura mínima de `3.25rem` distinguem edição sem fragmentar o painel.
+- **Structure:** rótulos permanecem visíveis, e controles auxiliares ocupam a mesma altura do campo associado.
+- **Password:** o toggle textual nomeia a ação “Mostrar senha” ou “Ocultar senha” e permanece ligado semanticamente ao campo.
+- **Validation:** erros usam âmbar com texto explícito junto ao campo, associação semântica e foco no primeiro valor inválido.
+
+### Action Feedback
+
+- **Success:** confirma a conclusão em verde com texto anunciado por tecnologia assistiva.
+- **Failure:** usa âmbar, nomeia o problema e oferece uma recuperação concreta em uma região de alerta.
+- **Clipboard:** a ação permanece repetível depois do sucesso e orienta a cópia manual quando o navegador recusa o acesso.
+- **Uncertain creation:** preserva somente ID, tipo e instante do comando, solicita novamente os dados privados e oferece retomada ou descarte explícito sem sugerir que a sala confirmada será excluída.
+
 ### Continuity Note
 
 - **Character:** substitui a ação quando o serviço está pronto e comunica espera sem parecer um controle.
@@ -232,6 +256,7 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 - **Do** manter estados verde e âmbar acompanhados por títulos e descrições explícitas.
 - **Do** respeitar safe areas, zoom, foco visível e alvos interativos com pelo menos `44px` por `44px`.
 - **Do** usar textura, latão e tipografia condensada como sinais discretos de direção de cena.
+- **Do** associar validação ao campo correspondente e comunicar o resultado de ações assíncronas com texto explícito.
 
 ### Don't:
 
@@ -239,3 +264,4 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 - **Don't** usar cor, pulso ou preenchimento como único canal para disponibilidade.
 - **Don't** arredondar trilhos, marcadores numéricos ou divisores estruturais.
 - **Don't** introduzir componentes, ornamentos ou conteúdo de franquia sem presença comprovada no produto.
+- **Don't** deixar uma falha de ação silenciosa ou depender somente de cor para comunicar sucesso e erro.

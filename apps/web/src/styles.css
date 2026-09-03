@@ -46,9 +46,15 @@ button {
 }
 
 button:focus-visible,
-a:focus-visible {
+a:focus-visible,
+input:focus-visible,
+.room-stage h2:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 4px;
+}
+
+input {
+  caret-color: var(--brass);
 }
 
 ::selection {
@@ -131,6 +137,14 @@ a:focus-visible {
   padding-block: clamp(3rem, 14vh, 7rem) 2rem;
 }
 
+.room-setup,
+.room-success {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 1.25rem;
+  padding-block: clamp(2rem, 8vh, 4.5rem) 2rem;
+}
+
 .cue-rail {
   z-index: 1;
   display: grid;
@@ -168,6 +182,236 @@ a:focus-visible {
 .service-state {
   align-self: center;
   padding-block: 1.5rem;
+}
+
+.room-stage {
+  align-self: center;
+  max-width: 34rem;
+}
+
+.service-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 1.25rem;
+  color: var(--ready);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.service-confirmation .state-signal {
+  margin: 0;
+  background: var(--ready);
+}
+
+.room-stage h2 {
+  max-width: 16ch;
+  margin: 0;
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: clamp(2.6rem, 10vw, 4rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.stage-description {
+  max-width: 32rem;
+  margin: 1rem 0 0;
+  color: var(--chalk-muted);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.room-form {
+  display: grid;
+  gap: 1.1rem;
+  margin-top: 2rem;
+}
+
+.pending-intent {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+  border-left: 2px solid var(--warning);
+  background: rgb(226 171 85 / 8%);
+}
+
+.pending-intent p {
+  margin: 0;
+  color: var(--chalk-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.pending-intent p:first-child {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.pending-intent button {
+  width: fit-content;
+  min-height: 2.75rem;
+  padding: 0.55rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--warning);
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 0.22rem;
+  cursor: pointer;
+}
+
+@media (max-width: 47.999rem) {
+  .room-setup--pending {
+    padding-block: 1rem;
+  }
+
+  .room-setup--pending .room-form {
+    gap: 0.85rem;
+    margin-top: 1.25rem;
+  }
+
+  .room-setup--pending .pending-intent {
+    gap: 0.45rem;
+    padding-block: 0.7rem;
+  }
+}
+
+.field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.field > label {
+  color: var(--chalk);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.field input {
+  width: 100%;
+  min-height: 3.25rem;
+  border: 1px solid var(--brass-quiet);
+  border-radius: 0.75rem;
+  background: var(--ink-raised);
+  color: var(--chalk);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  padding-inline: 1rem;
+  transition: border-color 180ms ease-out;
+}
+
+.field input:hover {
+  border-color: var(--brass);
+}
+
+.password-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+}
+
+.password-toggle {
+  min-width: 5.75rem;
+  min-height: 3.25rem;
+  border: 1px solid var(--brass-quiet);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--chalk);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding-inline: 0.75rem;
+}
+
+.password-toggle:hover {
+  border-color: var(--brass);
+}
+
+.field-guidance,
+.field-error,
+.form-error {
+  margin: -0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.field-guidance {
+  color: var(--chalk-muted);
+}
+
+.form-error {
+  color: var(--warning);
+}
+
+.field-error {
+  color: var(--warning);
+}
+
+.field-error:empty {
+  display: none;
+}
+
+.room-code-block {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 2.25rem;
+  padding-block: 1.25rem;
+  border-block: 1px solid var(--brass-quiet);
+}
+
+.room-code-block span,
+.room-details dt {
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.room-code-block output {
+  color: var(--brass);
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: clamp(2.6rem, 12vw, 4rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.room-details {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0 0;
+}
+
+.room-details div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.room-details dd {
+  margin: 0;
+  color: var(--chalk);
+  font-size: 1.05rem;
+}
+
+.copy-feedback {
+  margin: 1rem 0 0;
+  color: var(--ready);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.copy-feedback--error {
+  color: var(--warning);
 }
 
 .state-heading {
@@ -226,7 +470,8 @@ a:focus-visible {
   border-top: 1px dashed var(--brass-quiet);
 }
 
-.retry-button {
+.retry-button,
+.primary-button {
   width: 100%;
   min-height: 3.25rem;
   border: 1px solid var(--brass);
@@ -240,16 +485,26 @@ a:focus-visible {
     color 180ms ease-out;
 }
 
-.retry-button:hover {
-  background: var(--chalk);
-  color: var(--ink);
-}
-
-.retry-button:active {
+.retry-button:active,
+.primary-button:active {
   background: var(--warning);
 }
 
+@media (hover: hover) {
+  .retry-button:hover,
+  .primary-button:hover {
+    background: var(--chalk);
+    color: var(--ink);
+  }
+}
+
 .retry-button[aria-disabled="true"] {
+  background: transparent;
+  color: var(--chalk-muted);
+  cursor: wait;
+}
+
+.primary-button:disabled {
   background: transparent;
   color: var(--chalk-muted);
   cursor: wait;
@@ -288,6 +543,12 @@ a:focus-visible {
   }
 
   .service-check {
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+
+  .room-setup,
+  .room-success {
     grid-template-columns: 4rem minmax(0, 1fr);
     gap: 2.5rem;
   }
