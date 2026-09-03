@@ -1,3 +1,5 @@
+# CI intentionally disabled during the initial project phase.
+# Move this file back to .github/workflows only after Kauan explicitly requests it.
 name: CI
 
 on:
