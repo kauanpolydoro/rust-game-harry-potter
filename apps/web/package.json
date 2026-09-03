@@ -1,0 +1,36 @@
+{
+  "name": "@hogwarts/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/generate-vue-types.mjs --check && tsc --build --force && vite build",
+    "dev": "vite --host 0.0.0.0",
+    "lint": "oxlint --deny-warnings .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "node ../../scripts/generate-vue-types.mjs --check && tsc --build --force"
+  },
+  "dependencies": {
+    "@fontsource-variable/archivo-narrow": "5.3.0",
+    "@fontsource-variable/inter": "5.3.0",
+    "pinia": "4.0.3",
+    "vue": "3.5.42"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/vue": "8.1.0",
+    "@types/node": "26.4.1",
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vue/compiler-dom": "3.5.42",
+    "@vue/compiler-sfc": "3.5.42",
+    "jsdom": "30.0.1",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  }
+}

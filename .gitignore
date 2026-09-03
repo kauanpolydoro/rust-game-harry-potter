@@ -1,0 +1,10 @@
+/.env
+/.scratch/
+node_modules/
+/target/
+/apps/web/dist/
+/apps/web/playwright-report/
+/apps/web/test-results/
+/apps/web/src/.vue-typecheck-*/
+*.tsbuildinfo
+*.log

@@ -1,0 +1,289 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-03T11:47:45Z",
+  "title": "Design System: Batalha de Hogwarts",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Azul-noite fosco",
+        "canonical": "#08131d",
+        "tonalRamp": [
+          "oklch(15% 0.026 246.9)",
+          "oklch(25% 0.026 246.9)",
+          "oklch(38% 0.026 246.9)",
+          "oklch(52% 0.026 246.9)",
+          "oklch(66% 0.026 246.9)",
+          "oklch(78% 0.026 246.9)",
+          "oklch(88% 0.026 246.9)",
+          "oklch(95% 0.026 246.9)"
+        ]
+      },
+      "chalk": {
+        "role": "neutral",
+        "displayName": "Giz quente",
+        "canonical": "#f4f0e7",
+        "tonalRamp": [
+          "oklch(15% 0.013 86.8)",
+          "oklch(25% 0.013 86.8)",
+          "oklch(38% 0.013 86.8)",
+          "oklch(52% 0.013 86.8)",
+          "oklch(66% 0.013 86.8)",
+          "oklch(78% 0.013 86.8)",
+          "oklch(88% 0.013 86.8)",
+          "oklch(95% 0.013 86.8)"
+        ]
+      },
+      "chalk-muted": {
+        "role": "neutral",
+        "displayName": "Giz frio atenuado",
+        "canonical": "#b7c0c5",
+        "tonalRamp": [
+          "oklch(15% 0.012 231.7)",
+          "oklch(25% 0.012 231.7)",
+          "oklch(38% 0.012 231.7)",
+          "oklch(52% 0.012 231.7)",
+          "oklch(66% 0.012 231.7)",
+          "oklch(78% 0.012 231.7)",
+          "oklch(88% 0.012 231.7)",
+          "oklch(95% 0.012 231.7)"
+        ]
+      },
+      "brass": {
+        "role": "primary",
+        "displayName": "Latão de marcação",
+        "canonical": "#c7a35b",
+        "tonalRamp": [
+          "oklch(15% 0.100 83.3)",
+          "oklch(25% 0.100 83.3)",
+          "oklch(38% 0.100 83.3)",
+          "oklch(52% 0.100 83.3)",
+          "oklch(66% 0.100 83.3)",
+          "oklch(78% 0.100 83.3)",
+          "oklch(88% 0.100 83.3)",
+          "oklch(95% 0.100 83.3)"
+        ]
+      },
+      "brass-quiet": {
+        "role": "primary",
+        "displayName": "Latão quieto",
+        "canonical": "#6f633f",
+        "tonalRamp": [
+          "oklch(15% 0.054 91.7)",
+          "oklch(25% 0.054 91.7)",
+          "oklch(38% 0.054 91.7)",
+          "oklch(52% 0.054 91.7)",
+          "oklch(66% 0.054 91.7)",
+          "oklch(78% 0.054 91.7)",
+          "oklch(88% 0.054 91.7)",
+          "oklch(95% 0.054 91.7)"
+        ]
+      },
+      "ready": {
+        "role": "secondary",
+        "displayName": "Verde de confirmação",
+        "canonical": "#70c18c",
+        "tonalRamp": [
+          "oklch(15% 0.111 154.1)",
+          "oklch(25% 0.111 154.1)",
+          "oklch(38% 0.111 154.1)",
+          "oklch(52% 0.111 154.1)",
+          "oklch(66% 0.111 154.1)",
+          "oklch(78% 0.111 154.1)",
+          "oklch(88% 0.111 154.1)",
+          "oklch(95% 0.111 154.1)"
+        ]
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "Âmbar de atenção",
+        "canonical": "#e2ab55",
+        "tonalRamp": [
+          "oklch(15% 0.122 76.4)",
+          "oklch(25% 0.122 76.4)",
+          "oklch(38% 0.122 76.4)",
+          "oklch(52% 0.122 76.4)",
+          "oklch(66% 0.122 76.4)",
+          "oklch(78% 0.122 76.4)",
+          "oklch(88% 0.122 76.4)",
+          "oklch(95% 0.122 76.4)"
+        ]
+      },
+      "focus": {
+        "role": "tertiary",
+        "displayName": "Azul de foco",
+        "canonical": "#9cd7ff",
+        "tonalRamp": [
+          "oklch(15% 0.082 238.6)",
+          "oklch(25% 0.082 238.6)",
+          "oklch(38% 0.082 238.6)",
+          "oklch(52% 0.082 238.6)",
+          "oklch(66% 0.082 238.6)",
+          "oklch(78% 0.082 238.6)",
+          "oklch(88% 0.082 238.6)",
+          "oklch(95% 0.082 238.6)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Estado dominante",
+        "purpose": "Nomear a confirmação oficial no centro da mesa."
+      },
+      "title": {
+        "displayName": "Título da mesa",
+        "purpose": "Identificar a experiência no masthead compacto."
+      },
+      "body": {
+        "displayName": "Explicação",
+        "purpose": "Explicar disponibilidade e recuperação com leitura confortável."
+      },
+      "label": {
+        "displayName": "Metadado de cena",
+        "purpose": "Rotular edição, eixo e continuidade sem disputar hierarquia."
+      },
+      "control": {
+        "displayName": "Ação",
+        "purpose": "Dar peso inequívoco ao único controle de recuperação."
+      }
+    },
+    "shadows": [
+      {
+        "name": "painel-ambiente",
+        "value": "0 1.5rem 4rem rgb(0 0 0 / 28%)",
+        "purpose": "Separar discretamente a mesa central do fundo quando há espaço ao redor."
+      }
+    ],
+    "motion": [
+      {
+        "name": "confirmacao-pendente",
+        "value": "1.4s ease-in-out infinite",
+        "purpose": "Pulsar somente o sinal circular enquanto o estado oficial está sendo verificado."
+      },
+      {
+        "name": "acao-cromatica",
+        "value": "180ms ease-out",
+        "purpose": "Suavizar apenas as mudanças de fundo e texto da ação de recuperação."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "amplo",
+        "value": "48rem"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Ação de recuperação",
+      "kind": "button",
+      "refersTo": "retry-action",
+      "description": "Única ação disponível quando a autoridade não pôde ser confirmada.",
+      "html": "<button class=\"ds-retry-button\" type=\"button\">Tentar novamente</button>",
+      "css": ".ds-retry-button { width: 100%; min-height: 3.25rem; border: 1px solid var(--brass); border-radius: 0.75rem; background: var(--brass); color: var(--ink); cursor: pointer; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; font-size: 1rem; font-weight: 760; transition: background-color 180ms ease-out, color 180ms ease-out; } .ds-retry-button:hover { background: var(--chalk); color: var(--ink); } .ds-retry-button:active { background: var(--warning); } .ds-retry-button:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }"
+    },
+    {
+      "name": "Ação em verificação",
+      "kind": "button",
+      "refersTo": "retry-action-checking",
+      "description": "Mantém o controle e o foco estáveis enquanto uma nova confirmação está pendente.",
+      "html": "<button class=\"ds-retry-button-checking\" type=\"button\" aria-disabled=\"true\">Verificando servidor</button>",
+      "css": ".ds-retry-button-checking { width: 100%; min-height: 3.25rem; border: 1px solid var(--brass); border-radius: 0.75rem; background: transparent; color: var(--chalk-muted); cursor: wait; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; font-size: 1rem; font-weight: 760; } .ds-retry-button-checking:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }"
+    },
+    {
+      "name": "Sinal pronto",
+      "kind": "custom",
+      "refersTo": "status-signal-ready",
+      "description": "Confirma visualmente que o serviço autoritativo está pronto.",
+      "html": "<span class=\"ds-state-signal-ready\" aria-hidden=\"true\"></span>",
+      "css": ".ds-state-signal-ready { display: inline-block; width: 0.85rem; height: 0.85rem; border: 2px solid var(--ready); border-radius: 50%; background: var(--ready); color: var(--ready); }"
+    },
+    {
+      "name": "Sinal indisponível",
+      "kind": "custom",
+      "refersTo": "status-signal-unavailable",
+      "description": "Marca visualmente a indisponibilidade que exige recuperação.",
+      "html": "<span class=\"ds-state-signal-unavailable\" aria-hidden=\"true\"></span>",
+      "css": ".ds-state-signal-unavailable { display: inline-block; width: 0.85rem; height: 0.85rem; border: 2px solid var(--warning); border-radius: 50%; background: var(--warning); color: var(--warning); }"
+    },
+    {
+      "name": "Sinal em verificação",
+      "kind": "custom",
+      "refersTo": "status-signal-checking",
+      "description": "Indica uma confirmação pendente sem substituir o rótulo textual do estado.",
+      "html": "<span class=\"ds-state-signal-checking\" aria-hidden=\"true\"></span>",
+      "css": ".ds-state-signal-checking { display: inline-block; width: 0.85rem; height: 0.85rem; border: 2px solid var(--chalk-muted); border-radius: 50%; background: transparent; color: var(--chalk-muted); animation: ds-checking 1.4s ease-in-out infinite; } @keyframes ds-checking { 50% { background: currentColor; opacity: 0.35; } } @media (prefers-reduced-motion: reduce) { .ds-state-signal-checking { animation-duration: 0.01ms; animation-iteration-count: 1; } }"
+    },
+    {
+      "name": "Trilho de estado oficial",
+      "kind": "custom",
+      "refersTo": "cue-number",
+      "description": "Numera e conecta verticalmente a leitura do estado oficial.",
+      "html": "<div class=\"ds-cue-rail\" aria-hidden=\"true\"><span class=\"ds-cue-number\">1</span><span class=\"ds-cue-line\"></span><span class=\"ds-cue-label\">Estado oficial</span></div>",
+      "css": ".ds-cue-rail { display: grid; grid-template-rows: auto minmax(4rem, 1fr) auto; justify-items: center; min-height: 17rem; } .ds-cue-number { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 1px solid var(--brass); background: var(--ink); color: var(--brass); font-family: Inter, ui-sans-serif, sans-serif; font-variant-numeric: tabular-nums; font-weight: 760; } .ds-cue-line { width: 1px; background: var(--brass-quiet); } .ds-cue-label { color: var(--chalk-muted); font-family: Inter, ui-sans-serif, sans-serif; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; writing-mode: vertical-rl; }"
+    },
+    {
+      "name": "Nota de continuidade",
+      "kind": "custom",
+      "refersTo": "continuity-note",
+      "description": "Substitui a ação por uma espera discreta depois da confirmação.",
+      "html": "<p class=\"ds-continuity-note\"><span aria-hidden=\"true\"></span>Aguardando a próxima etapa da mesa</p>",
+      "css": ".ds-continuity-note { display: flex; align-items: center; gap: 0.75rem; margin: 0.35rem 0 0; color: var(--chalk-muted); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; font-size: 0.78rem; line-height: 1.4; } .ds-continuity-note span { width: 2rem; height: 1px; background: var(--brass); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "A Mesa de Contrarregra",
+    "overview": "A interface trata a mesa autoritativa como uma sequência legível de deixas, inspirada pela precisão de uma mesa de direção de cena. O sistema evita a coleção de cartões mágicos flutuantes e organiza cada estado como uma marca oficial em um painel contínuo.\n\nAzul-noite fosco, textura material discreta, texto de giz e regras de latão criam uma atmosfera sóbria sem competir com a decisão do grupo. Hierarquia forte, poucos elementos e estados explicitamente nomeados mantêm a autoridade do servidor e o próximo passo visíveis em celulares e computadores.",
+    "keyCharacteristics": [
+      "Painel único, escuro e texturizado.",
+      "Eixo vertical de deixas com numeração e regras de latão.",
+      "Tipografia condensada para comandos e sans-serif neutra para explicações.",
+      "Verde e âmbar reservados para estados oficiais, sempre acompanhados por texto.",
+      "Ação de recuperação isolada no alcance do polegar."
+    ],
+    "rules": [
+      {
+        "name": "Regra do Latão Raro",
+        "body": "O latão estrutura a leitura e marca a ação principal, mas não preenche superfícies inteiras fora do controle de recuperação.",
+        "section": "colors"
+      },
+      {
+        "name": "Regra da Voz de Comando",
+        "body": "Archivo Narrow pertence aos títulos que orientam a mesa; explicações, metadados e controles permanecem em Inter.",
+        "section": "typography"
+      },
+      {
+        "name": "Regra do Eixo de Deixa",
+        "body": "Numeração, linha vertical, estado dominante e ação final devem compartilhar uma progressão visual contínua, nunca uma grade de módulos independentes.",
+        "section": "layout"
+      },
+      {
+        "name": "Regra do Painel Único",
+        "body": "A sombra enquadra a mesa completa; estados, trilhos e ações permanecem planos dentro dela.",
+        "section": "elevation"
+      },
+      {
+        "name": "Regra do Contraste de Silhueta",
+        "body": "Cantos arredondados indicam interação ou estado; a estrutura da mesa continua reta e precisa.",
+        "section": "shapes"
+      },
+      {
+        "name": "Regra do Próximo Passo",
+        "body": "A região inferior mostra uma única ação de recuperação ou uma única nota de continuidade, nunca as duas ao mesmo tempo.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do preservar o painel contínuo, o eixo de deixas e a hierarquia entre estado oficial e próximo passo.",
+      "Do manter estados verde e âmbar acompanhados por títulos e descrições explícitas.",
+      "Do respeitar safe areas, zoom, foco visível e alvos interativos com pelo menos `44px` por `44px`.",
+      "Do usar textura, latão e tipografia condensada como sinais discretos de direção de cena."
+    ],
+    "donts": [
+      "Don't transformar a mesa em um dashboard de cartões mágicos independentes.",
+      "Don't usar cor, pulso ou preenchimento como único canal para disponibilidade.",
+      "Don't arredondar trilhos, marcadores numéricos ou divisores estruturais.",
+      "Don't introduzir componentes, ornamentos ou conteúdo de franquia sem presença comprovada no produto."
+    ]
+  }
+}

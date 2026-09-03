@@ -1,0 +1,10 @@
+{
+  "name": "Batalha de Hogwarts",
+  "short_name": "Hogwarts",
+  "description": "Mesa cooperativa mobile-first para Batalha de Hogwarts.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08131d",
+  "theme_color": "#08131d",
+  "lang": "pt-BR"
+}

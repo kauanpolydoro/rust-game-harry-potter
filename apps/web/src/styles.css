@@ -1,0 +1,331 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink: #08131d;
+  --ink-raised: #0d1b27;
+  --chalk: #f4f0e7;
+  --chalk-muted: #b7c0c5;
+  --brass: #c7a35b;
+  --brass-quiet: #6f633f;
+  --ready: #70c18c;
+  --warning: #e2ab55;
+  --focus: #9cd7ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--ink);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  background: var(--ink);
+  color: var(--chalk);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+
+::selection {
+  background: var(--brass);
+  color: var(--ink);
+}
+
+#app {
+  min-height: inherit;
+}
+
+.shell {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(22rem, 1fr) auto;
+  width: min(100%, 52rem);
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin-inline: auto;
+  padding:
+    max(1.25rem, env(safe-area-inset-top))
+    max(1.25rem, env(safe-area-inset-right))
+    max(1.25rem, env(safe-area-inset-bottom))
+    max(1.25rem, env(safe-area-inset-left));
+  overflow: hidden;
+  background-color: var(--ink);
+  background-image: url('/textures/stage-panel.jpg');
+  background-size: 32rem 32rem;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 28%);
+}
+
+.shell::before {
+  position: absolute;
+  inset: 0 auto 0 4.4rem;
+  width: 1px;
+  background: var(--brass-quiet);
+  content: "";
+  pointer-events: none;
+}
+
+.masthead {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.2rem 1.1rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--brass-quiet);
+}
+
+.cue-mark {
+  grid-row: 1 / span 2;
+  width: 0;
+  height: 0;
+  margin-inline: auto;
+  border-block: 0.45rem solid transparent;
+  border-left: 0.65rem solid var(--brass);
+}
+
+.masthead h1 {
+  margin: 0;
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+}
+
+.edition {
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.service-check {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 1.25rem;
+  padding-block: clamp(3rem, 14vh, 7rem) 2rem;
+}
+
+.cue-rail {
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(4rem, 1fr) auto;
+  justify-items: center;
+  min-height: 17rem;
+}
+
+.cue-number {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--brass);
+  background: var(--ink);
+  color: var(--brass);
+  font-variant-numeric: tabular-nums;
+  font-weight: 760;
+}
+
+.cue-line {
+  width: 1px;
+  background: var(--brass-quiet);
+}
+
+.cue-label {
+  color: var(--chalk-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+}
+
+.service-state {
+  align-self: center;
+  padding-block: 1.5rem;
+}
+
+.state-heading {
+  display: grid;
+  grid-template-columns: 1.2rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.9rem;
+}
+
+.state-heading h2 {
+  max-width: 14ch;
+  margin: 0;
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.state-signal {
+  width: 0.85rem;
+  height: 0.85rem;
+  margin-top: 0.35rem;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  color: var(--chalk-muted);
+}
+
+.service-check--ready .state-signal {
+  background: var(--ready);
+  color: var(--ready);
+}
+
+.service-check--unavailable .state-signal {
+  background: var(--warning);
+  color: var(--warning);
+}
+
+.service-check--checking .state-signal {
+  animation: checking 1.4s ease-in-out infinite;
+}
+
+.state-description {
+  max-width: 34rem;
+  margin: 1.5rem 0 0 2.1rem;
+  color: var(--chalk-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.action-dock {
+  min-height: 4.5rem;
+  margin-left: 4.45rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--brass-quiet);
+}
+
+.retry-button {
+  width: 100%;
+  min-height: 3.25rem;
+  border: 1px solid var(--brass);
+  border-radius: 0.75rem;
+  background: var(--brass);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 760;
+  transition:
+    background-color 180ms ease-out,
+    color 180ms ease-out;
+}
+
+.retry-button:hover {
+  background: var(--chalk);
+  color: var(--ink);
+}
+
+.retry-button:active {
+  background: var(--warning);
+}
+
+.retry-button[aria-disabled="true"] {
+  background: transparent;
+  color: var(--chalk-muted);
+  cursor: wait;
+}
+
+.continuity-note {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.continuity-note span {
+  width: 2rem;
+  height: 1px;
+  background: var(--brass);
+}
+
+@keyframes checking {
+  50% {
+    background: currentColor;
+    opacity: 0.35;
+  }
+}
+
+@media (min-width: 48rem) {
+  .shell {
+    padding-inline: 3rem;
+  }
+
+  .shell::before {
+    left: 6.2rem;
+  }
+
+  .service-check {
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+
+  .masthead {
+    grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+  }
+
+  .masthead h1 {
+    font-size: 1.8rem;
+  }
+
+  .state-heading h2 {
+    font-size: 4rem;
+  }
+
+  .state-description {
+    font-size: 1.2rem;
+  }
+
+  .edition {
+    align-self: center;
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
+  .action-dock {
+    margin-left: 6.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
