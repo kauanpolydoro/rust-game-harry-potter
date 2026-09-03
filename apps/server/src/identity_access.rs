@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -25,6 +25,9 @@ pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/api/rooms", post(create_room))
         .route("/api/rooms/{room_code}", get(find_room))
+        .route("/api/rooms/{room_code}/participants", post(join_room))
+        .route("/api/session", get(restore_session))
+        .route("/api/session/hero", put(select_hero))
 }
 
 #[derive(Deserialize)]
@@ -34,15 +37,23 @@ struct CreateRoomRequest {
     recovery_password: String,
 }
 
-#[derive(Serialize)]
-struct CreateRoomResponse {
-    room: RoomSummary,
-    participant: ParticipantSummary,
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JoinRoomRequest {
+    display_name: String,
+    hero_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectHeroRequest {
+    hero_id: String,
 }
 
 #[derive(Serialize)]
 struct FindRoomResponse {
     room: RoomSummary,
+    heroes: Vec<HeroAvailability>,
 }
 
 #[derive(Serialize)]
@@ -54,7 +65,31 @@ struct RoomSummary {
 #[derive(Serialize)]
 struct ParticipantSummary {
     display_name: String,
-    role: &'static str,
+    role: String,
+    position: i16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hero: Option<HeroSummary>,
+}
+
+#[derive(Serialize)]
+struct LobbyResponse {
+    room: RoomSummary,
+    participant: ParticipantSummary,
+    participants: Vec<ParticipantSummary>,
+    heroes: Vec<HeroAvailability>,
+}
+
+#[derive(Serialize)]
+struct HeroSummary {
+    id: &'static str,
+    name: &'static str,
+}
+
+#[derive(Serialize)]
+struct HeroAvailability {
+    id: &'static str,
+    name: &'static str,
+    available: bool,
 }
 
 #[derive(Serialize)]
@@ -97,6 +132,16 @@ enum ErrorCode {
     IdempotencyKeyReused,
     #[serde(rename = "ROOM_NOT_FOUND")]
     RoomNotFound,
+    #[serde(rename = "ROOM_UNAVAILABLE")]
+    RoomUnavailable,
+    #[serde(rename = "ROOM_FULL")]
+    RoomFull,
+    #[serde(rename = "INVALID_HERO")]
+    InvalidHero,
+    #[serde(rename = "HERO_UNAVAILABLE")]
+    HeroUnavailable,
+    #[serde(rename = "SESSION_INVALID")]
+    SessionInvalid,
     #[serde(rename = "INTERNAL_ERROR")]
     Internal,
 }
@@ -107,6 +152,7 @@ enum ErrorCategory {
     Validation,
     Conflict,
     NotFound,
+    Authentication,
     Internal,
 }
 
@@ -132,17 +178,98 @@ enum MessageKey {
     IdempotencyKeyReused,
     #[serde(rename = "room.not_found")]
     RoomNotFound,
+    #[serde(rename = "room.unavailable")]
+    RoomUnavailable,
+    #[serde(rename = "room.full")]
+    RoomFull,
+    #[serde(rename = "hero.invalid")]
+    InvalidHero,
+    #[serde(rename = "hero.unavailable")]
+    HeroUnavailable,
+    #[serde(rename = "session.invalid")]
+    SessionInvalid,
     #[serde(rename = "internal.error")]
     Internal,
 }
 
 #[derive(FromRow)]
 struct StoredRoomCreation {
-    room_code: String,
-    room_status: String,
+    participant_id: Uuid,
     display_name: String,
     recovery_password_hash: String,
     session_token: String,
+}
+
+#[derive(FromRow)]
+struct StoredRoomJoin {
+    participant_id: Uuid,
+    room_code: String,
+    display_name: String,
+    hero_id: String,
+    session_token: String,
+}
+
+#[derive(FromRow)]
+struct StoredParticipant {
+    id: Uuid,
+    display_name: String,
+    role: String,
+    position: i16,
+    hero_id: Option<String>,
+}
+
+struct StoredLobby {
+    room_code: String,
+    room_status: String,
+    current_participant_id: Uuid,
+    participants: Vec<StoredParticipant>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeroId {
+    Harry,
+    Hermione,
+    Neville,
+    Ron,
+}
+
+impl HeroId {
+    const ALL: [Self; 4] = [Self::Harry, Self::Hermione, Self::Neville, Self::Ron];
+
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value {
+            "harry" => Ok(Self::Harry),
+            "hermione" => Ok(Self::Hermione),
+            "neville" => Ok(Self::Neville),
+            "ron" => Ok(Self::Ron),
+            _ => Err(ApiError::invalid_hero()),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Harry => "harry",
+            Self::Hermione => "hermione",
+            Self::Neville => "neville",
+            Self::Ron => "ron",
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Harry => "Harry",
+            Self::Hermione => "Hermione",
+            Self::Neville => "Neville",
+            Self::Ron => "Ron",
+        }
+    }
+
+    fn summary(self) -> HeroSummary {
+        HeroSummary {
+            id: self.as_str(),
+            name: self.name(),
+        }
+    }
 }
 
 impl ApiError {
@@ -183,6 +310,56 @@ impl ApiError {
             category: ErrorCategory::NotFound,
             retry: RetryPolicy::AfterCorrection,
             message_key: MessageKey::RoomNotFound,
+        }
+    }
+
+    fn room_unavailable() -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: ErrorCode::RoomUnavailable,
+            category: ErrorCategory::NotFound,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::RoomUnavailable,
+        }
+    }
+
+    fn room_full() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::RoomFull,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::RoomFull,
+        }
+    }
+
+    fn invalid_hero() -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: ErrorCode::InvalidHero,
+            category: ErrorCategory::Validation,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::InvalidHero,
+        }
+    }
+
+    fn hero_unavailable() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::HeroUnavailable,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::HeroUnavailable,
+        }
+    }
+
+    fn session_invalid() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: ErrorCode::SessionInvalid,
+            category: ErrorCategory::Authentication,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::SessionInvalid,
         }
     }
 
@@ -230,7 +407,13 @@ async fn create_room(
     validate_password(&request.recovery_password)?;
 
     if let Some(stored) = postgres::load_room_creation(&state.database, &idempotency_key).await? {
-        return replay_room_creation(stored, display_name, request.recovery_password).await;
+        return replay_room_creation(
+            &state.database,
+            stored,
+            display_name,
+            request.recovery_password,
+        )
+        .await;
     }
 
     let password_hash = hash_password(request.recovery_password.clone()).await?;
@@ -259,7 +442,13 @@ async fn create_room(
         let stored = postgres::load_room_creation(&state.database, &idempotency_key)
             .await?
             .ok_or_else(ApiError::internal)?;
-        return replay_room_creation(stored, display_name, request.recovery_password).await;
+        return replay_room_creation(
+            &state.database,
+            stored,
+            display_name,
+            request.recovery_password,
+        )
+        .await;
     }
 
     let stored = postgres::persist_room_creation(
@@ -276,7 +465,7 @@ async fn create_room(
         .await
         .map_err(|_| ApiError::internal())?;
 
-    Ok(room_created_response(stored))
+    room_created_response(&state.database, stored).await
 }
 
 async fn find_room(
@@ -287,12 +476,14 @@ async fn find_room(
     let room = postgres::find_open_room(&state.database, &normalized_code)
         .await?
         .ok_or_else(ApiError::room_not_found)?;
+    let selected_heroes = postgres::selected_room_heroes(&state.database, &normalized_code).await?;
 
     let mut response = Json(FindRoomResponse {
         room: RoomSummary {
             code: room.0,
             status: room.1,
         },
+        heroes: hero_availability(&selected_heroes),
     })
     .into_response();
     response
@@ -301,7 +492,271 @@ async fn find_room(
     Ok(response)
 }
 
+async fn join_room(
+    State(state): State<AppState>,
+    Path(room_code): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<JoinRoomRequest>,
+) -> Result<Response, ApiError> {
+    let idempotency_key = idempotency_key(&headers)?;
+    let normalized_code = room_code.to_ascii_uppercase();
+    let display_name = validate_display_name(&request.display_name)?;
+    let hero = HeroId::parse(&request.hero_id)?;
+
+    if let Some(stored) = postgres::load_room_join(&state.database, &idempotency_key).await? {
+        return replay_room_join(
+            &state.database,
+            stored,
+            &normalized_code,
+            display_name,
+            hero,
+        )
+        .await;
+    }
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let room_id = postgres::lock_open_room(&mut transaction, &normalized_code)
+        .await?
+        .ok_or_else(ApiError::room_unavailable)?;
+    let participant_id = Uuid::new_v4();
+    let guest_session_id = Uuid::new_v4();
+    let claimed = postgres::claim_room_join(
+        &mut transaction,
+        &idempotency_key,
+        room_id,
+        participant_id,
+        guest_session_id,
+    )
+    .await?;
+
+    if !claimed {
+        transaction
+            .rollback()
+            .await
+            .map_err(|_| ApiError::internal())?;
+        let stored = postgres::load_room_join(&state.database, &idempotency_key)
+            .await?
+            .ok_or_else(ApiError::internal)?;
+        return replay_room_join(
+            &state.database,
+            stored,
+            &normalized_code,
+            display_name,
+            hero,
+        )
+        .await;
+    }
+
+    let position = postgres::next_room_position(&mut transaction, room_id).await?;
+    if postgres::room_has_hero(&mut transaction, room_id, hero.as_str()).await? {
+        return Err(ApiError::hero_unavailable());
+    }
+
+    let stored = postgres::persist_room_join(
+        &mut transaction,
+        postgres::NewRoomJoin {
+            room_id,
+            participant_id,
+            guest_session_id,
+            room_code: &normalized_code,
+            display_name,
+            hero_id: hero.as_str(),
+            position,
+        },
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    room_joined_response(&state.database, stored).await
+}
+
+async fn restore_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let session_token = session_token(&headers)?;
+    let participant_id = postgres::participant_for_session(&state.database, session_token)
+        .await?
+        .ok_or_else(ApiError::session_invalid)?;
+    let lobby = postgres::load_lobby(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::session_invalid)?;
+
+    Ok(no_store_json(StatusCode::OK, lobby_response(lobby)))
+}
+
+async fn select_hero(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SelectHeroRequest>,
+) -> Result<Response, ApiError> {
+    let session_token = session_token(&headers)?;
+    let hero = HeroId::parse(&request.hero_id)?;
+    let participant_id = postgres::participant_for_session(&state.database, session_token)
+        .await?
+        .ok_or_else(ApiError::session_invalid)?;
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let room_id = postgres::lock_participant_open_room(&mut transaction, participant_id)
+        .await?
+        .ok_or_else(ApiError::room_unavailable)?;
+
+    if postgres::room_hero_owned_by_other(&mut transaction, room_id, participant_id, hero.as_str())
+        .await?
+    {
+        return Err(ApiError::hero_unavailable());
+    }
+
+    postgres::update_participant_hero(&mut transaction, participant_id, hero.as_str()).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let lobby = postgres::load_lobby(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+
+    Ok(no_store_json(StatusCode::OK, lobby_response(lobby)))
+}
+
+async fn replay_room_join(
+    database: &sqlx::PgPool,
+    stored: StoredRoomJoin,
+    room_code: &str,
+    display_name: &str,
+    hero: HeroId,
+) -> Result<Response, ApiError> {
+    if stored.room_code != room_code
+        || stored.display_name != display_name
+        || stored.hero_id != hero.as_str()
+    {
+        return Err(ApiError::idempotency_conflict());
+    }
+
+    room_joined_response(database, stored).await
+}
+
+async fn room_joined_response(
+    database: &sqlx::PgPool,
+    stored: StoredRoomJoin,
+) -> Result<Response, ApiError> {
+    let lobby = postgres::load_lobby(database, stored.participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+    let mut response = no_store_json(StatusCode::CREATED, lobby_response(lobby));
+    set_session_cookie(&mut response, &stored.session_token);
+    Ok(response)
+}
+
+fn lobby_response(stored: StoredLobby) -> LobbyResponse {
+    let selected_heroes: Vec<String> = stored
+        .participants
+        .iter()
+        .filter_map(|participant| participant.hero_id.clone())
+        .collect();
+    let mut current_participant = None;
+    let participants = stored
+        .participants
+        .into_iter()
+        .map(|participant| {
+            let is_current = participant.id == stored.current_participant_id;
+            let summary = participant_summary(participant);
+            if is_current {
+                current_participant = Some(ParticipantSummary {
+                    display_name: summary.display_name.clone(),
+                    role: summary.role.clone(),
+                    position: summary.position,
+                    hero: summary.hero.as_ref().map(|hero| HeroSummary {
+                        id: hero.id,
+                        name: hero.name,
+                    }),
+                });
+            }
+            summary
+        })
+        .collect();
+
+    LobbyResponse {
+        room: RoomSummary {
+            code: stored.room_code,
+            status: stored.room_status,
+        },
+        participant: current_participant.expect("the current participant belongs to the lobby"),
+        participants,
+        heroes: hero_availability(&selected_heroes),
+    }
+}
+
+fn hero_availability(selected_heroes: &[String]) -> Vec<HeroAvailability> {
+    HeroId::ALL
+        .into_iter()
+        .map(|hero| HeroAvailability {
+            id: hero.as_str(),
+            name: hero.name(),
+            available: !selected_heroes
+                .iter()
+                .any(|selected| selected == hero.as_str()),
+        })
+        .collect()
+}
+
+fn participant_summary(stored: StoredParticipant) -> ParticipantSummary {
+    ParticipantSummary {
+        display_name: stored.display_name,
+        role: stored.role,
+        position: stored.position,
+        hero: stored
+            .hero_id
+            .as_deref()
+            .and_then(|hero_id| HeroId::parse(hero_id).ok())
+            .map(HeroId::summary),
+    }
+}
+
+fn no_store_json(status: StatusCode, body: impl Serialize) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn set_session_cookie(response: &mut Response, token: &str) {
+    let cookie = format!(
+        "__Host-session={token}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Strict"
+    );
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).expect("hexadecimal session tokens make a valid cookie"),
+    );
+}
+
+fn session_token(headers: &HeaderMap) -> Result<&str, ApiError> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|cookies| cookies.split(';'))
+        .map(str::trim)
+        .find_map(|cookie| cookie.strip_prefix("__Host-session="))
+        .filter(|token| {
+            token.len() == SESSION_BYTES * 2 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+        .ok_or_else(ApiError::session_invalid)
+}
+
 async fn replay_room_creation(
+    database: &sqlx::PgPool,
     stored: StoredRoomCreation,
     display_name: &str,
     password: String,
@@ -323,36 +778,19 @@ async fn replay_room_creation(
         return Err(ApiError::idempotency_conflict());
     }
 
-    Ok(room_created_response(stored))
+    room_created_response(database, stored).await
 }
 
-fn room_created_response(stored: StoredRoomCreation) -> Response {
-    let cookie = format!(
-        "__Host-session={}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Strict",
-        stored.session_token
-    );
-    let mut response = (
-        StatusCode::CREATED,
-        Json(CreateRoomResponse {
-            room: RoomSummary {
-                code: stored.room_code,
-                status: stored.room_status,
-            },
-            participant: ParticipantSummary {
-                display_name: stored.display_name,
-                role: "host",
-            },
-        }),
-    )
-        .into_response();
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).expect("hexadecimal session tokens make a valid cookie"),
-    );
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
+async fn room_created_response(
+    database: &sqlx::PgPool,
+    stored: StoredRoomCreation,
+) -> Result<Response, ApiError> {
+    let lobby = postgres::load_lobby(database, stored.participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+    let mut response = no_store_json(StatusCode::CREATED, lobby_response(lobby));
+    set_session_cookie(&mut response, &stored.session_token);
+    Ok(response)
 }
 
 async fn hash_password(password: String) -> Result<String, ApiError> {
