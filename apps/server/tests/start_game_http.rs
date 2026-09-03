@@ -175,6 +175,44 @@ fn assert_database_error_code(error: &sqlx::Error, expected: &str) {
     assert_eq!(actual.as_deref(), Some(expected));
 }
 
+async fn assert_history_prevents_game_deletion(room: &ReadyRoom) {
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the protected game deletion transaction must start");
+    sqlx::query(
+        r"
+        DELETE FROM game_start_requests
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&mut *transaction)
+    .await
+    .expect("the older start-request reference must be removed inside the test transaction");
+    let error = sqlx::query(
+        r"
+        DELETE FROM games
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("the append-only event or receipt must prevent deleting its game");
+    assert_database_error_code(&error, "23503");
+    transaction
+        .rollback()
+        .await
+        .expect("the protected game deletion transaction must roll back");
+}
+
 async fn insert_test_event(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     game_id: uuid::Uuid,
@@ -959,17 +997,7 @@ async fn committed_events_and_receipts_are_append_only() {
         assert_database_error_code(&error, "55000");
     }
 
-    let game_delete = sqlx::query(
-        r"
-        DELETE FROM games
-        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
-        ",
-    )
-    .bind(&room.room_code)
-    .execute(&room.database)
-    .await
-    .expect_err("a game with official history must not be deleted through a cascade");
-    assert_database_error_code(&game_delete, "23503");
+    assert_history_prevents_game_deletion(&room).await;
 
     let artifact_counts = sqlx::query_as::<_, (i64, i64)>(
         r"
@@ -1124,6 +1152,93 @@ async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
         .execute(&mut *transaction)
         .await
         .expect_err("incoherent event metadata must be rejected");
+        assert_database_error_code(&error, "23514");
+        assert!(error.to_string().contains(expected_message));
+        transaction
+            .rollback()
+            .await
+            .expect("the rejected event transaction must roll back");
+    }
+}
+
+#[tokio::test]
+async fn an_event_payload_must_match_the_supported_codec_exactly() {
+    let room = ready_room().await;
+    start_ready_game(&room, "event-codec-start").await;
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+        SELECT id, room_id, started_by_participant_id
+        FROM games
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the test game must exist");
+
+    for (event_type, extra_payload, expected_message) in [
+        (
+            "future_event",
+            "{}",
+            "event type is not supported by the current codec",
+        ),
+        (
+            "dark_arts_completed",
+            r#"{"unexpected":true}"#,
+            "payload metadata must match",
+        ),
+    ] {
+        let mut transaction = room
+            .database
+            .begin()
+            .await
+            .expect("the event codec transaction must start");
+        sqlx::query("UPDATE games SET sequence = 1, state_version = 2 WHERE id = $1")
+            .bind(game_id)
+            .execute(&mut *transaction)
+            .await
+            .expect("the test snapshot must advance inside the transaction");
+        let error = sqlx::query(
+            r"
+            INSERT INTO game_events (
+                game_id,
+                room_id,
+                sequence,
+                event_type,
+                command_id,
+                actor_participant_id,
+                state_version,
+                payload
+            )
+            VALUES (
+                $1,
+                $2,
+                1,
+                $3,
+                $4,
+                $5,
+                2,
+                jsonb_build_object(
+                    'event_version', 1,
+                    'type', $3,
+                    'sequence', 1,
+                    'state_version', 2,
+                    'turn', 1,
+                    'actor_position', 1
+                ) || $6::jsonb
+            )
+            ",
+        )
+        .bind(game_id)
+        .bind(room_id)
+        .bind(event_type)
+        .bind(uuid::Uuid::new_v4())
+        .bind(actor_id)
+        .bind(extra_payload)
+        .execute(&mut *transaction)
+        .await
+        .expect_err("an event outside the current codec must be rejected");
         assert_database_error_code(&error, "23514");
         assert!(error.to_string().contains(expected_message));
         transaction

@@ -114,15 +114,33 @@ BEGIN
     WHERE room_id = NEW.room_id
       AND id = NEW.actor_participant_id;
 
-    IF actor_position IS NOT NULL AND NOT (
-        NEW.payload @> jsonb_build_object(
+    IF NEW.event_version <> 1 OR NEW.event_type <> 'dark_arts_completed' THEN
+        RAISE EXCEPTION 'game event type is not supported by the current codec'
+            USING ERRCODE = '23514';
+    END IF;
+
+    IF jsonb_typeof(NEW.payload) <> 'object'
+       OR jsonb_typeof(NEW.payload -> 'turn') <> 'number'
+       OR NEW.payload ->> 'turn' !~ '^[1-9][0-9]*$'
+    THEN
+        RAISE EXCEPTION 'game event payload must match the current codec shape'
+            USING ERRCODE = '23514';
+    END IF;
+
+    IF (NEW.payload ->> 'turn')::NUMERIC > 4294967295 THEN
+        RAISE EXCEPTION 'game event turn exceeds the current codec range'
+            USING ERRCODE = '23514';
+    END IF;
+
+    IF actor_position IS NOT NULL AND NEW.payload <> jsonb_build_object(
             'event_version', NEW.event_version,
             'type', NEW.event_type,
             'sequence', NEW.sequence,
             'state_version', NEW.state_version,
+            'turn', NEW.payload -> 'turn',
             'actor_position', actor_position
         )
-    ) THEN
+    THEN
         RAISE EXCEPTION 'game event payload metadata must match its relational envelope'
             USING ERRCODE = '23514';
     END IF;
