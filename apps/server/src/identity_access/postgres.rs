@@ -155,16 +155,16 @@ pub(super) async fn room_has_hero(
     .map_err(|_| ApiError::internal())
 }
 
-pub(super) async fn lock_participant_open_room(
+pub(super) async fn lock_participant_room(
     transaction: &mut Transaction<'_, Postgres>,
     participant_id: Uuid,
-) -> Result<Option<Uuid>, ApiError> {
-    sqlx::query_scalar::<_, Uuid>(
+) -> Result<Option<(Uuid, String, Option<String>)>, ApiError> {
+    sqlx::query_as::<_, (Uuid, String, Option<String>)>(
         r"
-        SELECT id
+        SELECT rooms.id, rooms.status, participants.hero_id
         FROM rooms
-        WHERE id = (SELECT room_id FROM participants WHERE id = $1)
-          AND status = 'open'
+        JOIN participants ON participants.room_id = rooms.id
+        WHERE participants.id = $1
         FOR UPDATE
         ",
     )
@@ -204,9 +204,23 @@ pub(super) async fn update_participant_hero(
     participant_id: Uuid,
     hero_id: &str,
 ) -> Result<(), ApiError> {
-    sqlx::query("UPDATE participants SET hero_id = $2 WHERE id = $1")
+    sqlx::query("UPDATE participants SET hero_id = $2, ready = FALSE WHERE id = $1")
         .bind(participant_id)
         .bind(hero_id)
+        .execute(&mut **transaction)
+        .await
+        .map(|_| ())
+        .map_err(|_| ApiError::internal())
+}
+
+pub(super) async fn update_participant_readiness(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant_id: Uuid,
+    ready: bool,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE participants SET ready = $2 WHERE id = $1")
+        .bind(participant_id)
+        .bind(ready)
         .execute(&mut **transaction)
         .await
         .map(|_| ())
@@ -353,7 +367,7 @@ pub(super) async fn load_lobby(
 
     let participants = sqlx::query_as::<_, StoredParticipant>(
         r"
-        SELECT id, display_name, role, position, hero_id
+        SELECT id, display_name, role, position, hero_id, ready
         FROM participants
         WHERE room_id = (SELECT room_id FROM participants WHERE id = $1)
         ORDER BY position

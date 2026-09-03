@@ -556,6 +556,8 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum",
+ "blake3",
+ "game-content",
  "game-domain",
  "getrandom 0.4.3",
  "http-body-util",

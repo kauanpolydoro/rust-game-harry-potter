@@ -34,7 +34,7 @@ test('a guest creates a private room and becomes its host', async ({ context, pa
 
   await expect(page.getByRole('heading', { level: 2, name: 'Sala pronta' })).toBeVisible()
   await expect(page.getByText(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/)).toBeVisible()
-  await expect(page.getByText('Minerva', { exact: true })).toBeVisible()
+  await expect(page.locator('.room-details').getByText('Minerva', { exact: true })).toBeVisible()
   await expect(page.getByText('Protegida neste navegador')).toBeVisible()
 
   const session = (await context.cookies()).find((cookie) => cookie.name === '__Host-session')
@@ -64,14 +64,14 @@ test('a guest joins with an available hero and keeps the same position after rel
     await guestPage.getByRole('button', { name: 'Entrar na sala' }).click()
 
     await expect(guestPage.getByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
-    await expect(guestPage.getByText('Posição 2', { exact: true })).toBeVisible()
-    await expect(guestPage.getByText('Hermione', { exact: true })).toBeVisible()
+    await expect(guestPage.locator('.room-details').getByText('Posição 2', { exact: true })).toBeVisible()
+    await expect(guestPage.locator('.room-details').getByText('Hermione', { exact: true })).toBeVisible()
 
     await guestPage.reload()
 
     await expect(guestPage.getByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
-    await expect(guestPage.getByText('Posição 2', { exact: true })).toBeVisible()
-    await expect(guestPage.getByText('Hermione', { exact: true })).toBeVisible()
+    await expect(guestPage.locator('.room-details').getByText('Posição 2', { exact: true })).toBeVisible()
+    await expect(guestPage.locator('.room-details').getByText('Hermione', { exact: true })).toBeVisible()
   } finally {
     await guestContext.close()
   }

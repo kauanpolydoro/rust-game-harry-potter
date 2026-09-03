@@ -8,9 +8,12 @@ rust-version.workspace = true
 [dependencies]
 argon2.workspace = true
 axum.workspace = true
+blake3.workspace = true
+game-content = { path = "../../crates/game-content" }
 game-domain = { path = "../../crates/game-domain" }
 getrandom.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -19,7 +22,6 @@ uuid.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
-serde_json.workspace = true
 tower.workspace = true
 
 [lints]
