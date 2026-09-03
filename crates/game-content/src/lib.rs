@@ -13,7 +13,10 @@ pub use manifest::{
     ContentGap, ContentManifest, ContentSet, EntryKind, FunctionalConfidence, FunctionalField,
     FunctionalProvenance, ManifestEntry, ProvenanceSource, SourceKind,
 };
-pub use schema::import_base_bundle;
+pub use schema::{
+    import_base_bundle, import_base_bundle_with_runtime_rules,
+    import_base_bundle_with_trusted_sources,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportFailure {
