@@ -58,6 +58,8 @@ Readiness tem timeout de um segundo e não mascara falhas de banco como disponib
 
 ## Estrutura
 
+- `crates/game-content` importa bundles declarativos, valida publicação em modo fechado e produz manifestos canônicos com digest BLAKE3.
+
 - `crates/game-domain` contém somente regras puras e não pode importar infraestrutura.
 
 - `apps/server` contém os adapters HTTP e PostgreSQL.
@@ -65,5 +67,7 @@ Readiness tem timeout de um segundo e não mascara falhas de banco como disponib
 - `apps/web` contém o cliente Vue e considera oficial apenas o que chega pelos contratos do servidor.
 
 - `contracts` é a fonte canônica para artefatos gerados compartilhados.
+
+- `content/bundles` contém os catálogos candidatos e sua proveniência por campo.
 
 O gate `scripts/check-boundaries.mjs` impede dependências de infraestrutura no módulo de domínio.
