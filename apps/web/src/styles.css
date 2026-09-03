@@ -598,6 +598,42 @@ input {
   margin-top: 1rem;
 }
 
+.command-feedback {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1.5rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--brass-quiet);
+  color: var(--chalk-muted);
+}
+
+.command-feedback strong {
+  color: var(--chalk);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.command-feedback p {
+  max-width: 34rem;
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.command-feedback--pending strong,
+.command-feedback--warning strong {
+  color: var(--warning);
+}
+
+.command-feedback--accepted strong {
+  color: var(--ready);
+}
+
+.command-feedback + .game-situation {
+  margin-top: 1rem;
+  border-top: 0;
+}
+
 .game-situation {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

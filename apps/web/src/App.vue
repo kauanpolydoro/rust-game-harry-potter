@@ -3,10 +3,12 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { type Availability, useHealthStore } from './stores/health'
+import { useGameCommandStore } from './stores/gameCommand'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
 
 const health = useHealthStore()
+const gameCommand = useGameCommandStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
 const entryMode = ref<'create' | 'join'>('create')
@@ -71,6 +73,43 @@ const activeParticipant = computed(() =>
   ),
 )
 const currentGameParticipantPosition = computed(() => game.value?.participant.position)
+const canCompleteDarkArts = computed(
+  () =>
+    game.value?.legal_actions.includes('complete_dark_arts') === true &&
+    !gameCommand.pendingIntent &&
+    gameCommand.status !== 'submitting' &&
+    gameCommand.status !== 'recovering',
+)
+const gamePhaseLabel = computed(() => {
+  switch (game.value?.turn.phase) {
+    case 'dark_arts':
+      return 'Artes das Trevas'
+    case 'hero_action':
+      return 'Ação do Herói'
+    default:
+      return game.value?.turn.phase ?? ''
+  }
+})
+const gameCommandError = computed(() => {
+  switch (gameCommand.errorCode) {
+    case 'STALE_STATE_VERSION':
+      return 'O estado oficial avançou. Atualize a partida e decida novamente.'
+    case 'GAME_ACTION_NOT_ALLOWED':
+      return 'Esta ação não está disponível para você no estado oficial atual.'
+    case 'GAME_EXPIRED':
+      return 'A partida expirou e não aceita novas ações.'
+    case null:
+      return null
+    default:
+      return 'Não foi possível confirmar a ação. Consulte o resultado antes de decidir novamente.'
+  }
+})
+const acceptedCommandSummary = computed(() => {
+  const receipt = gameCommand.receipt
+  return receipt
+    ? `Recibo aceito no estado v${receipt.accepted_state_version}, sequência ${receipt.accepted_sequence}.`
+    : ''
+})
 const serviceHeading = computed(() => {
   if (isRestoringSession.value) {
     return 'Retomando sua sessão'
@@ -274,6 +313,41 @@ async function refreshLobby(): Promise<void> {
   document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
 }
 
+async function completeDarkArts(): Promise<void> {
+  if (!game.value || !canCompleteDarkArts.value) {
+    return
+  }
+  const projection = await gameCommand.completeDarkArts(game.value)
+  if (projection) {
+    roomAccess.game = projection
+    await nextTick()
+    document.getElementById('game-heading')?.focus()
+  }
+}
+
+async function recoverGameCommand(): Promise<void> {
+  if (!game.value) {
+    return
+  }
+  const projection = await gameCommand.recoverPending(game.value.game.id)
+  if (projection) {
+    roomAccess.game = projection
+    await nextTick()
+    document.getElementById('game-heading')?.focus()
+  }
+}
+
+function formatExpiration(value: string): string {
+  const expiration = new Date(value)
+  if (Number.isNaN(expiration.getTime())) {
+    return 'Prazo indisponível'
+  }
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(expiration)
+}
+
 async function focusAfterAction(errorCode: string | null): Promise<void> {
   await nextTick()
   if (lobby.value) {
@@ -346,6 +420,9 @@ watch(
 
 onMounted(async () => {
   await Promise.all([health.check(), roomAccess.restoreSession()])
+  if (game.value && gameCommand.pendingIntent) {
+    await recoverGameCommand()
+  }
   if (lobby.value || game.value) {
     await nextTick()
     document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
@@ -389,6 +466,7 @@ onMounted(async () => {
       v-else-if="game"
       class="room-success game-stage"
       aria-labelledby="game-heading"
+      :aria-busy="gameCommand.status === 'submitting' || gameCommand.status === 'recovering'"
     >
       <div class="cue-rail" aria-hidden="true">
         <span class="cue-number">4</span>
@@ -399,12 +477,65 @@ onMounted(async () => {
       <div class="room-stage room-stage--success">
         <p class="service-confirmation" role="status">
           <span class="state-signal" aria-hidden="true"></span>
-          Snapshot inicial confirmado
+          {{ game.snapshot.sequence === 0 ? 'Snapshot inicial confirmado' : 'Estado oficial confirmado' }}
         </p>
-        <h2 id="game-heading" tabindex="-1">Partida iniciada</h2>
+        <h2 id="game-heading" tabindex="-1">
+          {{ game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
+        </h2>
         <p class="stage-description">
           A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
         </p>
+
+        <div
+          v-if="gameCommand.status === 'submitting' || gameCommand.status === 'recovering'"
+          class="command-feedback command-feedback--pending"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>Intenção pendente</strong>
+          <p>
+            {{
+              gameCommand.status === 'recovering'
+                ? 'Consultando o recibo persistido. O estado abaixo continua sendo a última versão oficial.'
+                : 'A solicitação foi enviada. Nada muda na mesa até o servidor concluir o commit.'
+            }}
+          </p>
+        </div>
+        <div
+          v-else-if="gameCommand.status === 'uncertain'"
+          class="command-feedback command-feedback--warning"
+          role="alert"
+        >
+          <strong>Confirmação ainda desconhecida</strong>
+          <p>
+            A conexão terminou sem resposta. Consulte o mesmo comando antes de tomar outra decisão.
+          </p>
+        </div>
+        <div
+          v-else-if="gameCommand.status === 'accepted' && acceptedCommandSummary"
+          class="command-feedback command-feedback--accepted"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>Ação oficial</strong>
+          <p>{{ acceptedCommandSummary }}</p>
+        </div>
+        <div
+          v-else-if="gameCommand.status === 'not_committed'"
+          class="command-feedback"
+          role="status"
+        >
+          <strong>Nenhum aceite encontrado</strong>
+          <p>A intenção anterior não foi oficializada. Revise a mesa e decida novamente.</p>
+        </div>
+        <div
+          v-else-if="gameCommand.status === 'failed' && gameCommandError"
+          class="command-feedback command-feedback--warning"
+          role="alert"
+        >
+          <strong>Ação não aceita</strong>
+          <p>{{ gameCommandError }}</p>
+        </div>
 
         <dl class="game-situation">
           <div>
@@ -413,7 +544,7 @@ onMounted(async () => {
           </div>
           <div>
             <dt>Fase</dt>
-            <dd>{{ game.turn.phase === 'dark_arts' ? 'Artes das Trevas' : game.turn.phase }}</dd>
+            <dd>{{ gamePhaseLabel }}</dd>
           </div>
           <div>
             <dt>Participante ativo</dt>
@@ -422,6 +553,10 @@ onMounted(async () => {
           <div>
             <dt>Aventura</dt>
             <dd>{{ game.game.adventure.name }}</dd>
+          </div>
+          <div>
+            <dt>Retenção até</dt>
+            <dd>{{ formatExpiration(game.game.expires_at) }}</dd>
           </div>
         </dl>
 
@@ -863,9 +998,37 @@ onMounted(async () => {
       >
         {{ isRestoringSession ? 'Retomando sessão' : 'Tentar retomar sessão' }}
       </button>
+      <button
+        v-else-if="game && gameCommand.status === 'uncertain'"
+        class="primary-button"
+        type="button"
+        @click="recoverGameCommand()"
+      >
+        Verificar resultado da ação
+      </button>
+      <button
+        v-else-if="game && (gameCommand.status === 'submitting' || gameCommand.status === 'recovering')"
+        class="primary-button"
+        :disabled="true"
+        type="button"
+      >
+        {{ gameCommand.status === 'recovering' ? 'Consultando recibo' : 'Aguardando confirmação' }}
+      </button>
+      <button
+        v-else-if="game && canCompleteDarkArts"
+        class="primary-button"
+        type="button"
+        @click="completeDarkArts()"
+      >
+        Concluir Artes das Trevas
+      </button>
       <p v-else-if="game" class="continuity-note">
         <span aria-hidden="true"></span>
-        Estado inicial oficial recebido. A seed não foi enviada ao navegador.
+        {{
+          game.turn.phase === 'hero_action'
+            ? 'Fase oficial concluída. As próximas ações chegam em uma etapa posterior.'
+            : 'Aguardando a ação do participante ativo.'
+        }}
       </p>
       <button
         v-else-if="lobby && lobby.participant.hero && !lobby.participant.ready"

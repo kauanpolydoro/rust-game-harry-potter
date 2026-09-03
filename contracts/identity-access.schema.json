@@ -54,6 +54,16 @@
         "ruleset_version": { "type": "string", "minLength": 1 }
       }
     },
+    "ExecuteGameCommandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command_id", "expected_state_version", "type"],
+      "properties": {
+        "command_id": { "type": "string", "format": "uuid" },
+        "expected_state_version": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["complete_dark_arts"] }
+      }
+    },
     "RoomSummary": {
       "type": "object",
       "additionalProperties": false,
@@ -199,11 +209,12 @@
     "GameSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "status", "adventure"],
+      "required": ["id", "status", "adventure", "expires_at"],
       "properties": {
         "id": { "type": "string", "format": "uuid" },
         "status": { "type": "string", "enum": ["in_progress"] },
-        "adventure": { "$ref": "#/$defs/GameAdventure" }
+        "adventure": { "$ref": "#/$defs/GameAdventure" },
+        "expires_at": { "type": "string", "format": "date-time" }
       }
     },
     "GameVersions": {
@@ -249,7 +260,7 @@
       "required": ["number", "phase", "active_position"],
       "properties": {
         "number": { "type": "integer", "minimum": 1 },
-        "phase": { "type": "string", "enum": ["dark_arts"] },
+        "phase": { "type": "string", "enum": ["dark_arts", "hero_action"] },
         "active_position": { "type": "integer", "minimum": 1, "maximum": 4 }
       }
     },
@@ -281,6 +292,37 @@
           "type": "array",
           "items": { "type": "string" }
         }
+      }
+    },
+    "GameCommandReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command_id",
+        "type",
+        "status",
+        "expected_state_version",
+        "accepted_state_version",
+        "accepted_sequence",
+        "expires_at"
+      ],
+      "properties": {
+        "command_id": { "type": "string", "format": "uuid" },
+        "type": { "type": "string", "enum": ["complete_dark_arts"] },
+        "status": { "type": "string", "enum": ["accepted"] },
+        "expected_state_version": { "type": "integer", "minimum": 1 },
+        "accepted_state_version": { "type": "integer", "minimum": 2 },
+        "accepted_sequence": { "type": "integer", "minimum": 1 },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ExecuteGameCommandResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt", "projection"],
+      "properties": {
+        "receipt": { "$ref": "#/$defs/GameCommandReceipt" },
+        "projection": { "$ref": "#/$defs/GameProjectionResponse" }
       }
     },
     "ErrorResponse": {

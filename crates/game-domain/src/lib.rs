@@ -82,6 +82,7 @@ pub struct InitialGameState {
     pub prng_algorithm: &'static str,
     pub shuffle_algorithm: &'static str,
     pub sampling_algorithm: &'static str,
+    pub prng_counter: u64,
     pub players: Vec<InitialPlayer>,
 }
 
@@ -93,6 +94,44 @@ pub enum GameStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GamePhase {
     DarkArts,
+    HeroAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameCommand {
+    CompleteDarkArts,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GameCommandInput<'a> {
+    pub state: &'a InitialGameState,
+    pub actor_position: u8,
+    pub expected_state_version: u64,
+    pub command: GameCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameCommandDecision {
+    pub state: InitialGameState,
+    pub events: Vec<GameEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameEvent {
+    DarkArtsCompleted {
+        sequence: u64,
+        state_version: u64,
+        turn: u32,
+        actor_position: u8,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameCommandError {
+    StaleStateVersion,
+    ActorNotActive,
+    CommandNotLegal,
+    VersionOverflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,8 +244,61 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         prng_algorithm: PRNG_ALGORITHM,
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
+        prng_counter: 0,
         players,
     })
+}
+
+/// Applies a game command without consulting infrastructure, clocks, or entropy.
+///
+/// The returned state and events form one stable decision that the application
+/// layer can persist atomically.
+///
+/// # Errors
+///
+/// Returns an error when the observed version is stale, the actor is not
+/// authorized for the current decision, or the command is not legal now.
+pub fn decide_game_command(
+    input: GameCommandInput<'_>,
+) -> Result<GameCommandDecision, GameCommandError> {
+    if input.expected_state_version != input.state.state_version {
+        return Err(GameCommandError::StaleStateVersion);
+    }
+    if input.actor_position != input.state.active_position {
+        return Err(GameCommandError::ActorNotActive);
+    }
+
+    match (input.command, input.state.phase) {
+        (GameCommand::CompleteDarkArts, GamePhase::DarkArts) => {
+            let state_version = input
+                .state
+                .state_version
+                .checked_add(1)
+                .ok_or(GameCommandError::VersionOverflow)?;
+            let sequence = input
+                .state
+                .sequence
+                .checked_add(1)
+                .ok_or(GameCommandError::VersionOverflow)?;
+            let mut state = input.state.clone();
+            state.state_version = state_version;
+            state.sequence = sequence;
+            state.phase = GamePhase::HeroAction;
+
+            Ok(GameCommandDecision {
+                state,
+                events: vec![GameEvent::DarkArtsCompleted {
+                    sequence,
+                    state_version,
+                    turn: input.state.turn,
+                    actor_position: input.actor_position,
+                }],
+            })
+        }
+        (GameCommand::CompleteDarkArts, GamePhase::HeroAction) => {
+            Err(GameCommandError::CommandNotLegal)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -350,5 +442,73 @@ mod tests {
             }),
             Err(StartGameError::ContentNotPlayable)
         );
+    }
+
+    #[test]
+    fn active_participant_completes_dark_arts_at_a_stable_decision_point() {
+        let participants = valid_participants();
+        let initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+
+        let decision = decide_game_command(GameCommandInput {
+            state: &initial,
+            actor_position: 1,
+            expected_state_version: 1,
+            command: GameCommand::CompleteDarkArts,
+        })
+        .expect("the active participant should complete the phase");
+
+        assert_eq!(initial.phase, GamePhase::DarkArts);
+        assert_eq!(initial.state_version, 1);
+        assert_eq!(decision.state.phase, GamePhase::HeroAction);
+        assert_eq!(decision.state.state_version, 2);
+        assert_eq!(decision.state.sequence, 1);
+        assert_eq!(decision.state.prng_counter, 0);
+        assert_eq!(
+            decision.events,
+            vec![GameEvent::DarkArtsCompleted {
+                sequence: 1,
+                state_version: 2,
+                turn: 1,
+                actor_position: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn command_decision_rejects_stale_or_unauthorized_intentions_without_mutation() {
+        let participants = valid_participants();
+        let initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+
+        assert_eq!(
+            decide_game_command(GameCommandInput {
+                state: &initial,
+                actor_position: 1,
+                expected_state_version: 0,
+                command: GameCommand::CompleteDarkArts,
+            }),
+            Err(GameCommandError::StaleStateVersion)
+        );
+        assert_eq!(
+            decide_game_command(GameCommandInput {
+                state: &initial,
+                actor_position: 2,
+                expected_state_version: 1,
+                command: GameCommand::CompleteDarkArts,
+            }),
+            Err(GameCommandError::ActorNotActive)
+        );
+        assert_eq!(initial.phase, GamePhase::DarkArts);
+        assert_eq!(initial.state_version, 1);
+        assert_eq!(initial.sequence, 0);
     }
 }

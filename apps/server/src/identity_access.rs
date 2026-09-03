@@ -133,6 +133,8 @@ enum ErrorCode {
     IdempotencyKeyRequired,
     #[serde(rename = "INVALID_IDEMPOTENCY_KEY")]
     InvalidIdempotencyKey,
+    #[serde(rename = "INVALID_COMMAND_ID")]
+    InvalidCommandId,
     #[serde(rename = "INVALID_DISPLAY_NAME")]
     InvalidDisplayName,
     #[serde(rename = "WEAK_RECOVERY_PASSWORD")]
@@ -165,6 +167,14 @@ enum ErrorCode {
     ContentNotPlayable,
     #[serde(rename = "ROOM_SEALED")]
     RoomSealed,
+    #[serde(rename = "STALE_STATE_VERSION")]
+    StaleStateVersion,
+    #[serde(rename = "GAME_ACTION_NOT_ALLOWED")]
+    GameActionNotAllowed,
+    #[serde(rename = "GAME_EXPIRED")]
+    GameExpired,
+    #[serde(rename = "COMMAND_NOT_FOUND")]
+    CommandNotFound,
     #[serde(rename = "INTERNAL_ERROR")]
     Internal,
 }
@@ -194,6 +204,8 @@ enum MessageKey {
     IdempotencyKeyRequired,
     #[serde(rename = "request.idempotency_key.invalid")]
     InvalidIdempotencyKey,
+    #[serde(rename = "game.command_id.invalid")]
+    InvalidCommandId,
     #[serde(rename = "participant.display_name.invalid")]
     InvalidDisplayName,
     #[serde(rename = "room.recovery_password.weak")]
@@ -226,6 +238,14 @@ enum MessageKey {
     ContentNotPlayable,
     #[serde(rename = "room.sealed")]
     RoomSealed,
+    #[serde(rename = "game.state.stale")]
+    StaleStateVersion,
+    #[serde(rename = "game.action.not_allowed")]
+    GameActionNotAllowed,
+    #[serde(rename = "game.expired")]
+    GameExpired,
+    #[serde(rename = "game.command.not_found")]
+    CommandNotFound,
     #[serde(rename = "internal.error")]
     Internal,
 }
@@ -330,6 +350,10 @@ impl ApiError {
             retry: RetryPolicy::AfterCorrection,
             message_key: MessageKey::WeakRecoveryPassword,
         }
+    }
+
+    pub(crate) fn invalid_command_id() -> Self {
+        Self::invalid_request(ErrorCode::InvalidCommandId, MessageKey::InvalidCommandId)
     }
 
     pub(crate) fn idempotency_conflict() -> Self {
@@ -469,6 +493,46 @@ impl ApiError {
             category: ErrorCategory::Conflict,
             retry: RetryPolicy::AfterCorrection,
             message_key: MessageKey::RoomSealed,
+        }
+    }
+
+    pub(crate) fn stale_state_version() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::StaleStateVersion,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::StaleStateVersion,
+        }
+    }
+
+    pub(crate) fn game_action_not_allowed() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: ErrorCode::GameActionNotAllowed,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::GameActionNotAllowed,
+        }
+    }
+
+    pub(crate) fn game_expired() -> Self {
+        Self {
+            status: StatusCode::GONE,
+            code: ErrorCode::GameExpired,
+            category: ErrorCategory::Conflict,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::GameExpired,
+        }
+    }
+
+    pub(crate) fn command_not_found() -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: ErrorCode::CommandNotFound,
+            category: ErrorCategory::NotFound,
+            retry: RetryPolicy::AfterCorrection,
+            message_key: MessageKey::CommandNotFound,
         }
     }
 
