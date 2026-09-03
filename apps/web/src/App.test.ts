@@ -236,8 +236,71 @@ describe('application shell', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
     await screen.findByRole('button', { name: 'Tentar criar novamente' })
     const firstKey = (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers
+    const persistedIntent = JSON.parse(
+      sessionStorage.getItem('hogwarts.room-creation.pending-intent') ?? 'null',
+    ) as unknown
+    expect(persistedIntent).toEqual({
+      commandType: 'create_room',
+      createdAt: expect.any(String),
+      idempotencyKey: expect.any(String),
+    })
+    expect(JSON.stringify(persistedIntent)).not.toContain('Minerva')
+    expect(JSON.stringify(persistedIntent)).not.toContain('a long uncommon passphrase')
 
     cleanup()
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    expect(screen.getByLabelText('Seu nome')).toHaveValue('')
+    expect(screen.getByLabelText('Seu nome')).not.toHaveAttribute('readonly')
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Retomar criação pendente' }))
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    const retryKey = (request.mock.calls[3]?.[1] as RequestInit | undefined)?.headers
+
+    expect(retryKey).toEqual(firstKey)
+  })
+
+  it('keeps a recovered intent until the host resumes or explicitly discards it', async () => {
+    const readyResponse = (): Response =>
+      new Response(JSON.stringify({ status: 'ready' }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      })
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(readyResponse())
+      .mockRejectedValueOnce(new TypeError('response lost after commit'))
+      .mockResolvedValueOnce(readyResponse())
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              category: 'conflict',
+              code: 'IDEMPOTENCY_KEY_REUSED',
+              correlation_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+              details: {},
+              message_key: 'request.idempotency_key.reused',
+              retry: 'with_new_idempotency_key',
+            },
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participant: { display_name: 'Minerva', role: 'host' },
+            room: { code: '9HKGW4RT', status: 'open' },
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 201 },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
     render(App, { global: { plugins: [createPinia()] } })
     await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
     await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
@@ -246,10 +309,34 @@ describe('application shell', () => {
       'a long uncommon passphrase',
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
-    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
-    const retryKey = (request.mock.calls[3]?.[1] as RequestInit | undefined)?.headers
+    await screen.findByRole('button', { name: 'Tentar criar novamente' })
+    const firstKey = (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers
 
-    expect(retryKey).toEqual(firstKey)
+    cleanup()
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByText('Existe uma criação pendente neste navegador.')
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Pomona')
+    await fireEvent.update(screen.getByLabelText('Senha de recuperação'), 'a different passphrase')
+    await fireEvent.click(screen.getByRole('button', { name: 'Retomar criação pendente' }))
+
+    await screen.findByText(
+      'O nome ou a senha não correspondem à criação pendente. Reinsira os mesmos dados ou descarte a tentativa.',
+    )
+    expect(screen.getByRole('button', { name: 'Descartar e começar outra' })).toBeVisible()
+    expect(screen.getByLabelText('Senha de recuperação')).not.toHaveAttribute('readonly')
+    const mismatchedKey = (request.mock.calls[3]?.[1] as RequestInit | undefined)?.headers
+
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Retomar criação pendente' }))
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    const recoveredKey = (request.mock.calls[4]?.[1] as RequestInit | undefined)?.headers
+
+    expect(mismatchedKey).toEqual(firstKey)
+    expect(recoveredKey).toEqual(firstKey)
   })
 
   it('keeps the submitted payload immutable while confirmation is pending', async () => {

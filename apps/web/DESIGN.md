@@ -239,6 +239,7 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 - **Success:** confirma a conclusão em verde com texto anunciado por tecnologia assistiva.
 - **Failure:** usa âmbar, nomeia o problema e oferece uma recuperação concreta em uma região de alerta.
 - **Clipboard:** a ação permanece repetível depois do sucesso e orienta a cópia manual quando o navegador recusa o acesso.
+- **Uncertain creation:** preserva somente ID, tipo e instante do comando, solicita novamente os dados privados e oferece retomada ou descarte explícito sem sugerir que a sala confirmada será excluída.
 
 ### Continuity Note
 

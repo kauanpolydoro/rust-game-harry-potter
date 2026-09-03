@@ -40,3 +40,11 @@ export interface ErrorResponse {
     correlation_id: string
   }
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+export function isCreateRoomResponse(value: unknown): value is CreateRoomResponse {
+  return isRecord(value) && Object.keys(value).length === 2 && isRecord(value["room"]) && Object.keys(value["room"]).length === 2 && typeof value["room"]["code"] === 'string' && new RegExp("^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$").test(value["room"]["code"]) && typeof value["room"]["status"] === 'string' && (value["room"]["status"] === "open") && isRecord(value["participant"]) && Object.keys(value["participant"]).length === 2 && typeof value["participant"]["display_name"] === 'string' && [...value["participant"]["display_name"]].length >= 1 && [...value["participant"]["display_name"]].length <= 40 && typeof value["participant"]["role"] === 'string' && (value["participant"]["role"] === "host")
+}

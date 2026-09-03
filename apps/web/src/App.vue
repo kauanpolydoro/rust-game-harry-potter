@@ -45,9 +45,22 @@ const formError = computed(() => {
     case 'WEAK_RECOVERY_PASSWORD':
     case null:
       return null
+    case 'IDEMPOTENCY_KEY_REUSED':
+      return roomCreation.recoveringPendingIntent
+        ? 'O nome ou a senha não correspondem à criação pendente. Reinsira os mesmos dados ou descarte a tentativa.'
+        : 'Não foi possível retomar a criação. Descarte a tentativa pendente para começar outra.'
     default:
       return 'Não foi possível criar a sala. Revise os dados e tente novamente.'
   }
+})
+const submitLabel = computed(() => {
+  if (roomCreation.status === 'submitting') {
+    return 'Criando sala'
+  }
+  if (roomCreation.recoveringPendingIntent) {
+    return 'Retomar criação pendente'
+  }
+  return roomCreation.status === 'failed' ? 'Tentar criar novamente' : 'Criar sala privada'
 })
 
 function retry(): void {
@@ -74,6 +87,13 @@ async function createRoom(): Promise<void> {
 
 function togglePassword(): void {
   passwordVisible.value = !passwordVisible.value
+}
+
+function discardPendingRequest(): void {
+  roomCreation.discardPendingRequest()
+  displayName.value = ''
+  recoveryPassword.value = ''
+  passwordVisible.value = false
 }
 
 async function copyRoomCode(): Promise<void> {
@@ -169,7 +189,12 @@ onMounted(() => health.check())
       </div>
     </section>
 
-    <section v-else class="room-setup" aria-labelledby="room-setup-heading">
+    <section
+      v-else
+      class="room-setup"
+      :class="{ 'room-setup--pending': Boolean(roomCreation.pendingIntent) }"
+      aria-labelledby="room-setup-heading"
+    >
       <div class="cue-rail" aria-hidden="true">
         <span class="cue-number">2</span>
         <span class="cue-line"></span>
@@ -192,6 +217,19 @@ onMounted(() => health.check())
           :aria-busy="roomCreation.status === 'submitting'"
           @submit.prevent="createRoom()"
         >
+          <div
+            v-if="roomCreation.pendingIntent && roomCreation.status !== 'submitting'"
+            class="pending-intent"
+          >
+            <p role="status">Existe uma criação pendente neste navegador.</p>
+            <p>
+              Retome com o mesmo nome e senha. Descartar inicia outra sala sem excluir a anterior.
+            </p>
+            <button type="button" @click="discardPendingRequest()">
+              Descartar e começar outra
+            </button>
+          </div>
+
           <div class="field">
             <label for="display-name">Seu nome</label>
             <input
@@ -202,7 +240,7 @@ onMounted(() => health.check())
               id="display-name"
               maxlength="40"
               name="display-name"
-              :readonly="roomCreation.status === 'submitting'"
+              :readonly="roomCreation.status === 'submitting' || Boolean(roomCreation.pendingInput)"
               required
               type="text"
             />
@@ -222,7 +260,7 @@ onMounted(() => health.check())
                 maxlength="128"
                 minlength="12"
                 name="recovery-password"
-                :readonly="roomCreation.status === 'submitting'"
+                :readonly="roomCreation.status === 'submitting' || Boolean(roomCreation.pendingInput)"
                 required
               />
               <button
@@ -270,13 +308,7 @@ onMounted(() => health.check())
         form="create-room"
         type="submit"
       >
-        {{
-          roomCreation.status === 'submitting'
-            ? 'Criando sala'
-            : roomCreation.status === 'failed'
-              ? 'Tentar criar novamente'
-              : 'Criar sala privada'
-        }}
+        {{ submitLabel }}
       </button>
     </footer>
   </main>

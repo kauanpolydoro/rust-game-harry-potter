@@ -231,6 +231,56 @@ input {
   margin-top: 2rem;
 }
 
+.pending-intent {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+  border-left: 2px solid var(--warning);
+  background: rgb(226 171 85 / 8%);
+}
+
+.pending-intent p {
+  margin: 0;
+  color: var(--chalk-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.pending-intent p:first-child {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.pending-intent button {
+  width: fit-content;
+  min-height: 2.75rem;
+  padding: 0.55rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--warning);
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 0.22rem;
+  cursor: pointer;
+}
+
+@media (max-width: 47.999rem) {
+  .room-setup--pending {
+    padding-block: 1rem;
+  }
+
+  .room-setup--pending .room-form {
+    gap: 0.85rem;
+    margin-top: 1.25rem;
+  }
+
+  .room-setup--pending .pending-intent {
+    gap: 0.45rem;
+    padding-block: 0.7rem;
+  }
+}
+
 .field {
   display: grid;
   gap: 0.5rem;
