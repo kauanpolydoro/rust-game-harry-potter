@@ -152,6 +152,19 @@ function acceptedCommandResponse(commandId: string) {
   }
 }
 
+function errorResponse(code: string) {
+  return {
+    error: {
+      category: 'request',
+      code,
+      correlation_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+      details: {},
+      message_key: `error.${code.toLowerCase()}`,
+      retry: 'not_retryable',
+    },
+  }
+}
+
 function hostRoomResponse() {
   const participant = { display_name: 'Minerva', position: 1, ready: false, role: 'host' }
   return {
@@ -420,10 +433,18 @@ describe('application shell', () => {
     })
     expect(JSON.stringify(persistedIntent)).not.toContain('Minerva')
     expect(JSON.stringify(persistedIntent)).not.toContain('a long uncommon passphrase')
+    expect((persistedIntent as { idempotencyKey: string }).idempotencyKey).toMatch(
+      /^[A-Za-z0-9_.:-]{8,128}$/,
+    )
+    expect(
+      Date.parse((persistedIntent as { createdAt: string }).createdAt),
+    ).not.toBeNaN()
 
     cleanup()
+    expect(sessionStorage.getItem('hogwarts.room-creation.pending-intent')).not.toBeNull()
     render(App, { global: { plugins: [createPinia()] } })
     await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    expect(sessionStorage.getItem('hogwarts.room-creation.pending-intent')).not.toBeNull()
     expect(screen.getByLabelText('Seu nome')).toHaveValue('')
     expect(screen.getByLabelText('Seu nome')).not.toHaveAttribute('readonly')
     await fireEvent.update(screen.getByLabelText('Seu nome'), 'Minerva')
@@ -577,7 +598,9 @@ describe('application shell', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Criar sala privada' }))
 
     expect(
-      await screen.findByText('Não foi possível criar a sala. Revise os dados e tente novamente.'),
+      await screen.findByText(
+        'A confirmação não chegou. Tente novamente para consultar a mesma criação.',
+      ),
     ).toHaveAttribute('role', 'alert')
     expect(screen.queryByRole('heading', { level: 2, name: 'Sala pronta' })).not.toBeInTheDocument()
   })
@@ -720,6 +743,79 @@ describe('application shell', () => {
     )
   })
 
+  it('replays a pending join after a lost response and reload', async () => {
+    const readyResponse = (): Response =>
+      new Response(JSON.stringify({ status: 'ready' }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      })
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(readyResponse())
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            room: { code: '9HKGW4RT', status: 'open' },
+            heroes: availableHeroes,
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 200 },
+        ),
+      )
+      .mockRejectedValueOnce(new TypeError('response lost after commit'))
+      .mockResolvedValueOnce(readyResponse())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(errorResponse('SESSION_INVALID')), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 401,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(guestLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Entrar em uma sala' }))
+    await fireEvent.update(screen.getByLabelText('Código da sala'), '9hkgw4rt')
+    await fireEvent.click(screen.getByRole('button', { name: 'Localizar sala' }))
+    await screen.findByRole('heading', { level: 2, name: 'Escolha seu lugar à mesa' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Luna')
+    await fireEvent.click(screen.getByRole('radio', { name: 'Hermione' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Entrar na sala' }))
+    await screen.findByText('A confirmação não chegou. Tente entrar novamente com os mesmos dados.')
+
+    const initialRequest = request.mock.calls[2]?.[1] as RequestInit | undefined
+    const persistedIntent = JSON.parse(
+      sessionStorage.getItem('hogwarts.room-join.pending-intent') ?? 'null',
+    ) as unknown
+    expect(persistedIntent).toEqual({
+      commandType: 'join_room',
+      createdAt: expect.any(String),
+      idempotencyKey: expect.any(String),
+      input: { display_name: 'Luna', hero_id: 'hermione' },
+      roomCode: '9HKGW4RT',
+    })
+
+    cleanup()
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    const replayRequest = request.mock.calls[5]?.[1] as RequestInit | undefined
+    expect(request).toHaveBeenNthCalledWith(
+      6,
+      '/api/rooms/9HKGW4RT/participants',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(replayRequest?.headers).toEqual(initialRequest?.headers)
+    expect(replayRequest?.body).toBe(initialRequest?.body)
+    expect(sessionStorage.getItem('hogwarts.room-join.pending-intent')).toBeNull()
+    expect(localStorage.getItem('hogwarts.session.expected')).toBe('true')
+  })
+
   it('lets a ready host seal the room and renders only the redacted initial projection', async () => {
     localStorage.setItem('hogwarts.session.expected', 'true')
     const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -844,7 +940,7 @@ describe('application shell', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: { code: 'INTERNAL_ERROR' } }), {
+        new Response(JSON.stringify(errorResponse('INTERNAL_ERROR')), {
           headers: { 'Content-Type': 'application/json' },
           status: 500,
         }),
@@ -911,6 +1007,42 @@ describe('application shell', () => {
       '/api/session',
       expect.objectContaining({ credentials: 'same-origin' }),
     )
+  })
+
+  it('shows realtime connection failure and offers an explicit retry', async () => {
+    class FailingWebSocket {
+      static attempts = 0
+
+      constructor() {
+        FailingWebSocket.attempts += 1
+        throw new Error('socket unavailable')
+      }
+    }
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    vi.stubGlobal('WebSocket', FailingWebSocket)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        ),
+    )
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(await screen.findByText('Atualizações automáticas interrompidas.')).toBeVisible()
+    await fireEvent.click(screen.getByRole('button', { name: 'Reconectar atualizações' }))
+    expect(FailingWebSocket.attempts).toBe(2)
   })
 
   it('keeps a valid browser binding recoverable when session restoration loses the network', async () => {
@@ -1049,7 +1181,7 @@ describe('application shell', () => {
       }
       if (url === '/api/games/current/commands' && init?.method === 'POST') {
         return Promise.resolve(
-          new Response(JSON.stringify({ error: { code: 'STALE_STATE_VERSION' } }), {
+          new Response(JSON.stringify(errorResponse('STALE_STATE_VERSION')), {
             headers: { 'Content-Type': 'application/json' },
             status: 409,
           }),
@@ -1184,7 +1316,7 @@ describe('application shell', () => {
       }
       if (url === `/api/games/current/commands/${commandId}`) {
         return Promise.resolve(
-          new Response(JSON.stringify({ error: { code: 'COMMAND_NOT_FOUND' } }), {
+          new Response(JSON.stringify(errorResponse('COMMAND_NOT_FOUND')), {
             headers: { 'Content-Type': 'application/json' },
             status: 404,
           }),

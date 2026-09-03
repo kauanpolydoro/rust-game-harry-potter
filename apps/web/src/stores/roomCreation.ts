@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 
+import { apiError, requestJson, transportErrorCode } from '../api/http'
 import {
   isCreateRoomResponse,
   type CreateRoomRequest,
@@ -18,7 +19,7 @@ const pendingIntentStorage = 'hogwarts.room-creation.pending-intent'
 const idempotencyKeyPattern = /^[A-Za-z0-9_.:-]{8,128}$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function loadPendingIntent(): PendingRoomIntent | null {
@@ -64,19 +65,6 @@ function removePendingIntent(): void {
   } catch {
     // Storage availability must not prevent a definitive response from being handled.
   }
-}
-
-function apiError(value: unknown): { code: string; retry: string } | null {
-  if (
-    !isRecord(value) ||
-    !isRecord(value.error) ||
-    typeof value.error.code !== 'string' ||
-    typeof value.error.retry !== 'string'
-  ) {
-    return null
-  }
-
-  return { code: value.error.code, retry: value.error.retry }
 }
 
 export const useRoomCreationStore = defineStore('roomCreation', {
@@ -149,7 +137,7 @@ export const useRoomCreationStore = defineStore('roomCreation', {
       persistPendingIntent(this.pendingIntent)
 
       try {
-        const response = await fetch('/api/rooms', {
+        const { body: result, response } = await requestJson('/api/rooms', {
           body: JSON.stringify(this.pendingInput),
           cache: 'no-store',
           credentials: 'same-origin',
@@ -160,8 +148,6 @@ export const useRoomCreationStore = defineStore('roomCreation', {
           },
           method: 'POST',
         })
-        const result: unknown = await response.json()
-
         if (response.ok && isCreateRoomResponse(result)) {
           this.roomCreation = result
           this.status = 'succeeded'
@@ -184,8 +170,8 @@ export const useRoomCreationStore = defineStore('roomCreation', {
           this.pendingInput = null
           removePendingIntent()
         }
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },

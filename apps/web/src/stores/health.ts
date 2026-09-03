@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 
+import { requestJson } from '../api/http'
 import { healthStatuses, type HealthResponse } from '../contracts/health.generated'
 
 export type Availability = 'checking' | 'ready' | 'unavailable'
@@ -21,12 +22,11 @@ export const useHealthStore = defineStore('health', {
       this.availability = 'checking'
 
       try {
-        const response = await fetch('/health/ready', {
+        const { body: health, response } = await requestJson('/health/ready', {
           cache: 'no-store',
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         })
-        const health: unknown = await response.json()
         this.availability =
           response.ok && isHealthResponse(health) && health.status === 'ready'
             ? 'ready'

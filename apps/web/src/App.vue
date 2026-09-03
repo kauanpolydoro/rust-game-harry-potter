@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { isUncertainTransportFailure } from './api/http'
+import GameStage from './components/GameStage.vue'
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
@@ -21,6 +23,13 @@ const selectedHero = ref<HeroId | ''>('')
 const passwordVisible = ref(false)
 const copyResult = ref<'idle' | 'copied' | 'failed'>('idle')
 const selectedContentKey = ref('')
+
+if (roomAccess.pendingJoinIntent) {
+  entryMode.value = 'join'
+  displayName.value = roomAccess.pendingJoinIntent.input.display_name
+  roomCode.value = roomAccess.pendingJoinIntent.roomCode
+  selectedHero.value = roomAccess.pendingJoinIntent.input.hero_id
+}
 
 const statusPresentation = {
   checking: {
@@ -71,12 +80,6 @@ const lobbyIsReadyToSeal = computed(
 const canStartGame = computed(
   () => Boolean(isHost.value && lobbyIsReadyToSeal.value && selectedContent.value?.playable),
 )
-const activeParticipant = computed(() =>
-  game.value?.participants.find(
-    (participant) => participant.position === game.value?.turn.active_position,
-  ),
-)
-const currentGameParticipantPosition = computed(() => game.value?.participant.position)
 const canCompleteDarkArts = computed(
   () =>
     game.value?.legal_actions.includes('complete_dark_arts') === true &&
@@ -86,36 +89,6 @@ const canCompleteDarkArts = computed(
     gameCommand.status !== 'stale' &&
     gameCommand.status !== 'resyncing',
 )
-const gamePhaseLabel = computed(() => {
-  switch (game.value?.turn.phase) {
-    case 'dark_arts':
-      return 'Artes das Trevas'
-    case 'hero_action':
-      return 'Ação do Herói'
-    default:
-      return game.value?.turn.phase ?? ''
-  }
-})
-const gameCommandError = computed(() => {
-  switch (gameCommand.errorCode) {
-    case 'STALE_STATE_VERSION':
-      return 'O estado oficial avançou. Atualize a partida e decida novamente.'
-    case 'GAME_ACTION_NOT_ALLOWED':
-      return 'Esta ação não está disponível para você no estado oficial atual.'
-    case 'GAME_EXPIRED':
-      return 'A partida expirou e não aceita novas ações.'
-    case null:
-      return null
-    default:
-      return 'Não foi possível confirmar a ação. Consulte o resultado antes de decidir novamente.'
-  }
-})
-const acceptedCommandSummary = computed(() => {
-  const receipt = gameCommand.receipt
-  return receipt
-    ? `Recibo aceito no estado v${receipt.accepted_state_version}, sequência ${receipt.accepted_sequence}.`
-    : ''
-})
 const serviceHeading = computed(() => {
   if (isRestoringSession.value) {
     return 'Retomando sua sessão'
@@ -146,9 +119,10 @@ const passwordError = computed(() =>
     : null,
 )
 const createFormError = computed(() => {
+  if (isUncertainTransportFailure(roomCreation.errorCode)) {
+    return 'A confirmação não chegou. Tente novamente para consultar a mesma criação.'
+  }
   switch (roomCreation.errorCode) {
-    case 'NETWORK_UNAVAILABLE':
-      return 'A confirmação não chegou. Tente novamente para consultar a mesma criação.'
     case 'INVALID_DISPLAY_NAME':
     case 'WEAK_RECOVERY_PASSWORD':
     case null:
@@ -162,13 +136,17 @@ const createFormError = computed(() => {
   }
 })
 const joinFormError = computed(() => {
+  if (isUncertainTransportFailure(roomAccess.errorCode)) {
+    if (roomAccess.pendingJoinIntent && !roomAccess.roomLookup) {
+      return 'A confirmação da entrada não chegou. Tente retomar a mesma solicitação.'
+    }
+    return roomAccess.roomLookup
+      ? 'A confirmação não chegou. Tente entrar novamente com os mesmos dados.'
+      : 'Não foi possível localizar a sala. Confira sua conexão e tente novamente.'
+  }
   switch (roomAccess.errorCode) {
     case null:
       return null
-    case 'NETWORK_UNAVAILABLE':
-      return roomAccess.roomLookup
-        ? 'A confirmação não chegou. Tente entrar novamente com os mesmos dados.'
-        : 'Não foi possível localizar a sala. Confira sua conexão e tente novamente.'
     case 'ROOM_NOT_FOUND':
     case 'ROOM_UNAVAILABLE':
       return 'Não foi possível encontrar uma sala aberta com esse código.'
@@ -183,11 +161,12 @@ const joinFormError = computed(() => {
   }
 })
 const lobbyError = computed(() => {
+  if (isUncertainTransportFailure(roomAccess.errorCode)) {
+    return 'A confirmação não chegou. Repita a mesma ação para consultar o resultado.'
+  }
   switch (roomAccess.errorCode) {
     case 'HERO_UNAVAILABLE':
       return 'Outro participante escolheu esse Herói primeiro. Atualize sua escolha.'
-    case 'NETWORK_UNAVAILABLE':
-      return 'A confirmação não chegou. Repita a mesma ação para consultar o resultado.'
     case 'INTERNAL_ERROR':
     case 'UNEXPECTED_RESPONSE':
       return 'A confirmação da partida falhou. Tente novamente com a mesma solicitação.'
@@ -218,12 +197,15 @@ const createSubmitLabel = computed(() => {
 })
 const joinSubmitLabel = computed(() => {
   if (!roomAccess.roomLookup) {
+    if (roomAccess.pendingJoinIntent) {
+      return roomAccess.status === 'joining' ? 'Retomando entrada' : 'Retomar entrada pendente'
+    }
     return roomAccess.status === 'looking_up' ? 'Localizando sala' : 'Localizar sala'
   }
   if (roomAccess.status === 'joining') {
     return 'Entrando na sala'
   }
-  return roomAccess.errorCode === 'NETWORK_UNAVAILABLE'
+  return isUncertainTransportFailure(roomAccess.errorCode)
     ? 'Tentar entrar novamente'
     : 'Entrar na sala'
 })
@@ -232,10 +214,6 @@ function lobbyIsBusy(): boolean {
   return ['selecting_hero', 'setting_readiness', 'starting_game', 'restoring'].includes(
     roomAccess.status,
   )
-}
-
-function gameCommandIsBusy(): boolean {
-  return ['submitting', 'recovering', 'resyncing'].includes(gameCommand.status)
 }
 
 function retry(): void {
@@ -256,6 +234,8 @@ async function createRoom(): Promise<void> {
 
   if (roomCreation.roomCreation) {
     roomAccess.adoptCreatedRoom(roomCreation.roomCreation)
+    recoveryPassword.value = ''
+    passwordVisible.value = false
   }
   await focusAfterAction(roomCreation.errorCode)
 }
@@ -270,6 +250,15 @@ async function findRoom(): Promise<void> {
     await nextTick()
     document.getElementById('room-code')?.focus()
   }
+}
+
+async function findOrRecoverRoom(): Promise<void> {
+  if (roomAccess.pendingJoinIntent) {
+    await roomAccess.recoverPendingJoin()
+    await focusAfterAction(roomAccess.errorCode)
+    return
+  }
+  await findRoom()
 }
 
 async function joinRoom(): Promise<void> {
@@ -363,17 +352,6 @@ async function recoverGameCommand(): Promise<void> {
   }
 }
 
-function formatExpiration(value: string): string {
-  const expiration = new Date(value)
-  if (Number.isNaN(expiration.getTime())) {
-    return 'Prazo indisponível'
-  }
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(expiration)
-}
-
 async function focusAfterAction(errorCode: string | null): Promise<void> {
   await nextTick()
   if (lobby.value) {
@@ -413,6 +391,13 @@ function showCreate(): void {
   roomCode.value = ''
   selectedHero.value = ''
   roomAccess.clearLookup()
+}
+
+function discardPendingJoin(): void {
+  roomAccess.clearLookup()
+  displayName.value = ''
+  roomCode.value = ''
+  selectedHero.value = ''
 }
 
 function heroIsSelectable(heroId: HeroId, available: boolean): boolean {
@@ -459,6 +444,9 @@ onBeforeUnmount(() => gameSync.disconnect())
 
 onMounted(async () => {
   await Promise.all([health.check(), roomAccess.restoreSession()])
+  if (!lobby.value && !game.value && roomAccess.pendingJoinIntent) {
+    await roomAccess.recoverPendingJoin()
+  }
   if (game.value && gameCommand.pendingIntent) {
     await recoverGameCommand()
   }
@@ -501,170 +489,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section
-      v-else-if="game"
-      class="room-success game-stage"
-      aria-labelledby="game-heading"
-      :aria-busy="gameCommandIsBusy()"
-    >
-      <div class="cue-rail" aria-hidden="true">
-        <span class="cue-number">4</span>
-        <span class="cue-line"></span>
-        <span class="cue-label">Partida selada</span>
-      </div>
-
-      <div class="room-stage room-stage--success">
-        <p class="service-confirmation" role="status">
-          <span class="state-signal" aria-hidden="true"></span>
-          {{ game.snapshot.sequence === 0 ? 'Snapshot inicial confirmado' : 'Estado oficial confirmado' }}
-        </p>
-        <h2 id="game-heading" tabindex="-1">
-          {{ game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
-        </h2>
-        <p class="stage-description">
-          A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
-        </p>
-
-        <div
-          v-if="gameCommandIsBusy()"
-          class="command-feedback command-feedback--pending"
-          role="status"
-          aria-live="polite"
-        >
-          <strong>
-            {{ gameCommand.status === 'resyncing' ? 'Atualizando estado oficial' : 'Intenção pendente' }}
-          </strong>
-          <p>
-            {{
-              gameCommand.status === 'resyncing'
-                ? 'O último Snapshot confirmado permanece visível até a nova projeção chegar.'
-                : gameCommand.status === 'recovering'
-                ? 'Consultando o recibo persistido. O estado abaixo continua sendo a última versão oficial.'
-                : 'A solicitação foi enviada. Nada muda na mesa até o servidor concluir o commit.'
-            }}
-          </p>
-        </div>
-        <div
-          v-else-if="gameCommand.status === 'uncertain'"
-          class="command-feedback command-feedback--warning"
-          role="alert"
-        >
-          <strong>Confirmação ainda desconhecida</strong>
-          <p>
-            A conexão terminou sem resposta. Consulte o mesmo comando antes de tomar outra decisão.
-          </p>
-        </div>
-        <div
-          v-else-if="gameCommand.status === 'resynced'"
-          class="command-feedback command-feedback--accepted"
-          role="status"
-          aria-live="polite"
-        >
-          <strong>Estado oficial atualizado</strong>
-          <p>
-            Outro comando avançou esta partida. Revise o Snapshot recebido antes de decidir uma
-            nova ação.
-          </p>
-        </div>
-        <div
-          v-else-if="gameCommand.status === 'stale'"
-          class="command-feedback command-feedback--warning"
-          role="alert"
-        >
-          <strong>Estado oficial desatualizado</strong>
-          <p>
-            Outro comando avançou esta partida, mas o Snapshot atualizado ainda não foi recebido.
-          </p>
-        </div>
-        <div
-          v-else-if="gameCommand.status === 'accepted' && acceptedCommandSummary"
-          class="command-feedback command-feedback--accepted"
-          role="status"
-          aria-live="polite"
-        >
-          <strong>Ação oficial</strong>
-          <p>{{ acceptedCommandSummary }}</p>
-        </div>
-        <div
-          v-else-if="gameCommand.status === 'not_committed'"
-          class="command-feedback"
-          role="status"
-        >
-          <strong>Nenhum aceite encontrado</strong>
-          <p>A intenção anterior não foi oficializada. Revise a mesa e decida novamente.</p>
-        </div>
-        <div
-          v-else-if="gameCommand.status === 'failed' && gameCommandError"
-          class="command-feedback command-feedback--warning"
-          role="alert"
-        >
-          <strong>Ação não aceita</strong>
-          <p>{{ gameCommandError }}</p>
-        </div>
-
-        <dl class="game-situation">
-          <div>
-            <dt>Turno</dt>
-            <dd>{{ game.turn.number }}</dd>
-          </div>
-          <div>
-            <dt>Fase</dt>
-            <dd>{{ gamePhaseLabel }}</dd>
-          </div>
-          <div>
-            <dt>Participante ativo</dt>
-            <dd>{{ activeParticipant?.display_name ?? `Posição ${game.turn.active_position}` }}</dd>
-          </div>
-          <div>
-            <dt>Aventura</dt>
-            <dd>{{ game.game.adventure.name }}</dd>
-          </div>
-          <div>
-            <dt>Retenção até</dt>
-            <dd>{{ formatExpiration(game.game.expires_at) }}</dd>
-          </div>
-        </dl>
-
-        <div class="participant-lineup">
-          <h3>Posições seladas</h3>
-          <ol>
-            <li v-for="participant in game.participants" :key="participant.position">
-              <span>Posição {{ participant.position }}</span>
-              <strong>{{ participant.display_name }}</strong>
-              <span>{{ participant.hero.name }}</span>
-              <span v-if="participant.position === currentGameParticipantPosition">Você</span>
-            </li>
-          </ol>
-        </div>
-
-        <details class="snapshot-details">
-          <summary>Ver versões do Snapshot</summary>
-          <dl>
-            <div>
-              <dt>Estado</dt>
-              <dd>v{{ game.snapshot.state_version }} · sequência {{ game.snapshot.sequence }}</dd>
-            </div>
-            <div>
-              <dt>Ruleset</dt>
-              <dd>{{ game.snapshot.versions.ruleset }}</dd>
-            </div>
-            <div>
-              <dt>Manifesto</dt>
-              <dd>v{{ game.snapshot.versions.manifest }}</dd>
-            </div>
-            <div>
-              <dt>Digest</dt>
-              <dd class="digest-value">{{ game.snapshot.digest }}</dd>
-            </div>
-            <div>
-              <dt>PRNG</dt>
-              <dd>{{ game.snapshot.versions.prng }}</dd>
-            </div>
-          </dl>
-        </details>
-        <p class="seed-note">A seed permanece secreta enquanto a partida estiver em andamento.</p>
-      </div>
-    </section>
+    <GameStage v-else-if="game" />
 
     <section
       v-else-if="lobby"
@@ -948,9 +773,19 @@ onMounted(async () => {
           v-if="!roomAccess.roomLookup"
           id="find-room"
           class="room-form"
-          :aria-busy="roomAccess.status === 'looking_up'"
-          @submit.prevent="findRoom()"
+          :aria-busy="roomAccess.status === 'looking_up' || roomAccess.status === 'joining'"
+          @submit.prevent="findOrRecoverRoom()"
         >
+          <div
+            v-if="roomAccess.pendingJoinIntent && roomAccess.status !== 'joining'"
+            class="pending-intent"
+          >
+            <p role="status">Existe uma entrada pendente neste navegador.</p>
+            <p>A mesma solicitação será reapresentada sem criar outro participante.</p>
+            <button type="button" @click="discardPendingJoin()">
+              Descartar e usar outro código
+            </button>
+          </div>
           <div class="field">
             <label for="room-code">Código da sala</label>
             <input
@@ -963,6 +798,7 @@ onMounted(async () => {
               minlength="8"
               name="room-code"
               pattern="[23456789A-HJ-NP-Za-hj-np-z]{8}"
+              :readonly="Boolean(roomAccess.pendingJoinIntent)"
               required
               spellcheck="false"
               type="text"
@@ -1156,7 +992,7 @@ onMounted(async () => {
       <button
         v-else-if="entryMode === 'join' && !roomAccess.roomLookup"
         class="primary-button"
-        :disabled="roomAccess.status === 'looking_up'"
+        :disabled="roomAccess.status === 'looking_up' || roomAccess.status === 'joining'"
         form="find-room"
         type="submit"
       >

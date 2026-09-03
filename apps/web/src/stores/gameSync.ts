@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { ref } from 'vue'
 
 import {
   isRealtimeEventBatchMessage,
@@ -9,14 +10,30 @@ import {
 import { useRoomAccessStore } from './roomAccess'
 
 const realtimeSubprotocol = 'hogwarts.realtime.v1'
-const reconnectDelayMilliseconds = 500
+const baseReconnectDelayMilliseconds = 500
+const maximumReconnectDelayMilliseconds = 30_000
+const hiddenReconnectFloorMilliseconds = 15_000
+const stableConnectionMilliseconds = 5_000
 
-type GameSyncStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'
+export type GameSyncStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
 
-let activeSocket: WebSocket | null = null
-let activeGameId: string | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let connectionGeneration = 0
+interface ConnectionRequest {
+  cursor: number
+  forceSnapshot: boolean
+  gameId: string
+  snapshotVersion: number
+}
+
+interface ConnectionCallbacks {
+  currentRequest: () => ConnectionRequest | null
+  receive: (serialized: unknown) => void
+  updateStatus: (status: GameSyncStatus) => void
+}
 
 function realtimeUrl(cursor: number, snapshotVersion: number): string {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -44,176 +61,363 @@ function eventBatchContinuesFrom(message: RealtimeEventBatchMessage, cursor: num
   )
 }
 
-export const useGameSyncStore = defineStore('gameSync', {
-  state: (): {
-    status: GameSyncStatus
-    cursor: number
-    snapshotVersion: number
-  } => ({
-    status: 'disconnected',
-    cursor: 0,
-    snapshotVersion: 1,
-  }),
-  actions: {
-    connect(game: GameProjectionResponse, forceSnapshot = false): void {
-      this.cursor = Math.max(this.cursor, game.snapshot.cursor)
-      this.snapshotVersion = game.snapshot.snapshot_version
+class GameSyncConnection {
+  private activeGameId: string | null = null
+  private generation = 0
+  private reconnectAttempt = 0
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private socket: WebSocket | null = null
+  private stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  private forceSnapshotOnRetry = false
+  private listeningForBrowserState = false
+
+  constructor(private readonly callbacks: ConnectionCallbacks) {}
+
+  connect(request: ConnectionRequest): void {
+    const changingGame = this.activeGameId !== request.gameId
+    if (
+      !changingGame &&
+      !request.forceSnapshot &&
+      this.socket &&
+      (this.socket.readyState === WebSocket.CONNECTING ||
+        this.socket.readyState === WebSocket.OPEN)
+    ) {
+      return
+    }
+
+    this.clearReconnectTimer()
+    this.closeCurrentSocket()
+    if (changingGame) {
+      this.reconnectAttempt = 0
+      this.forceSnapshotOnRetry = false
+    }
+    this.activeGameId = request.gameId
+    this.attachBrowserStateListeners()
+    if (!this.isOnline()) {
+      this.callbacks.updateStatus('failed')
+      this.forceSnapshotOnRetry ||= request.forceSnapshot
+      return
+    }
+
+    const generation = this.generation
+    const requestedVersion = request.forceSnapshot ? 0 : request.snapshotVersion
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(
+        realtimeUrl(request.cursor, requestedVersion),
+        realtimeSubprotocol,
+      )
+    } catch {
+      this.callbacks.updateStatus('failed')
+      this.forceSnapshotOnRetry ||= request.forceSnapshot
+      this.scheduleReconnect(generation)
+      return
+    }
+    this.socket = socket
+    this.callbacks.updateStatus(request.forceSnapshot ? 'reconnecting' : 'connecting')
+
+    socket.onopen = () => {
+      if (!this.isCurrent(socket, generation)) {
+        return
+      }
+      if (socket.protocol !== realtimeSubprotocol) {
+        this.requestRecovery(true)
+        return
+      }
+      this.callbacks.updateStatus('connected')
+      this.clearStabilityTimer()
+      this.stabilityTimer = setTimeout(() => {
+        if (this.isCurrent(socket, generation) && socket.readyState === WebSocket.OPEN) {
+          this.reconnectAttempt = 0
+        }
+      }, stableConnectionMilliseconds)
+    }
+    socket.onmessage = (event) => {
+      if (this.isCurrent(socket, generation)) {
+        this.callbacks.receive(event.data)
+      }
+    }
+    socket.onerror = () => {
+      if (this.isCurrent(socket, generation)) {
+        this.callbacks.updateStatus('failed')
+      }
+    }
+    socket.onclose = (event) => {
+      if (!this.isCurrent(socket, generation)) {
+        return
+      }
+      this.socket = null
+      this.clearStabilityTimer()
+      if (event.code === 1008) {
+        this.callbacks.updateStatus('failed')
+        return
+      }
+      this.callbacks.updateStatus('reconnecting')
+      this.scheduleReconnect(generation)
+    }
+  }
+
+  requestRecovery(forceSnapshot: boolean): void {
+    if (!this.activeGameId) {
+      return
+    }
+    this.forceSnapshotOnRetry ||= forceSnapshot
+    this.closeCurrentSocket()
+    this.callbacks.updateStatus(this.isOnline() ? 'reconnecting' : 'failed')
+    this.scheduleReconnect(this.generation)
+  }
+
+  disconnect(): void {
+    this.closeCurrentSocket()
+    this.clearReconnectTimer()
+    this.clearStabilityTimer()
+    this.activeGameId = null
+    this.forceSnapshotOnRetry = false
+    this.reconnectAttempt = 0
+    this.detachBrowserStateListeners()
+  }
+
+  private scheduleReconnect(generation: number): void {
+    if (this.reconnectTimer || generation !== this.generation || !this.activeGameId) {
+      return
+    }
+    if (!this.isOnline()) {
+      this.callbacks.updateStatus('failed')
+      return
+    }
+
+    const exponentialDelay = Math.min(
+      maximumReconnectDelayMilliseconds,
+      baseReconnectDelayMilliseconds * 2 ** Math.min(this.reconnectAttempt, 10),
+    )
+    const jitteredDelay = Math.min(
+      maximumReconnectDelayMilliseconds,
+      Math.round(exponentialDelay * (0.5 + Math.random())),
+    )
+    const delay = this.isHidden()
+      ? Math.max(hiddenReconnectFloorMilliseconds, jitteredDelay)
+      : jitteredDelay
+    this.reconnectAttempt += 1
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (generation !== this.generation || !this.isOnline()) {
+        this.callbacks.updateStatus('failed')
+        return
+      }
+      const current = this.callbacks.currentRequest()
+      if (!current || current.gameId !== this.activeGameId) {
+        return
+      }
+      const forceSnapshot = this.forceSnapshotOnRetry
+      this.forceSnapshotOnRetry = false
+      this.connect({ ...current, forceSnapshot })
+    }, delay)
+  }
+
+  private closeCurrentSocket(): void {
+    this.generation += 1
+    const socket = this.socket
+    this.socket = null
+    this.clearStabilityTimer()
+    if (socket) {
+      socket.onclose = null
+      socket.onerror = null
+      socket.onmessage = null
+      socket.onopen = null
+      socket.close()
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer)
+      this.stabilityTimer = null
+    }
+  }
+
+  private isCurrent(socket: WebSocket, generation: number): boolean {
+    return generation === this.generation && socket === this.socket
+  }
+
+  private isOnline(): boolean {
+    return typeof navigator === 'undefined' || navigator.onLine
+  }
+
+  private isHidden(): boolean {
+    return typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  }
+
+  private attachBrowserStateListeners(): void {
+    if (this.listeningForBrowserState || typeof window === 'undefined') {
+      return
+    }
+    window.addEventListener('online', this.handleOnline)
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
+    this.listeningForBrowserState = true
+  }
+
+  private detachBrowserStateListeners(): void {
+    if (!this.listeningForBrowserState || typeof window === 'undefined') {
+      return
+    }
+    window.removeEventListener('online', this.handleOnline)
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    this.listeningForBrowserState = false
+  }
+
+  private readonly handleOnline = (): void => {
+    if (!this.socket && !this.reconnectTimer && this.activeGameId) {
+      this.callbacks.updateStatus('reconnecting')
+      this.scheduleReconnect(this.generation)
+    }
+  }
+
+  private readonly handleVisibilityChange = (): void => {
+    if (!this.isHidden() && !this.socket && this.activeGameId) {
+      if (this.reconnectTimer) {
+        this.reconnectAttempt = Math.max(0, this.reconnectAttempt - 1)
+      }
+      this.clearReconnectTimer()
+      this.callbacks.updateStatus('reconnecting')
+      this.scheduleReconnect(this.generation)
+    }
+  }
+}
+
+export const useGameSyncStore = defineStore('gameSync', () => {
+  const roomAccess = useRoomAccessStore()
+  const status = ref<GameSyncStatus>('disconnected')
+  const cursor = ref(0)
+  const snapshotVersion = ref(1)
+  const currentGameId = ref<string | null>(null)
+
+  const connection = new GameSyncConnection({
+    currentRequest: () => {
+      const game = roomAccess.game
+      if (!game || game.game.id !== currentGameId.value) {
+        return null
+      }
+      return {
+        cursor: cursor.value,
+        forceSnapshot: false,
+        gameId: game.game.id,
+        snapshotVersion: snapshotVersion.value,
+      }
+    },
+    receive,
+    updateStatus: (nextStatus) => {
+      status.value = nextStatus
+    },
+  })
+
+  function connect(game: GameProjectionResponse, forceSnapshot = false): void {
+    if (currentGameId.value !== game.game.id) {
+      cursor.value = 0
+      snapshotVersion.value = 1
+      currentGameId.value = game.game.id
+      cursor.value = game.snapshot.cursor
+      snapshotVersion.value = game.snapshot.snapshot_version
+    } else {
+      cursor.value = Math.max(cursor.value, game.snapshot.cursor)
+      snapshotVersion.value = game.snapshot.snapshot_version
+    }
+    connection.connect({
+      cursor: cursor.value,
+      forceSnapshot,
+      gameId: game.game.id,
+      snapshotVersion: snapshotVersion.value,
+    })
+  }
+
+  function receive(serialized: unknown): void {
+    if (typeof serialized !== 'string') {
+      connection.requestRecovery(true)
+      return
+    }
+    let message: unknown
+    try {
+      message = JSON.parse(serialized)
+    } catch {
+      connection.requestRecovery(true)
+      return
+    }
+
+    const current = roomAccess.game
+    if (!current || current.game.id !== currentGameId.value) {
+      return
+    }
+    if (isRealtimeSnapshotMessage(message)) {
       if (
-        !forceSnapshot &&
-        activeGameId === game.game.id &&
-        activeSocket &&
-        (activeSocket.readyState === WebSocket.CONNECTING ||
-          activeSocket.readyState === WebSocket.OPEN)
+        message.cursor !== message.projection.snapshot.cursor ||
+        message.cursor !== message.projection.snapshot.sequence ||
+        message.projection.game.id !== current.game.id
+      ) {
+        connection.requestRecovery(true)
+        return
+      }
+      if (
+        message.cursor < cursor.value ||
+        message.projection.snapshot.state_version < current.snapshot.state_version
       ) {
         return
       }
+      cursor.value = message.cursor
+      snapshotVersion.value = message.projection.snapshot.snapshot_version
+      roomAccess.replaceGameProjection(message.projection)
+      return
+    }
+    if (isRealtimeEventBatchMessage(message)) {
+      if (
+        message.projection.game.id !== current.game.id ||
+        message.cursor !== message.projection.snapshot.cursor ||
+        message.cursor !== message.projection.snapshot.sequence ||
+        message.projection.snapshot.state_version < current.snapshot.state_version ||
+        message.from_cursor > cursor.value ||
+        !eventBatchContinuesFrom(message, cursor.value)
+      ) {
+        connection.requestRecovery(true)
+        return
+      }
+      if (message.cursor <= cursor.value) {
+        return
+      }
+      cursor.value = message.cursor
+      snapshotVersion.value = message.projection.snapshot.snapshot_version
+      roomAccess.replaceGameProjection(message.projection)
+      return
+    }
+    connection.requestRecovery(true)
+  }
 
-      this.closeSocket()
-      activeGameId = game.game.id
-      if (typeof WebSocket === 'undefined') {
-        this.status = 'failed'
-        return
-      }
+  function resynchronize(): void {
+    const game = roomAccess.game
+    if (game) {
+      connect(game, true)
+    }
+  }
 
-      const generation = connectionGeneration
-      const requestedSnapshotVersion = forceSnapshot ? 0 : this.snapshotVersion
-      let socket: WebSocket
-      try {
-        socket = new WebSocket(
-          realtimeUrl(this.cursor, requestedSnapshotVersion),
-          realtimeSubprotocol,
-        )
-      } catch {
-        this.status = 'failed'
-        this.scheduleReconnect(generation)
-        return
-      }
-      activeSocket = socket
-      this.status = forceSnapshot ? 'reconnecting' : 'connecting'
+  function disconnect(): void {
+    connection.disconnect()
+    currentGameId.value = null
+    status.value = 'disconnected'
+    cursor.value = 0
+    snapshotVersion.value = 1
+  }
 
-      socket.onopen = () => {
-        if (generation !== connectionGeneration || socket !== activeSocket) {
-          return
-        }
-        if (socket.protocol !== realtimeSubprotocol) {
-          this.forceSnapshot()
-          return
-        }
-        this.status = 'connected'
-      }
-      socket.onmessage = (event) => {
-        if (generation !== connectionGeneration || socket !== activeSocket) {
-          return
-        }
-        this.receive(event.data)
-      }
-      socket.onerror = () => {
-        if (generation === connectionGeneration && socket === activeSocket) {
-          this.status = 'failed'
-        }
-      }
-      socket.onclose = () => {
-        if (generation !== connectionGeneration || socket !== activeSocket) {
-          return
-        }
-        activeSocket = null
-        this.status = 'reconnecting'
-        this.scheduleReconnect(generation)
-      }
-    },
-    receive(serialized: unknown): void {
-      if (typeof serialized !== 'string') {
-        this.forceSnapshot()
-        return
-      }
-      let message: unknown
-      try {
-        message = JSON.parse(serialized)
-      } catch {
-        this.forceSnapshot()
-        return
-      }
-
-      const roomAccess = useRoomAccessStore()
-      const current = roomAccess.game
-      if (!current || current.game.id !== activeGameId) {
-        return
-      }
-      if (isRealtimeSnapshotMessage(message)) {
-        if (
-          message.cursor !== message.projection.snapshot.cursor ||
-          message.cursor !== message.projection.snapshot.sequence ||
-          message.projection.game.id !== current.game.id
-        ) {
-          this.forceSnapshot()
-          return
-        }
-        this.cursor = message.cursor
-        this.snapshotVersion = message.projection.snapshot.snapshot_version
-        roomAccess.replaceGameProjection(message.projection)
-        return
-      }
-      if (isRealtimeEventBatchMessage(message)) {
-        if (
-          message.projection.game.id !== current.game.id ||
-          message.cursor !== message.projection.snapshot.cursor ||
-          message.cursor !== message.projection.snapshot.sequence ||
-          message.from_cursor > this.cursor ||
-          !eventBatchContinuesFrom(message, this.cursor)
-        ) {
-          this.forceSnapshot()
-          return
-        }
-        if (message.cursor <= this.cursor) {
-          return
-        }
-        this.cursor = message.cursor
-        this.snapshotVersion = message.projection.snapshot.snapshot_version
-        roomAccess.replaceGameProjection(message.projection)
-        return
-      }
-      this.forceSnapshot()
-    },
-    forceSnapshot(): void {
-      const game = useRoomAccessStore().game
-      if (game) {
-        this.connect(game, true)
-      }
-    },
-    scheduleReconnect(generation: number): void {
-      if (reconnectTimer || generation !== connectionGeneration) {
-        return
-      }
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null
-        if (generation !== connectionGeneration) {
-          return
-        }
-        const game = useRoomAccessStore().game
-        if (game) {
-          this.connect(game)
-        }
-      }, reconnectDelayMilliseconds)
-    },
-    closeSocket(): void {
-      connectionGeneration += 1
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
-        reconnectTimer = null
-      }
-      const socket = activeSocket
-      activeSocket = null
-      if (socket) {
-        socket.onclose = null
-        socket.close()
-      }
-    },
-    disconnect(): void {
-      this.closeSocket()
-      activeGameId = null
-      this.status = 'disconnected'
-      this.cursor = 0
-      this.snapshotVersion = 1
-    },
-  },
+  return {
+    connect,
+    cursor,
+    disconnect,
+    receive,
+    resynchronize,
+    snapshotVersion,
+    status,
+  }
 })
