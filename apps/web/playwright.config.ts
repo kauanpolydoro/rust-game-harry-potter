@@ -39,7 +39,7 @@ export default defineConfig({
       command: 'npm run dev -- --port 4173',
       cwd: import.meta.dirname,
       env: {
-        HEALTH_PROXY_TARGET: 'http://127.0.0.1:18080',
+        BACKEND_PROXY_TARGET: 'http://127.0.0.1:18080',
       },
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,

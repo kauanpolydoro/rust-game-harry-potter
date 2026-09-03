@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hogwarts.invalid/contracts/identity-access.schema.json",
+  "title": "IdentityAccessContracts",
+  "$defs": {
+    "CreateRoomRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "recovery_password"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "recovery_password": { "type": "string", "minLength": 12, "maxLength": 128 }
+      }
+    },
+    "RoomSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "status"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$"
+        },
+        "status": { "type": "string", "enum": ["open"] }
+      }
+    },
+    "ParticipantSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "role"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "role": { "type": "string", "enum": ["host"] }
+      }
+    },
+    "CreateRoomResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room", "participant"],
+      "properties": {
+        "room": { "$ref": "#/$defs/RoomSummary" },
+        "participant": { "$ref": "#/$defs/ParticipantSummary" }
+      }
+    },
+    "FindRoomResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room"],
+      "properties": {
+        "room": { "$ref": "#/$defs/RoomSummary" }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "category", "retry", "message_key", "details", "correlation_id"],
+          "properties": {
+            "code": { "type": "string" },
+            "category": { "type": "string" },
+            "retry": { "type": "string" },
+            "message_key": { "type": "string" },
+            "details": { "type": "object" },
+            "correlation_id": { "type": "string", "format": "uuid" }
+          }
+        }
+      }
+    }
+  }
+}

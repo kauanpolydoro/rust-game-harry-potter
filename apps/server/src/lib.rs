@@ -8,6 +8,8 @@ use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Serialize;
 use sqlx::{PgPool, migrate::Migrator};
 
+mod identity_access;
+
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 
 #[derive(Clone)]
@@ -44,6 +46,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness))
         .route("/health/startup", get(startup))
+        .merge(identity_access::router())
         .with_state(state)
 }
 
