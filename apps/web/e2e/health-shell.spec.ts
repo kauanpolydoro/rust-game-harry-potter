@@ -62,6 +62,19 @@ const completedGameProjection = {
   turn: { ...initialGameProjection.turn, phase: 'hero_action' },
 }
 
+function errorResponse(code: string) {
+  return {
+    error: {
+      category: 'request',
+      code,
+      correlation_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+      details: {},
+      message_key: `error.${code.toLowerCase()}`,
+      retry: 'after_correction',
+    },
+  }
+}
+
 test('a player sees when the authoritative service is ready', async ({ page }) => {
   await page.goto('/')
 
@@ -139,6 +152,110 @@ test('a guest joins with an available hero and keeps the same position after rel
   }
 })
 
+test('two players synchronize a committed command and reconnect without reloading', async ({
+  browser,
+  page: hostPage,
+}) => {
+  const guestContext = await browser.newContext()
+  const guestPage = await guestContext.newPage()
+  await guestPage.addInitScript(() => {
+    type BrowserSocket = { close: (code?: number, reason?: string) => void }
+    type BrowserSocketConstructor = new (
+      url: string | URL,
+      protocols?: string | string[],
+    ) => BrowserSocket
+    const scope = globalThis as unknown as {
+      WebSocket: BrowserSocketConstructor
+      __e2eSockets: BrowserSocket[]
+    }
+    const NativeWebSocket = scope.WebSocket
+    const observed: BrowserSocket[] = []
+    class ObservedWebSocket extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols)
+        observed.push(this)
+      }
+    }
+    scope.__e2eSockets = observed
+    scope.WebSocket = ObservedWebSocket
+  })
+
+  try {
+    await hostPage.goto('/')
+    await hostPage.getByLabel('Seu nome').fill('Minerva')
+    await hostPage.getByLabel('Senha de recuperação').fill('a long uncommon passphrase')
+    await hostPage.getByRole('button', { name: 'Criar sala privada' }).click()
+    const roomCode = await hostPage.locator('output').textContent()
+
+    await hostPage.getByRole('radio', { name: 'Harry' }).check()
+    await hostPage.getByRole('button', { name: 'Confirmar Herói' }).click()
+    await hostPage.getByRole('button', { name: 'Estou pronto' }).click()
+
+    await guestPage.goto('/')
+    await guestPage.getByRole('button', { name: 'Entrar em uma sala' }).click()
+    await guestPage.getByLabel('Código da sala').fill(roomCode ?? '')
+    await guestPage.getByRole('button', { name: 'Localizar sala' }).click()
+    await guestPage.getByLabel('Seu nome').fill('Luna')
+    await guestPage.getByRole('radio', { name: 'Hermione' }).check()
+    await guestPage.getByRole('button', { name: 'Entrar na sala' }).click()
+    await guestPage.getByRole('button', { name: 'Estou pronto' }).click()
+
+    await hostPage.getByRole('button', { name: 'Atualizar estado da sala' }).click()
+    await hostPage.getByRole('button', { name: 'Selar sala e iniciar' }).click()
+    await guestPage.getByRole('button', { name: 'Atualizar estado da sala' }).click()
+
+    await expect(hostPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
+    await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
+    await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
+    await expect(guestPage.getByText('Ação do Herói')).toBeVisible()
+
+    await guestPage.evaluate(() => {
+      const sockets = (
+        globalThis as unknown as {
+          __e2eSockets: Array<{ close: (code?: number, reason?: string) => void }>
+        }
+      ).__e2eSockets
+      sockets.at(-1)?.close(1000, 'E2E reconnect')
+    })
+    await expect(guestPage.getByText('Reconectando atualizações em tempo real.')).toBeVisible()
+    await expect
+      .poll(
+        () =>
+          guestPage.evaluate(
+            () =>
+              (globalThis as unknown as { __e2eSockets: Array<unknown> }).__e2eSockets.length,
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThanOrEqual(2)
+    await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible({
+      timeout: 10_000,
+    })
+  } finally {
+    await guestContext.close()
+  }
+})
+
+test('the current interface reflows at an effective 200 percent zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 900 })
+  await page.goto('/')
+
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' }),
+  ).toBeVisible()
+  const overflow = await page.evaluate(
+    () => {
+      const browserDocument = (
+        globalThis as unknown as {
+          document: { documentElement: { clientWidth: number; scrollWidth: number } }
+        }
+      ).document
+      return browserDocument.documentElement.scrollWidth - browserDocument.documentElement.clientWidth
+    },
+  )
+  expect(overflow).toBeLessThanOrEqual(1)
+})
+
 test('a stale command resynchronizes before the player can decide again', async ({ page }) => {
   let sessionRequests = 0
   let commandRequests = 0
@@ -156,7 +273,7 @@ test('a stale command resynchronizes before the player can decide again', async 
   await page.route('**/api/games/current/commands', async (route) => {
     commandRequests += 1
     await route.fulfill({
-      body: JSON.stringify({ error: { code: 'STALE_STATE_VERSION' } }),
+      body: JSON.stringify(errorResponse('STALE_STATE_VERSION')),
       contentType: 'application/json',
       status: 409,
     })

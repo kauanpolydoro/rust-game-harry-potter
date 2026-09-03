@@ -8,12 +8,16 @@
   "workspaces": [
     "apps/web"
   ],
+  "devDependencies": {
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript7": "npm:typescript@7.0.2"
+  },
   "scripts": {
     "build": "npm run build --workspace @hogwarts/web",
     "dev:web": "npm run dev --workspace @hogwarts/web",
     "generate:contracts": "node scripts/generate-contracts.mjs",
-    "generate:check": "node scripts/generate-contracts.mjs --check && node scripts/generate-vue-types.mjs --check",
-    "generate:vue-types": "node scripts/generate-vue-types.mjs",
+    "generate:check": "node scripts/generate-contracts.mjs --check",
+    "check:vue-a11y": "node scripts/check-vue-a11y.mjs",
     "lint": "npm run lint --workspace @hogwarts/web",
     "test": "node --test scripts/*.test.mjs && npm run test --workspace @hogwarts/web",
     "test:e2e": "npm run test:e2e --workspace @hogwarts/web",
