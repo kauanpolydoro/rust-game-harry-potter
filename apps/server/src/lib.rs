@@ -22,6 +22,8 @@ use tokio::sync::{broadcast, watch};
 use tracing::Instrument;
 use uuid::Uuid;
 
+mod content_catalog;
+mod current_session;
 mod http_support;
 mod identity_access;
 mod match_runtime;
@@ -39,7 +41,7 @@ pub struct AppState {
     database: PgPool,
     migration_database: PgPool,
     started: Arc<AtomicBool>,
-    content: match_runtime::ContentCatalog,
+    content: content_catalog::ContentCatalog,
     application_origin: Arc<str>,
     game_event_fanout: GameEventFanout,
     session_token_key: Arc<[u8; 32]>,
@@ -117,7 +119,7 @@ impl AppState {
             migration_database: database.clone(),
             database,
             started: Arc::new(AtomicBool::new(false)),
-            content: match_runtime::ContentCatalog::new(manifests),
+            content: content_catalog::ContentCatalog::new(manifests),
             application_origin: Arc::from(DEFAULT_APPLICATION_ORIGIN),
             game_event_fanout: GameEventFanout::default(),
             session_token_key: Arc::new(session_token_key),
@@ -212,6 +214,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health/ready", get(readiness))
         .route("/health/startup", get(startup))
         .merge(identity_access::router())
+        .merge(current_session::router())
         .merge(match_runtime::router())
         .with_state(state)
         .layer(middleware::from_fn(correlate_request))
@@ -284,7 +287,9 @@ pub async fn initialize(state: &AppState) -> Result<(), InitializationError> {
         .run(&state.migration_database)
         .await
         .map_err(InitializationError::Migration)?;
-    match_runtime::publish_content(state)
+    state
+        .content
+        .publish(&state.database)
         .await
         .map_err(InitializationError::Content)?;
     state.mark_started();

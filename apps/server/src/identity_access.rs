@@ -1,7 +1,3 @@
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
-};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -16,12 +12,15 @@ use uuid::{Uuid, Variant};
 
 use crate::{
     AppState,
+    content_catalog::ContentManifestOption,
     http_support::{ApiError, idempotency_key, no_store_json},
-    match_runtime,
     session::authenticated_participant,
 };
 
+mod credentials;
 mod postgres;
+
+use credentials::{hash_password, validate_display_name, validate_password, verify_password};
 
 const ROOM_CODE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const ROOM_CODE_LENGTH: usize = 8;
@@ -31,7 +30,6 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/rooms", post(create_room))
         .route("/api/rooms/{room_code}", get(find_room))
         .route("/api/rooms/{room_code}/participants", post(join_room))
-        .route("/api/session", get(restore_session))
         .route("/api/session/hero", put(select_hero))
         .route("/api/session/readiness", put(set_readiness))
 }
@@ -85,12 +83,12 @@ struct ParticipantSummary {
 }
 
 #[derive(Serialize)]
-struct LobbyResponse {
+pub(crate) struct LobbyResponse {
     room: RoomSummary,
     participant: ParticipantSummary,
     participants: Vec<ParticipantSummary>,
     heroes: Vec<HeroAvailability>,
-    content_options: Vec<match_runtime::ContentManifestOption>,
+    content_options: Vec<ContentManifestOption>,
 }
 
 #[derive(Serialize)]
@@ -328,21 +326,14 @@ async fn join_room(
     room_joined_response(&state, stored, &idempotency_key).await
 }
 
-async fn restore_session(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Response, ApiError> {
-    let participant_id = authenticated_participant(&state, &headers).await?;
-    if let Some(projection) =
-        match_runtime::projection_for_participant(&state.database, participant_id).await?
-    {
-        return Ok(no_store_json(StatusCode::OK, projection));
-    }
+pub(crate) async fn lobby_for_participant(
+    state: &AppState,
+    participant_id: Uuid,
+) -> Result<LobbyResponse, ApiError> {
     let lobby = postgres::load_lobby(&state.database, participant_id)
         .await?
         .ok_or_else(ApiError::session_invalid)?;
-
-    Ok(no_store_json(StatusCode::OK, lobby_response(&state, lobby)))
+    Ok(lobby_response(state, lobby))
 }
 
 async fn select_hero(
@@ -494,7 +485,7 @@ fn lobby_response(state: &AppState, stored: StoredLobby) -> LobbyResponse {
         participant: current_participant.expect("the current participant belongs to the lobby"),
         participants,
         heroes: hero_availability(&selected_heroes),
-        content_options: match_runtime::content_options(state),
+        content_options: state.content.options(),
     }
 }
 
@@ -555,18 +546,7 @@ async fn replay_room_creation(
     display_name: &str,
     password: String,
 ) -> Result<Response, ApiError> {
-    let stored_hash = stored.recovery_password_hash.clone();
-    let password_matches = tokio::task::spawn_blocking(move || {
-        let parsed = PasswordHash::new(&stored_hash).map_err(|_| ())?;
-        Ok::<_, ()>(
-            Argon2::default()
-                .verify_password(password.as_bytes(), &parsed)
-                .is_ok(),
-        )
-    })
-    .await
-    .map_err(|error| ApiError::internal_with("identity access application operation", error))?
-    .map_err(|()| ApiError::internal())?;
+    let password_matches = verify_password(password, stored.recovery_password_hash.clone()).await?;
 
     if stored.display_name != display_name || !password_matches {
         return Err(ApiError::idempotency_conflict());
@@ -596,59 +576,6 @@ async fn room_created_response(
     Ok(response)
 }
 
-async fn hash_password(password: String) -> Result<String, ApiError> {
-    tokio::task::spawn_blocking(move || {
-        Argon2::default()
-            .hash_password(password.as_bytes())
-            .map(|hash| hash.to_string())
-            .map_err(|_| ())
-    })
-    .await
-    .map_err(|error| ApiError::internal_with("identity access application operation", error))?
-    .map_err(|()| ApiError::internal())
-}
-
-fn validate_display_name(display_name: &str) -> Result<&str, ApiError> {
-    let normalized = display_name.trim();
-    if normalized.is_empty()
-        || normalized.chars().count() > 40
-        || normalized.chars().any(char::is_control)
-    {
-        return Err(ApiError::invalid_display_name());
-    }
-
-    Ok(normalized)
-}
-
-fn validate_password(password: &str) -> Result<(), ApiError> {
-    if password.chars().count() > 128 || weak_password(password) {
-        return Err(ApiError::weak_password());
-    }
-
-    Ok(())
-}
-
-fn weak_password(password: &str) -> bool {
-    const COMMON_FRAGMENTS: [&str; 7] = [
-        "password",
-        "qwerty",
-        "123456",
-        "abcdef",
-        "senha",
-        "harrypotter",
-        "hogwarts",
-    ];
-    let normalized = password.to_lowercase();
-
-    password.chars().count() < 12
-        || distinct_character_count(password, 4) < 4
-        || COMMON_FRAGMENTS
-            .iter()
-            .any(|candidate| normalized.contains(candidate))
-        || is_repeated_pattern(password)
-        || contains_ascii_sequence(&normalized, 4)
-}
-
 fn parse_hero(value: &str) -> Result<HeroId, ApiError> {
     value.parse().map_err(|_| ApiError::invalid_hero())
 }
@@ -658,42 +585,6 @@ const fn hero_summary(hero: HeroId) -> HeroSummary {
         id: hero.as_str(),
         name: hero.name(),
     }
-}
-
-fn distinct_character_count(value: &str, limit: usize) -> usize {
-    let mut distinct = Vec::with_capacity(limit);
-    for character in value.chars() {
-        if !distinct.contains(&character) {
-            distinct.push(character);
-            if distinct.len() == limit {
-                break;
-            }
-        }
-    }
-    distinct.len()
-}
-
-fn is_repeated_pattern(value: &str) -> bool {
-    let characters: Vec<char> = value.chars().collect();
-    (1..=characters.len() / 2).any(|pattern_length| {
-        characters.len().is_multiple_of(pattern_length)
-            && characters
-                .iter()
-                .enumerate()
-                .all(|(index, character)| *character == characters[index % pattern_length])
-    })
-}
-
-fn contains_ascii_sequence(value: &str, minimum_length: usize) -> bool {
-    let bytes = value.as_bytes();
-    bytes.windows(minimum_length).any(|window| {
-        window
-            .windows(2)
-            .all(|pair| pair[1].is_ascii_alphanumeric() && pair[1] == pair[0].wrapping_add(1))
-            || window
-                .windows(2)
-                .all(|pair| pair[1].is_ascii_alphanumeric() && pair[0] == pair[1].wrapping_add(1))
-    })
 }
 
 fn random_room_code() -> Result<String, ApiError> {

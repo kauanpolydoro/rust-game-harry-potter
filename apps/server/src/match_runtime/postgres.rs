@@ -1,11 +1,11 @@
-use game_content::ContentManifest;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, SelectedContent, StoredCommandGame, StoredCommandReceipt, StoredGame,
-    StoredGameEvent, StoredGameStart, StoredRoomActor, StoredRoomParticipant,
+    ApiError, StoredCommandGame, StoredCommandReceipt, StoredGame, StoredGameEvent,
+    StoredGameStart, StoredRoomActor, StoredRoomParticipant,
 };
+use crate::content_catalog::SelectedContent;
 
 pub(super) struct GameStartClaim<'a> {
     pub(super) adventure_id: &'a str,
@@ -41,73 +41,6 @@ struct PersistedCommandCounters {
     state_version: i64,
     sequence: i64,
     prng_counter: i64,
-}
-
-pub(super) async fn publish_manifest(
-    database: &PgPool,
-    manifest: &ContentManifest,
-    document: &str,
-) -> Result<(), sqlx::Error> {
-    let manifest_version = i16::try_from(manifest.manifest_version).map_err(|_| {
-        sqlx::Error::Protocol("manifest version does not fit PostgreSQL SMALLINT".to_owned())
-    })?;
-    let inserted = sqlx::query_scalar::<_, String>(
-        r"
-        INSERT INTO content_manifests (
-            digest,
-            manifest_version,
-            content_version,
-            ruleset_version,
-            playable,
-            document
-        )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-        ON CONFLICT (digest) DO NOTHING
-        RETURNING digest
-        ",
-    )
-    .bind(&manifest.digest)
-    .bind(manifest_version)
-    .bind(&manifest.content_version)
-    .bind(&manifest.ruleset_version)
-    .bind(manifest.playable)
-    .bind(document)
-    .fetch_optional(database)
-    .await?;
-
-    if inserted.is_none() {
-        let stored = sqlx::query_as::<_, (i16, String, String, bool, String)>(
-            r"
-            SELECT
-                manifest_version,
-                content_version,
-                ruleset_version,
-                playable,
-                document::text
-            FROM content_manifests
-            WHERE digest = $1
-            ",
-        )
-        .bind(&manifest.digest)
-        .fetch_one(database)
-        .await?;
-        let requested_document: serde_json::Value = serde_json::from_str(document)
-            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
-        let stored_document: serde_json::Value = serde_json::from_str(&stored.4)
-            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
-        if stored.0 != manifest_version
-            || stored.1 != manifest.content_version
-            || stored.2 != manifest.ruleset_version
-            || stored.3 != manifest.playable
-            || stored_document != requested_document
-        {
-            return Err(sqlx::Error::Protocol(
-                "content manifest digest collision or immutable document mismatch".to_owned(),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 pub(super) async fn lock_room_actor(
