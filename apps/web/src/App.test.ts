@@ -4,9 +4,48 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
 
+const availableHeroes = [
+  { available: true, id: 'harry', name: 'Harry' },
+  { available: true, id: 'hermione', name: 'Hermione' },
+  { available: true, id: 'neville', name: 'Neville' },
+  { available: true, id: 'ron', name: 'Ron' },
+]
+
+function hostRoomResponse() {
+  const participant = { display_name: 'Minerva', position: 1, role: 'host' }
+  return {
+    heroes: availableHeroes,
+    participant,
+    participants: [participant],
+    room: { code: '9HKGW4RT', status: 'open' },
+  }
+}
+
+function guestLobbyResponse() {
+  const guest = {
+    display_name: 'Luna',
+    hero: { id: 'hermione', name: 'Hermione' },
+    position: 2,
+    role: 'guest',
+  }
+  return {
+    heroes: availableHeroes.map((hero) => ({
+      ...hero,
+      available: hero.id !== 'hermione',
+    })),
+    participant: guest,
+    participants: [
+      { display_name: 'Minerva', position: 1, role: 'host' },
+      guest,
+    ],
+    room: { code: '9HKGW4RT', status: 'open' },
+  }
+}
+
 describe('application shell', () => {
   afterEach(() => {
     cleanup()
+    localStorage.clear()
     sessionStorage.clear()
     vi.unstubAllGlobals()
   })
@@ -94,10 +133,7 @@ describe('application shell', () => {
       )
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
-            participant: { display_name: 'Minerva', role: 'host' },
-            room: { code: '9HKGW4RT', status: 'open' },
-          }),
+          JSON.stringify(hostRoomResponse()),
           {
             headers: { 'Content-Type': 'application/json' },
             status: 201,
@@ -170,10 +206,7 @@ describe('application shell', () => {
       )
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
-            participant: { display_name: 'Minerva', role: 'host' },
-            room: { code: '9HKGW4RT', status: 'open' },
-          }),
+          JSON.stringify(hostRoomResponse()),
           {
             headers: { 'Content-Type': 'application/json' },
             status: 201,
@@ -214,10 +247,7 @@ describe('application shell', () => {
       .mockResolvedValueOnce(readyResponse())
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
-            participant: { display_name: 'Minerva', role: 'host' },
-            room: { code: '9HKGW4RT', status: 'open' },
-          }),
+          JSON.stringify(hostRoomResponse()),
           {
             headers: { 'Content-Type': 'application/json' },
             status: 201,
@@ -292,10 +322,7 @@ describe('application shell', () => {
       )
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
-            participant: { display_name: 'Minerva', role: 'host' },
-            room: { code: '9HKGW4RT', status: 'open' },
-          }),
+          JSON.stringify(hostRoomResponse()),
           { headers: { 'Content-Type': 'application/json' }, status: 201 },
         ),
       )
@@ -369,10 +396,7 @@ describe('application shell', () => {
 
     completeCreation(
       new Response(
-        JSON.stringify({
-          participant: { display_name: 'Minerva', role: 'host' },
-          room: { code: '9HKGW4RT', status: 'open' },
-        }),
+        JSON.stringify(hostRoomResponse()),
         { headers: { 'Content-Type': 'application/json' }, status: 201 },
       ),
     )
@@ -474,5 +498,137 @@ describe('application shell', () => {
     await screen.findByText('Escolha uma senha mais longa e menos previsível.')
     expect(password).toHaveAttribute('aria-invalid', 'true')
     await waitFor(() => expect(password).toHaveFocus())
+  })
+
+  it('lets a guest find a room, choose an available hero and receive a position', async () => {
+    const heroes = availableHeroes
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ room: { code: '9HKGW4RT', status: 'open' }, heroes }),
+          { headers: { 'Content-Type': 'application/json' }, status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            heroes: heroes.map((hero) => ({
+              ...hero,
+              available: hero.id !== 'hermione',
+            })),
+            participant: {
+              display_name: 'Luna',
+              hero: { id: 'hermione', name: 'Hermione' },
+              position: 2,
+              role: 'guest',
+            },
+            participants: [
+              { display_name: 'Minerva', position: 1, role: 'host' },
+              {
+                display_name: 'Luna',
+                hero: { id: 'hermione', name: 'Hermione' },
+                position: 2,
+                role: 'guest',
+              },
+            ],
+            room: { code: '9HKGW4RT', status: 'open' },
+          }),
+          { headers: { 'Content-Type': 'application/json' }, status: 201 },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Entrar em uma sala' }))
+    await fireEvent.update(screen.getByLabelText('Código da sala'), '9hkgw4rt')
+    await fireEvent.click(screen.getByRole('button', { name: 'Localizar sala' }))
+
+    await screen.findByRole('heading', { level: 2, name: 'Escolha seu lugar à mesa' })
+    await fireEvent.update(screen.getByLabelText('Seu nome'), 'Luna')
+    await fireEvent.click(screen.getByRole('radio', { name: 'Hermione' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Entrar na sala' }))
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(screen.getByText('Luna')).toBeVisible()
+    expect(screen.getByText('Posição 2')).toBeVisible()
+    expect(localStorage.getItem('hogwarts.session.expected')).toBe('true')
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      '/api/rooms/9HKGW4RT',
+      expect.objectContaining({ credentials: 'same-origin' }),
+    )
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      '/api/rooms/9HKGW4RT/participants',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('restores a guest position after the browser reloads', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(guestLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(screen.getByText('Luna')).toBeVisible()
+    expect(screen.getByText('Posição 2')).toBeVisible()
+    expect(screen.getByText('Hermione')).toBeVisible()
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      '/api/session',
+      expect.objectContaining({ credentials: 'same-origin' }),
+    )
+  })
+
+  it('keeps a valid browser binding recoverable when session restoration loses the network', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockRejectedValueOnce(new TypeError('network unavailable'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(guestLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Não foi possível retomar' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Tentar retomar sessão' }))
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(localStorage.getItem('hogwarts.session.expected')).toBe('true')
   })
 })

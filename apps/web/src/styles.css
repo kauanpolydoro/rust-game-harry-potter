@@ -48,6 +48,7 @@ button {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
+.hero-option:has(input:focus-visible),
 .room-stage h2:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 4px;
@@ -307,6 +308,15 @@ input {
   transition: border-color 180ms ease-out;
 }
 
+#room-code {
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .field input:hover {
   border-color: var(--brass);
 }
@@ -356,6 +366,131 @@ input {
 
 .field-error:empty {
   display: none;
+}
+
+.alternate-path {
+  margin: 0.3rem 0 0;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.alternate-path button,
+.text-button {
+  min-height: 2.75rem;
+  padding: 0.45rem 0.25rem;
+  border: 0;
+  background: transparent;
+  color: var(--brass);
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 0.22rem;
+}
+
+.hero-fieldset,
+.hero-selection fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.hero-fieldset legend,
+.hero-selection legend,
+.participant-lineup h3 {
+  margin: 0 0 0.65rem;
+  color: var(--chalk);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.hero-options {
+  display: grid;
+  border-block: 1px solid var(--brass-quiet);
+}
+
+.hero-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.25rem;
+  padding-inline: 0.25rem;
+  border-bottom: 1px solid rgb(111 99 63 / 55%);
+  color: var(--chalk);
+  cursor: pointer;
+}
+
+.hero-option:last-child {
+  border-bottom: 0;
+}
+
+.hero-option input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  accent-color: var(--brass);
+}
+
+.hero-option span {
+  font-weight: 700;
+}
+
+.hero-option small {
+  color: var(--ready);
+  font-size: 0.78rem;
+}
+
+.hero-option--unavailable {
+  color: var(--chalk-muted);
+  cursor: not-allowed;
+}
+
+.hero-option--unavailable small {
+  color: var(--warning);
+}
+
+.hero-selection {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.secondary-button {
+  min-height: 2.75rem;
+  border: 1px solid var(--brass);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--chalk);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.secondary-button:disabled {
+  border-color: var(--brass-quiet);
+  color: var(--chalk-muted);
+  cursor: not-allowed;
+}
+
+.participant-lineup {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--brass-quiet);
+}
+
+.participant-lineup ol {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .room-code-block {

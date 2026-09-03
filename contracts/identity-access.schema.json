@@ -3,6 +3,10 @@
   "$id": "https://hogwarts.invalid/contracts/identity-access.schema.json",
   "title": "IdentityAccessContracts",
   "$defs": {
+    "HeroId": {
+      "type": "string",
+      "enum": ["harry", "hermione", "neville", "ron"]
+    },
     "CreateRoomRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -10,6 +14,23 @@
       "properties": {
         "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
         "recovery_password": { "type": "string", "minLength": 12, "maxLength": 128 }
+      }
+    },
+    "JoinRoomRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "hero_id"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "hero_id": { "$ref": "#/$defs/HeroId" }
+      }
+    },
+    "SelectHeroRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hero_id"],
+      "properties": {
+        "hero_id": { "$ref": "#/$defs/HeroId" }
       }
     },
     "RoomSummary": {
@@ -24,30 +45,80 @@
         "status": { "type": "string", "enum": ["open"] }
       }
     },
+    "HeroSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/HeroId" },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "HeroAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "available"],
+      "properties": {
+        "id": { "$ref": "#/$defs/HeroId" },
+        "name": { "type": "string", "minLength": 1 },
+        "available": { "type": "boolean" }
+      }
+    },
     "ParticipantSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "role"],
+      "required": ["display_name", "role", "position"],
       "properties": {
         "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
-        "role": { "type": "string", "enum": ["host"] }
+        "role": { "type": "string", "enum": ["host", "guest"] },
+        "position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "hero": { "$ref": "#/$defs/HeroSummary" }
       }
     },
     "CreateRoomResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["room", "participant"],
+      "required": ["room", "participant", "participants", "heroes"],
       "properties": {
         "room": { "$ref": "#/$defs/RoomSummary" },
-        "participant": { "$ref": "#/$defs/ParticipantSummary" }
+        "participant": { "$ref": "#/$defs/ParticipantSummary" },
+        "participants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ParticipantSummary" }
+        },
+        "heroes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/HeroAvailability" }
+        }
       }
     },
     "FindRoomResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["room"],
+      "required": ["room", "heroes"],
       "properties": {
-        "room": { "$ref": "#/$defs/RoomSummary" }
+        "room": { "$ref": "#/$defs/RoomSummary" },
+        "heroes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/HeroAvailability" }
+        }
+      }
+    },
+    "LobbyResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room", "participant", "participants", "heroes"],
+      "properties": {
+        "room": { "$ref": "#/$defs/RoomSummary" },
+        "participant": { "$ref": "#/$defs/ParticipantSummary" },
+        "participants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ParticipantSummary" }
+        },
+        "heroes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/HeroAvailability" }
+        }
       }
     },
     "ErrorResponse": {
