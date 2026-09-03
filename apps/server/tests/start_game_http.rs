@@ -1188,6 +1188,11 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
             r#"{"unexpected":true}"#,
             "payload metadata must match",
         ),
+        (
+            "dark_arts_completed",
+            r#"{"sequence":1.0}"#,
+            "payload must match the current codec shape",
+        ),
     ] {
         let mut transaction = room
             .database
@@ -1246,6 +1251,79 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
             .await
             .expect("the rejected event transaction must roll back");
     }
+}
+
+#[tokio::test]
+async fn a_game_snapshot_cannot_advance_without_official_history() {
+    let room = ready_room().await;
+    start_ready_game(&room, "orphan-snapshot-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the orphan snapshot transaction must start");
+    sqlx::query(
+        r"
+        UPDATE games
+        SET sequence = sequence + 1,
+            state_version = state_version + 1
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&mut *transaction)
+    .await
+    .expect("the deferred history constraint should allow the statement");
+
+    let error = transaction
+        .commit()
+        .await
+        .expect_err("the orphan snapshot must be rejected at commit");
+    assert_database_error_code(&error, "23514");
+    assert!(
+        error
+            .to_string()
+            .contains("matching official event and receipt")
+    );
+}
+
+#[tokio::test]
+async fn an_official_event_cannot_commit_without_its_receipt() {
+    let room = ready_room().await;
+    start_ready_game(&room, "orphan-event-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the orphan event transaction must start");
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            UPDATE games
+            SET sequence = 1,
+                state_version = 2
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            RETURNING id, room_id, started_by_participant_id
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test snapshot must advance inside the transaction");
+    insert_test_event(
+        &mut transaction,
+        game_id,
+        room_id,
+        uuid::Uuid::new_v4(),
+        actor_id,
+    )
+    .await;
+
+    let error = transaction
+        .commit()
+        .await
+        .expect_err("the orphan event must be rejected at commit");
+    assert_database_error_code(&error, "23514");
+    assert!(error.to_string().contains("receipt"));
 }
 
 #[tokio::test]

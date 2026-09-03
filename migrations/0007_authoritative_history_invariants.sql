@@ -120,8 +120,16 @@ BEGIN
     END IF;
 
     IF jsonb_typeof(NEW.payload) <> 'object'
+       OR jsonb_typeof(NEW.payload -> 'event_version') <> 'number'
+       OR NEW.payload ->> 'event_version' !~ '^[1-9][0-9]*$'
+       OR jsonb_typeof(NEW.payload -> 'sequence') <> 'number'
+       OR NEW.payload ->> 'sequence' !~ '^[1-9][0-9]*$'
+       OR jsonb_typeof(NEW.payload -> 'state_version') <> 'number'
+       OR NEW.payload ->> 'state_version' !~ '^[1-9][0-9]*$'
        OR jsonb_typeof(NEW.payload -> 'turn') <> 'number'
        OR NEW.payload ->> 'turn' !~ '^[1-9][0-9]*$'
+       OR jsonb_typeof(NEW.payload -> 'actor_position') <> 'number'
+       OR NEW.payload ->> 'actor_position' !~ '^[1-9][0-9]*$'
     THEN
         RAISE EXCEPTION 'game event payload must match the current codec shape'
             USING ERRCODE = '23514';
@@ -148,6 +156,80 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+CREATE FUNCTION require_game_transition_history()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.sequence = OLD.sequence AND NEW.state_version = OLD.state_version THEN
+        RETURN NEW;
+    END IF;
+
+    IF NEW.sequence <> OLD.sequence + 1 OR NEW.state_version <> OLD.state_version + 1 THEN
+        RAISE EXCEPTION 'game state must advance by exactly one official transition'
+            USING ERRCODE = '23514';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM game_events AS events
+        JOIN game_command_receipts AS receipts
+          ON receipts.game_id = events.game_id
+         AND receipts.room_id = events.room_id
+         AND receipts.accepted_sequence = events.sequence
+         AND receipts.command_id = events.command_id
+         AND receipts.actor_participant_id = events.actor_participant_id
+         AND receipts.accepted_state_version = events.state_version
+         AND receipts.command_type = 'complete_dark_arts'
+        WHERE events.game_id = NEW.id
+          AND events.room_id = NEW.room_id
+          AND events.sequence = NEW.sequence
+          AND events.state_version = NEW.state_version
+    ) THEN
+        RAISE EXCEPTION 'game transition requires a matching official event and receipt'
+            USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION require_game_event_receipt()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM game_command_receipts AS receipts
+        WHERE receipts.game_id = NEW.game_id
+          AND receipts.room_id = NEW.room_id
+          AND receipts.accepted_sequence = NEW.sequence
+          AND receipts.command_id = NEW.command_id
+          AND receipts.actor_participant_id = NEW.actor_participant_id
+          AND receipts.accepted_state_version = NEW.state_version
+          AND receipts.command_type = 'complete_dark_arts'
+    ) THEN
+        RAISE EXCEPTION 'official game event requires a matching command receipt'
+            USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER game_state_transitions_have_history
+AFTER UPDATE ON games
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION require_game_transition_history();
+
+CREATE CONSTRAINT TRIGGER game_events_have_receipts
+AFTER INSERT ON game_events
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION require_game_event_receipt();
 
 CREATE FUNCTION reject_official_history_mutation()
 RETURNS TRIGGER
