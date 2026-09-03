@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 const initialGameProjection = {
+  choice: { status: 'none' },
   game: {
     adventure: { id: 'adventure:001', name: 'Game 1' },
     expires_at: '2026-09-10T12:00:00Z',
@@ -29,6 +30,7 @@ const initialGameProjection = {
     },
   ],
   snapshot: {
+    cursor: 0,
     digest: `blake3:${'c'.repeat(64)}`,
     sequence: 0,
     snapshot_version: 1,
@@ -52,6 +54,7 @@ const completedGameProjection = {
   legal_actions: [],
   snapshot: {
     ...initialGameProjection.snapshot,
+    cursor: 1,
     digest: `blake3:${'d'.repeat(64)}`,
     sequence: 1,
     state_version: 2,

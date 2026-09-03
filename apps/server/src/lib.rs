@@ -8,17 +8,22 @@ use std::{error::Error, fmt};
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Serialize;
 use sqlx::{PgPool, migrate::Migrator};
+use tokio::sync::broadcast;
+use uuid::Uuid;
 
 mod identity_access;
 mod match_runtime;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
+const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
 
 #[derive(Clone)]
 pub struct AppState {
     database: PgPool,
     started: Arc<AtomicBool>,
     content: match_runtime::ContentCatalog,
+    application_origin: Arc<str>,
+    game_event_signal: broadcast::Sender<Uuid>,
 }
 
 impl AppState {
@@ -42,11 +47,21 @@ impl AppState {
         database: PgPool,
         manifests: Vec<game_content::ContentManifest>,
     ) -> Self {
+        let (game_event_signal, _) = broadcast::channel(256);
         Self {
             database,
             started: Arc::new(AtomicBool::new(false)),
             content: match_runtime::ContentCatalog::new(manifests),
+            application_origin: Arc::from(DEFAULT_APPLICATION_ORIGIN),
+            game_event_signal,
         }
+    }
+
+    /// Sets the one browser origin accepted by authenticated WebSocket handshakes.
+    #[must_use]
+    pub fn with_application_origin(mut self, application_origin: impl Into<Arc<str>>) -> Self {
+        self.application_origin = application_origin.into();
+        self
     }
 
     pub fn mark_started(&self) {
@@ -55,6 +70,18 @@ impl AppState {
 
     fn is_started(&self) -> bool {
         self.started.load(Ordering::Acquire)
+    }
+
+    fn application_origin(&self) -> &str {
+        &self.application_origin
+    }
+
+    fn subscribe_to_game_events(&self) -> broadcast::Receiver<Uuid> {
+        self.game_event_signal.subscribe()
+    }
+
+    fn signal_game_event(&self, game_id: Uuid) {
+        let _ = self.game_event_signal.send(game_id);
     }
 }
 

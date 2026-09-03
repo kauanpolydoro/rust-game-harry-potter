@@ -6,8 +6,11 @@ use game_content::{ContentManifest, import_base_bundle};
 use harry_potter_server::{AppState, build_router, initialize};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use std::{sync::Arc, time::Duration};
-use tokio::sync::Barrier;
+use std::{fmt::Write as _, sync::Arc, time::Duration};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::Barrier,
+};
 use tower::ServiceExt;
 
 struct ReadyRoom {
@@ -315,6 +318,15 @@ async fn ready_room() -> ReadyRoom {
     }
 }
 
+fn assert_initial_synchronization_projection(projection: &Value) {
+    assert_eq!(projection["snapshot"]["snapshot_version"], 1);
+    assert_eq!(projection["snapshot"]["state_version"], 1);
+    assert_eq!(projection["snapshot"]["sequence"], 0);
+    assert_eq!(projection["snapshot"]["cursor"], 0);
+    assert_eq!(projection["legal_actions"], json!(["complete_dark_arts"]));
+    assert_eq!(projection["choice"], json!({ "status": "none" }));
+}
+
 #[tokio::test]
 async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_projection() {
     let room = ready_room().await;
@@ -338,9 +350,7 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
     let host_projection = response_json(response).await;
     assert_eq!(host_projection["game"]["status"], "in_progress");
     assert_eq!(host_projection["game"]["adventure"]["id"], "adventure:001");
-    assert_eq!(host_projection["snapshot"]["snapshot_version"], 1);
-    assert_eq!(host_projection["snapshot"]["state_version"], 1);
-    assert_eq!(host_projection["snapshot"]["sequence"], 0);
+    assert_initial_synchronization_projection(&host_projection);
     assert_eq!(
         host_projection["snapshot"]["versions"]["prng"],
         "chacha20-v1"
@@ -355,10 +365,6 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
     assert_eq!(
         host_projection["participants"].as_array().map(Vec::len),
         Some(2)
-    );
-    assert_eq!(
-        host_projection["legal_actions"],
-        json!(["complete_dark_arts"])
     );
     assert!(!host_projection.to_string().contains("seed"));
 
@@ -1236,4 +1242,407 @@ async fn an_expired_game_rejects_the_command_at_the_database_clock_boundary() {
         response_json(response).await["error"]["code"],
         "GAME_EXPIRED"
     );
+}
+
+struct RawWebSocket {
+    stream: tokio::net::TcpStream,
+    buffered: Vec<u8>,
+}
+
+impl RawWebSocket {
+    async fn read_text(&mut self) -> String {
+        loop {
+            let header = self.read_exact(2).await;
+            let opcode = header[0] & 0x0f;
+            assert_eq!(header[1] & 0x80, 0, "server frames must not be masked");
+            let mut length = u64::from(header[1] & 0x7f);
+            if length == 126 {
+                let extended = self.read_exact(2).await;
+                length = u64::from(u16::from_be_bytes([extended[0], extended[1]]));
+            } else if length == 127 {
+                let extended = self.read_exact(8).await;
+                length = u64::from_be_bytes(
+                    extended
+                        .try_into()
+                        .expect("a 64-bit WebSocket length must contain eight bytes"),
+                );
+            }
+            let payload = self
+                .read_exact(usize::try_from(length).expect("test frames must fit in memory"))
+                .await;
+            match opcode {
+                1 => return String::from_utf8(payload).expect("text frames must contain UTF-8"),
+                8 => panic!("the WebSocket closed before a text message arrived"),
+                9 | 10 => {}
+                other => panic!("unexpected WebSocket opcode {other}"),
+            }
+        }
+    }
+
+    async fn read_exact(&mut self, length: usize) -> Vec<u8> {
+        while self.buffered.len() < length {
+            let mut chunk = [0_u8; 4096];
+            let read = self
+                .stream
+                .read(&mut chunk)
+                .await
+                .expect("the WebSocket frame must be readable");
+            assert!(read > 0, "the socket closed while a frame was being read");
+            self.buffered.extend_from_slice(&chunk[..read]);
+        }
+        self.buffered.drain(..length).collect()
+    }
+}
+
+async fn start_network_server(
+    app: axum::Router,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("the test server must bind");
+    let address = listener
+        .local_addr()
+        .expect("the test server must have an address");
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("the test server must run");
+    });
+    (address, task)
+}
+
+async fn websocket_handshake(
+    address: std::net::SocketAddr,
+    path: &str,
+    cookie: Option<&str>,
+    origin: Option<&str>,
+    protocol: Option<&str>,
+) -> (u16, String, RawWebSocket) {
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("the WebSocket client must connect");
+    let mut request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    );
+    if let Some(cookie) = cookie {
+        write!(request, "Cookie: {cookie}\r\n").expect("writing to a String cannot fail");
+    }
+    if let Some(origin) = origin {
+        write!(request, "Origin: {origin}\r\n").expect("writing to a String cannot fail");
+    }
+    if let Some(protocol) = protocol {
+        write!(request, "Sec-WebSocket-Protocol: {protocol}\r\n")
+            .expect("writing to a String cannot fail");
+    }
+    request.push_str("\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("the WebSocket handshake must be writable");
+
+    let mut response = Vec::new();
+    let header_end = loop {
+        if let Some(index) = response.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
+        let mut chunk = [0_u8; 4096];
+        let read = stream
+            .read(&mut chunk)
+            .await
+            .expect("the WebSocket handshake must be readable");
+        assert!(read > 0, "the handshake response ended before its headers");
+        response.extend_from_slice(&chunk[..read]);
+    };
+    let headers = String::from_utf8(response[..header_end].to_vec())
+        .expect("the handshake headers must be ASCII");
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .expect("the handshake must contain a status code");
+    let buffered = response[header_end..].to_vec();
+
+    (status, headers, RawWebSocket { stream, buffered })
+}
+
+#[tokio::test]
+async fn websocket_handshake_requires_the_session_exact_origin_and_current_protocol() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-handshake").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let path = "/api/games/current/events?cursor=0&snapshot_version=1";
+
+    let (status, _, _) = websocket_handshake(
+        address,
+        path,
+        Some(&room.host_cookie),
+        Some("https://attacker.invalid"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 403);
+
+    let (status, _, _) = websocket_handshake(
+        address,
+        path,
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v0"),
+    )
+    .await;
+    assert_eq!(status, 426);
+
+    let (status, _, _) = websocket_handshake(
+        address,
+        path,
+        None,
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 401);
+
+    let (status, headers, _) = websocket_handshake(
+        address,
+        path,
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("sec-websocket-protocol: hogwarts.realtime.v1")
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participant() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-snapshot").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+
+    let (status, _, mut host_socket) = websocket_handshake(
+        address,
+        "/api/games/current/events?snapshot_version=1",
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let host_serialized =
+        tokio::time::timeout(std::time::Duration::from_secs(2), host_socket.read_text())
+            .await
+            .expect("the initial host Snapshot must arrive");
+    let host: Value = serde_json::from_str(&host_serialized).expect("Snapshot must be JSON");
+    assert_eq!(host["protocol_version"], 1);
+    assert_eq!(host["type"], "snapshot");
+    assert_eq!(host["cursor"], 0);
+    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 1);
+    assert_eq!(host["projection"]["snapshot"]["cursor"], 0);
+    assert_eq!(
+        host["projection"]["legal_actions"],
+        json!(["complete_dark_arts"])
+    );
+    assert_eq!(host["projection"]["choice"], json!({ "status": "none" }));
+
+    let (status, _, mut guest_socket) = websocket_handshake(
+        address,
+        "/api/games/current/events",
+        Some(&room.guest_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let guest_serialized =
+        tokio::time::timeout(std::time::Duration::from_secs(2), guest_socket.read_text())
+            .await
+            .expect("the initial guest Snapshot must arrive");
+    let guest: Value = serde_json::from_str(&guest_serialized).expect("Snapshot must be JSON");
+    assert_eq!(guest["projection"]["participant"]["display_name"], "Luna");
+    assert_eq!(guest["projection"]["legal_actions"], json!([]));
+
+    for serialized in [host_serialized, guest_serialized] {
+        assert!(!serialized.contains("participant_id"));
+        assert!(!serialized.contains("prng_seed"));
+        assert!(!serialized.contains("__Host-session"));
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn an_incompatible_snapshot_version_or_cursor_gap_receives_a_full_snapshot() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-resync").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+
+    for path in [
+        "/api/games/current/events?cursor=8&snapshot_version=1",
+        "/api/games/current/events?cursor=0&snapshot_version=999",
+    ] {
+        let (status, _, mut socket) = websocket_handshake(
+            address,
+            path,
+            Some(&room.host_cookie),
+            Some("http://127.0.0.1:5173"),
+            Some("hogwarts.realtime.v1"),
+        )
+        .await;
+        assert_eq!(status, 101);
+        let serialized =
+            tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_text())
+                .await
+                .expect("an incompatible cursor must receive a Snapshot");
+        let snapshot: Value = serde_json::from_str(&serialized).expect("Snapshot must be JSON");
+        assert_eq!(snapshot["type"], "snapshot");
+        assert_eq!(snapshot["cursor"], 0);
+        assert_eq!(snapshot["projection"]["snapshot"]["cursor"], 0);
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn database_rejects_a_gap_in_the_official_event_sequence() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-sequence").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the gap test transaction must start");
+    let (game_id, participant_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid)>(
+        r"
+        UPDATE games
+        SET sequence = 2
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        RETURNING id, started_by_participant_id
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test Snapshot cursor must advance inside the transaction");
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            sequence,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, 2, 'dark_arts_completed', $2, $3, 2, '{}'::jsonb)
+        ",
+    )
+    .bind(game_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(participant_id)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("the database must reject sequence two when sequence one is absent");
+    assert!(
+        error
+            .to_string()
+            .contains("game event sequence must be contiguous")
+    );
+    transaction
+        .rollback()
+        .await
+        .expect("the rejected gap transaction must roll back");
+}
+
+#[tokio::test]
+async fn committed_log_replays_contiguous_events_and_redacts_another_participants_command() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-events").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let path = "/api/games/current/events?cursor=0&snapshot_version=1";
+    let (status, _, mut host_socket) = websocket_handshake(
+        address,
+        path,
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+
+    let command_id = uuid::Uuid::new_v4();
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": command_id.to_string(),
+                "expected_state_version": 1,
+                "type": "complete_dark_arts"
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the command must receive a post-commit response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let host_serialized =
+        tokio::time::timeout(std::time::Duration::from_secs(2), host_socket.read_text())
+            .await
+            .expect("the committed event must reach the connected host");
+    let host: Value = serde_json::from_str(&host_serialized).expect("event batch must be JSON");
+    assert_eq!(host["type"], "events");
+    assert_eq!(host["from_cursor"], 0);
+    assert_eq!(host["cursor"], 1);
+    assert_eq!(host["events"][0]["sequence"], 1);
+    assert_eq!(host["events"][0]["command_id"], command_id.to_string());
+    assert_eq!(host["projection"]["snapshot"]["cursor"], 1);
+
+    let (status, _, mut guest_socket) = websocket_handshake(
+        address,
+        path,
+        Some(&room.guest_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let guest_serialized =
+        tokio::time::timeout(std::time::Duration::from_secs(2), guest_socket.read_text())
+            .await
+            .expect("the durable log must replay without the original signal");
+    let guest: Value = serde_json::from_str(&guest_serialized).expect("event batch must be JSON");
+    assert_eq!(guest["events"][0]["sequence"], 1);
+    assert!(guest["events"][0].get("command_id").is_none());
+    assert!(!guest_serialized.contains("actor_participant_id"));
+    assert!(!guest_serialized.contains(&command_id.to_string()));
+
+    let (status, _, mut redelivery_socket) = websocket_handshake(
+        address,
+        path,
+        Some(&room.guest_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let redelivery = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        redelivery_socket.read_text(),
+    )
+    .await
+    .expect("at-least-once delivery must allow the same cursor to be replayed");
+    assert_eq!(
+        serde_json::from_str::<Value>(&redelivery).expect("redelivery must be JSON")["events"][0]["sequence"],
+        1
+    );
+    server.abort();
 }

@@ -28,6 +28,10 @@ Interrompa com `Ctrl+C`.
 
 O PostgreSQL permanece no volume local do Compose entre execuções.
 
+O WebSocket autenticado aceita somente a origem exata configurada em `APPLICATION_ORIGIN`.
+
+Em desenvolvimento, o valor padrão é `http://127.0.0.1:5173`.
+
 ## Validar
 
 Instale o Chromium do Playwright uma vez no ambiente local:

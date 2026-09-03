@@ -231,11 +231,12 @@ const _hoisted_91 = ["disabled"]
 const _hoisted_92 = ["disabled"]
 const _hoisted_93 = ["disabled"]
 
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
+import { useGameSyncStore } from './stores/gameSync'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
 
@@ -246,6 +247,7 @@ const __sfc__ = /*@__PURE__*/_defineComponent({
 
 const health = useHealthStore()
 const gameCommand = useGameCommandStore()
+const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
 const entryMode = ref<'create' | 'join'>('create')
@@ -678,6 +680,19 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  game,
+  (current) => {
+    if (current) {
+      gameSync.connect(current)
+    } else {
+      gameSync.disconnect()
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => gameSync.disconnect())
 
 onMounted(async () => {
   await Promise.all([health.check(), roomAccess.restoreSession()])
