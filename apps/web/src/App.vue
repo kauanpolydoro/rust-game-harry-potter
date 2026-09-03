@@ -781,9 +781,12 @@ onMounted(async () => {
             class="pending-intent"
           >
             <p role="status">Existe uma entrada pendente neste navegador.</p>
-            <p>A mesma solicitação será reapresentada sem criar outro participante.</p>
+            <p>
+              Ela pode já ter sido confirmada. Retomar reapresenta a mesma solicitação sem criar
+              outro participante.
+            </p>
             <button type="button" @click="discardPendingJoin()">
-              Descartar e usar outro código
+              Descartar entrada e usar outro código
             </button>
           </div>
           <div class="field">
@@ -810,7 +813,7 @@ onMounted(async () => {
           <p v-if="joinFormError" id="join-form-error" class="form-error" role="alert">
             {{ joinFormError }}
           </p>
-          <p class="alternate-path">
+          <p v-if="!roomAccess.pendingJoinIntent" class="alternate-path">
             Precisa abrir a mesa?
             <button type="button" @click="showCreate()">Criar uma sala</button>
           </p>
@@ -873,8 +876,20 @@ onMounted(async () => {
             </div>
           </fieldset>
           <p v-if="joinFormError" class="form-error" role="alert">{{ joinFormError }}</p>
-          <button class="text-button" type="button" @click="roomAccess.clearLookup()">
-            Usar outro código
+          <p v-if="roomAccess.pendingJoinIntent" class="field-guidance">
+            A entrada pode já ter sido confirmada. Descarte somente se aceitar abandonar essa
+            posição.
+          </p>
+          <button
+            class="text-button"
+            type="button"
+            @click="roomAccess.pendingJoinIntent ? discardPendingJoin() : roomAccess.clearLookup()"
+          >
+            {{
+              roomAccess.pendingJoinIntent
+                ? 'Descartar entrada e usar outro código'
+                : 'Usar outro código'
+            }}
           </button>
         </form>
       </div>

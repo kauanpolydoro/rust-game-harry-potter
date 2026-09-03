@@ -787,6 +787,10 @@ describe('application shell', () => {
     await fireEvent.click(screen.getByRole('radio', { name: 'Hermione' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Entrar na sala' }))
     await screen.findByText('A confirmação não chegou. Tente entrar novamente com os mesmos dados.')
+    expect(screen.queryByRole('button', { name: 'Usar outro código' })).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Descartar entrada e usar outro código' }),
+    ).toBeVisible()
 
     const initialRequest = request.mock.calls[2]?.[1] as RequestInit | undefined
     const persistedIntent = JSON.parse(
