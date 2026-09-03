@@ -1,0 +1,21 @@
+name: harry-potter-game
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: hogwarts
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_USER: hogwarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hogwarts -d hogwarts"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+volumes:
+  postgres-data:

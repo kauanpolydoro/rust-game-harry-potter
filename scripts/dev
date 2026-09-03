@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repository_root"
+
+command -v cargo >/dev/null || {
+  echo "cargo não encontrado; instale o Rust indicado em rust-toolchain.toml" >&2
+  exit 1
+}
+command -v docker >/dev/null || {
+  echo "docker não encontrado; instale Docker com Compose" >&2
+  exit 1
+}
+command -v npm >/dev/null || {
+  echo "npm não encontrado; instale o Node indicado em package.json" >&2
+  exit 1
+}
+
+docker compose up -d --wait postgres
+npm ci
+
+export DATABASE_URL="${DATABASE_URL:-postgres://hogwarts:local-development-only@127.0.0.1:55432/hogwarts}"
+export BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1:8080}"
+export HEALTH_PROXY_TARGET="${HEALTH_PROXY_TARGET:-http://$BIND_ADDRESS}"
+
+processes=()
+
+stop_processes() {
+  if ((${#processes[@]} > 0)); then
+    kill "${processes[@]}" 2>/dev/null || true
+    wait "${processes[@]}" 2>/dev/null || true
+  fi
+}
+
+trap stop_processes EXIT INT TERM
+
+cargo run -p harry-potter-server &
+processes+=("$!")
+npm run dev:web &
+processes+=("$!")
+
+echo "Aplicação disponível em http://127.0.0.1:5173"
+wait -n "${processes[@]}"

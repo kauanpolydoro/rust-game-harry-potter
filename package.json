@@ -1,0 +1,22 @@
+{
+  "name": "harry-potter-game",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24.18.0"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @hogwarts/web",
+    "dev:web": "npm run dev --workspace @hogwarts/web",
+    "generate:contracts": "node scripts/generate-contracts.mjs",
+    "generate:check": "node scripts/generate-contracts.mjs --check && node scripts/generate-vue-types.mjs --check",
+    "generate:vue-types": "node scripts/generate-vue-types.mjs",
+    "lint": "npm run lint --workspace @hogwarts/web",
+    "test": "node --test scripts/*.test.mjs && npm run test --workspace @hogwarts/web",
+    "test:e2e": "npm run test:e2e --workspace @hogwarts/web",
+    "typecheck": "npm run typecheck --workspace @hogwarts/web"
+  }
+}
