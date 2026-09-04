@@ -20,6 +20,7 @@ pub enum EffectTrigger {
     #[serde(alias = "dark_arts_completed")]
     DarkArts,
     Villains,
+    VillainReward,
     #[default]
     Manual,
 }
@@ -29,7 +30,8 @@ impl EffectTrigger {
         match self {
             Self::DarkArts => 0,
             Self::Villains => 1,
-            Self::Manual => 2,
+            Self::VillainReward => 2,
+            Self::Manual => 3,
         }
     }
 
@@ -162,8 +164,11 @@ pub enum Zone {
     HeroPlayArea,
     Heroes,
     HogwartsDeck,
+    LocationDeck,
+    LocationDiscard,
     Market,
     VillainDeck,
+    VillainDiscard,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

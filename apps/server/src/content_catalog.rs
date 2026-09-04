@@ -60,9 +60,27 @@ impl ContentCatalog {
                         .functional_provenance
                         .get(&FunctionalField::Health)
                         .and_then(|definition| definition.value);
+                    let reward_rule_id = entry
+                        .functional_provenance
+                        .get(&FunctionalField::Reward)
+                        .and_then(|definition| definition.rule_id.as_ref())
+                        .map(|id| id.as_str().to_owned());
+                    let control_limit = entry
+                        .functional_provenance
+                        .get(&FunctionalField::ControlLimit)
+                        .and_then(|definition| definition.value);
+                    let dark_arts_count = entry
+                        .functional_provenance
+                        .get(&FunctionalField::DarkArtsCount)
+                        .and_then(|definition| definition.value)
+                        .and_then(|count| u8::try_from(count).ok());
                     if (entry.kind == EntryKind::HogwartsCard && influence_cost.is_none())
                         || (entry.kind == EntryKind::Villain
-                            && health.is_none_or(|health| health == 0))
+                            && (health.is_none_or(|health| health == 0)
+                                || reward_rule_id.is_none()))
+                        || (entry.kind == EntryKind::Location
+                            && (control_limit.is_none_or(|limit| limit == 0)
+                                || dark_arts_count.is_none_or(|count| count == 0)))
                     {
                         return None;
                     }
@@ -75,6 +93,9 @@ impl ContentCatalog {
                         effect_rule_id,
                         influence_cost,
                         health,
+                        reward_rule_id,
+                        control_limit,
+                        dark_arts_count,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?,
@@ -196,6 +217,9 @@ struct SelectedInitialEntity {
     effect_rule_id: String,
     influence_cost: Option<u16>,
     health: Option<u16>,
+    reward_rule_id: Option<String>,
+    control_limit: Option<u16>,
+    dark_arts_count: Option<u8>,
 }
 
 impl SelectedContent {
@@ -240,13 +264,29 @@ impl SelectedContent {
                             template
                                 .health
                                 .expect("validated villain setup has positive health"),
+                        )
+                        .with_reward_rule(
+                            template
+                                .reward_rule_id
+                                .as_deref()
+                                .expect("validated villain setup has a reward"),
+                        ),
+                        EntryKind::Location => game_domain::EffectEntity::location(
+                            instance_id,
+                            &template.catalog_id,
+                            &template.effect_rule_id,
+                            template
+                                .control_limit
+                                .expect("validated location has a control limit"),
+                            template
+                                .dark_arts_count
+                                .expect("validated location has a Dark Arts count"),
                         ),
                         EntryKind::Adventure
                         | EntryKind::Catalog
                         | EntryKind::DarkArts
                         | EntryKind::Hero
                         | EntryKind::Horcrux
-                        | EntryKind::Location
                         | EntryKind::Proficiency
                         | EntryKind::Ruleset
                         | EntryKind::TurnOrder => {
@@ -492,6 +532,7 @@ const fn effect_trigger(trigger: EffectTrigger) -> game_domain::EffectTrigger {
     match trigger {
         EffectTrigger::DarkArts => game_domain::EffectTrigger::DarkArts,
         EffectTrigger::Villains => game_domain::EffectTrigger::Villains,
+        EffectTrigger::VillainReward => game_domain::EffectTrigger::VillainReward,
         EffectTrigger::Manual => game_domain::EffectTrigger::Manual,
     }
 }
@@ -517,8 +558,11 @@ const fn effect_zone(zone: Zone) -> game_domain::EffectZone {
         Zone::HeroPlayArea => game_domain::EffectZone::HeroPlayArea,
         Zone::Heroes => game_domain::EffectZone::Heroes,
         Zone::HogwartsDeck => game_domain::EffectZone::HogwartsDeck,
+        Zone::LocationDeck => game_domain::EffectZone::LocationDeck,
+        Zone::LocationDiscard => game_domain::EffectZone::LocationDiscard,
         Zone::Market => game_domain::EffectZone::Market,
         Zone::VillainDeck => game_domain::EffectZone::VillainDeck,
+        Zone::VillainDiscard => game_domain::EffectZone::VillainDiscard,
     }
 }
 

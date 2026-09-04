@@ -138,6 +138,7 @@ struct GameParticipant {
     position: i16,
     hero: GameHero,
     resources: GameResources,
+    stunned: bool,
     hand_count: usize,
 }
 
@@ -202,8 +203,12 @@ struct TableSummary {
     discard_pile_count: usize,
     market: Vec<MarketCardSummary>,
     hogwarts_deck_count: usize,
+    current_location: Option<LocationSummary>,
+    location_deck_count: usize,
+    location_discard_count: usize,
     active_villains: Vec<VillainSummary>,
     villain_deck_count: usize,
+    villain_discard_count: usize,
 }
 
 #[derive(Serialize)]
@@ -230,6 +235,16 @@ struct VillainSummary {
     health: u16,
     attackable: bool,
     max_attack: u16,
+}
+
+#[derive(Serialize)]
+struct LocationSummary {
+    instance_id: String,
+    catalog_id: String,
+    name: String,
+    control: u16,
+    control_limit: u16,
+    dark_arts_count: u8,
 }
 
 pub(crate) async fn projection_for_participant(
@@ -548,12 +563,52 @@ fn table_summary(
             .effect_world()
             .entities_in(EffectZone::HogwartsDeck)
             .len(),
+        current_location: current_location_summary(state, content, manifest_digest)?,
+        location_deck_count: state
+            .effect_world()
+            .entities_in(EffectZone::LocationDeck)
+            .len(),
+        location_discard_count: state
+            .effect_world()
+            .entities_in(EffectZone::LocationDiscard)
+            .len(),
         active_villains,
         villain_deck_count: state
             .effect_world()
             .entities_in(EffectZone::VillainDeck)
             .len(),
+        villain_discard_count: state
+            .effect_world()
+            .entities_in(EffectZone::VillainDiscard)
+            .len(),
     })
+}
+
+fn current_location_summary(
+    state: &InitialGameState,
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> Result<Option<LocationSummary>, ApiError> {
+    state
+        .effect_world()
+        .entities_in(EffectZone::ActiveLocation)
+        .first()
+        .map(|entity| {
+            let catalog_id = entity.catalog_id().ok_or_else(ApiError::internal)?;
+            Ok(LocationSummary {
+                instance_id: entity.id().to_owned(),
+                catalog_id: catalog_id.to_owned(),
+                name: content
+                    .entity_name(manifest_digest, catalog_id)
+                    .unwrap_or_else(|| catalog_id.to_owned()),
+                control: entity.resource(EffectResource::Control),
+                control_limit: entity
+                    .resource_limit(EffectResource::Control)
+                    .ok_or_else(ApiError::internal)?,
+                dark_arts_count: entity.dark_arts_count().ok_or_else(ApiError::internal)?,
+            })
+        })
+        .transpose()
 }
 
 fn card_summary(
@@ -578,6 +633,7 @@ fn game_participant(
     let hero_id = stored.hero_id.as_deref().ok_or_else(ApiError::internal)?;
     let position = u8::try_from(stored.position)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    let health = hero_resource(state, stored.position, EffectResource::Health)?;
     Ok(GameParticipant {
         display_name: stored.display_name.clone(),
         role: stored.role.clone(),
@@ -587,10 +643,11 @@ fn game_participant(
             name: hero_name(hero_id)?,
         },
         resources: GameResources {
-            health: hero_resource(state, stored.position, EffectResource::Health)?,
+            health,
             attack: hero_resource(state, stored.position, EffectResource::Attack)?,
             influence: hero_resource(state, stored.position, EffectResource::Influence)?,
         },
+        stunned: health == 0,
         hand_count: state
             .effect_world()
             .entities_in(EffectZone::HeroHand)
@@ -633,6 +690,7 @@ fn choice_summary(state: &InitialGameState) -> ChoiceSummary {
         responsible_position: Some(choice.responsible_position),
         kind: Some(match choice.kind {
             PendingEffectChoiceKind::Effect => "effect",
+            PendingEffectChoiceKind::StunDiscard => "stun_discard",
             PendingEffectChoiceKind::Target => "target",
         }),
         options: choice.options.clone(),
@@ -724,7 +782,10 @@ fn effect_zone_name(zone: EffectZone) -> &'static str {
         EffectZone::HeroPlayArea => "hero_play_area",
         EffectZone::Heroes => "heroes",
         EffectZone::HogwartsDeck => "hogwarts_deck",
+        EffectZone::LocationDeck => "location_deck",
+        EffectZone::LocationDiscard => "location_discard",
         EffectZone::Market => "market",
         EffectZone::VillainDeck => "villain_deck",
+        EffectZone::VillainDiscard => "villain_discard",
     }
 }

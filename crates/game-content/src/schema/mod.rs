@@ -400,7 +400,10 @@ impl FunctionalDefinition {
         substantive_rules: &BTreeSet<RuleId>,
     ) -> bool {
         let supported_definition = match field {
-            FunctionalField::Cost | FunctionalField::Health => {
+            FunctionalField::Cost
+            | FunctionalField::Health
+            | FunctionalField::ControlLimit
+            | FunctionalField::DarkArtsCount => {
                 self.value.is_some()
                     || self
                         .rule

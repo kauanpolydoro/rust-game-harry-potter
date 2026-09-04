@@ -161,6 +161,7 @@ function gameProjectionResponse(): GameProjectionResponse {
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
       hand_count: 0,
+      stunned: false,
     },
     participants: [
       {
@@ -170,6 +171,7 @@ function gameProjectionResponse(): GameProjectionResponse {
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
         hand_count: 0,
+        stunned: false,
       },
       {
         display_name: 'Luna',
@@ -178,6 +180,7 @@ function gameProjectionResponse(): GameProjectionResponse {
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
         hand_count: 0,
+        stunned: false,
       },
     ],
     snapshot: {
@@ -205,6 +208,10 @@ function gameProjectionResponse(): GameProjectionResponse {
       market: [],
       play_area: [],
       villain_deck_count: 0,
+      villain_discard_count: 0,
+      location_deck_count: 0,
+      location_discard_count: 0,
+      current_location: null,
     },
     turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }
@@ -319,6 +326,7 @@ function multiplePendingChoiceProjectionResponse() {
         display_name: 'Pomona',
         hero: { id: 'neville', name: 'Neville' },
         hand_count: 0,
+        stunned: false,
         position: 3,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
@@ -363,6 +371,7 @@ function heroActionGameProjectionResponse() {
       ? {
           ...participant,
           hand_count: 1,
+          stunned: false,
           resources: { attack: 0, health: 9, influence: 0 },
         }
       : participant,
@@ -426,6 +435,10 @@ function heroActionGameProjectionResponse() {
       ],
       play_area: [],
       villain_deck_count: 0,
+      villain_discard_count: 0,
+      location_deck_count: 0,
+      location_discard_count: 0,
+      current_location: null,
     },
   }
 }
@@ -437,6 +450,7 @@ function playedCardGameProjectionResponse() {
       ? {
           ...participant,
           hand_count: 0,
+          stunned: false,
           resources: { attack: 2, health: 9, influence: 3 },
         }
       : participant,
@@ -3079,7 +3093,7 @@ describe('application shell', () => {
 
     expect(await screen.findByText('Recibo aceito no estado v3, sequência 2.')).toBeVisible()
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 3, name: 'Sua fase de ação' })).toHaveFocus(),
+      expect(screen.getByRole('heading', { level: 3, name: 'Sua mesa' })).toHaveFocus(),
     )
     expect(roomAccess.game?.snapshot).toMatchObject({ sequence: 3, state_version: 4 })
     expect(screen.getByText('v4 · sequência 3')).toBeVisible()

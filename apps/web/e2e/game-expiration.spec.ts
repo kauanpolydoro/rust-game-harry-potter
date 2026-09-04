@@ -45,6 +45,7 @@ test('expiration clears private data, pending commands and channels in every con
     await secondTab.goto('/')
     for (const page of [host, guest, secondTab]) {
       await expect(page.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Sua mesa' })).toBeVisible()
     }
 
     await host.route('**/api/games/current/commands', async (route) => {
@@ -72,7 +73,7 @@ test('expiration clears private data, pending commands and channels in every con
     await guestContext.setOffline(false)
     for (const page of [host, guest, secondTab]) {
       await expect(page.getByRole('heading', { name: 'Partida expirada' })).toBeVisible()
-      await expect(page.getByRole('heading', { name: 'Sua fase de ação' })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: 'Sua mesa' })).toHaveCount(0)
       await expect(page.getByLabel('Link de recuperação')).toHaveCount(0)
       expect(await page.evaluate(() => localStorage.getItem('hogwarts.session.expected'))).toBeNull()
       expect(await page.evaluate(() => sessionStorage.getItem('hogwarts.game-command.pending-intent'))).toBeNull()

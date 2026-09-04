@@ -184,7 +184,15 @@ fn validate_functional_definition_shapes(
     if let Some(incompatible) = entry.functional.iter().find_map(|(field, definition)| {
         definition
             .value
-            .filter(|_| !matches!(field, FunctionalField::Cost | FunctionalField::Health))
+            .filter(|_| {
+                !matches!(
+                    field,
+                    FunctionalField::Cost
+                        | FunctionalField::Health
+                        | FunctionalField::ControlLimit
+                        | FunctionalField::DarkArtsCount
+                )
+            })
             .map(|_| field)
     }) {
         return Err(ImportFailure {
@@ -496,6 +504,32 @@ fn validate_setup_entity_data(
 
             Ok(())
         }
+        EntryKind::Location => {
+            let has_positive_control_limit = entry
+                .functional
+                .get(&FunctionalField::ControlLimit)
+                .is_some_and(|definition| {
+                    definition.value.is_some_and(|limit| limit > 0) && definition.rule.is_none()
+                });
+            let has_valid_dark_arts_count = entry
+                .functional
+                .get(&FunctionalField::DarkArtsCount)
+                .is_some_and(|definition| {
+                    definition
+                        .value
+                        .is_some_and(|count| (1..=u16::from(u8::MAX)).contains(&count))
+                        && definition.rule.is_none()
+                });
+            if !has_positive_control_limit || !has_valid_dark_arts_count {
+                return Err(ImportFailure {
+                    message: format!(
+                        "game setup {adventure_id} entity {entity_id} requires a positive ControlLimit and a DarkArtsCount from 1 through 255"
+                    ),
+                });
+            }
+
+            Ok(())
+        }
         EntryKind::StarterCard => Ok(()),
         _ => Err(ImportFailure {
             message: format!(
@@ -519,7 +553,11 @@ fn setup_entity_is_compatible(kind: EntryKind, zone: Zone, owner: GameSetupOwner
             GameSetupOwner::None,
         ) | (
             EntryKind::Villain,
-            Zone::VillainDeck | Zone::ActiveVillains,
+            Zone::VillainDeck | Zone::ActiveVillains | Zone::VillainDiscard,
+            GameSetupOwner::None,
+        ) | (
+            EntryKind::Location,
+            Zone::ActiveLocation | Zone::LocationDeck | Zone::LocationDiscard,
             GameSetupOwner::None,
         )
     )
@@ -1118,6 +1156,7 @@ impl Zone {
                 | Self::HogwartsDeck
                 | Self::Market
                 | Self::VillainDeck
+                | Self::VillainDiscard
         )
     }
 
@@ -1133,8 +1172,11 @@ impl Zone {
             Self::HeroPlayArea => "hero_play_area",
             Self::Heroes => "heroes",
             Self::HogwartsDeck => "hogwarts_deck",
+            Self::LocationDeck => "location_deck",
+            Self::LocationDiscard => "location_discard",
             Self::Market => "market",
             Self::VillainDeck => "villain_deck",
+            Self::VillainDiscard => "villain_discard",
         }
     }
 }

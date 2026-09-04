@@ -90,7 +90,7 @@ Uma Ação oficial aceita define `last_game_action_at` pelo relógio do PostgreS
 Leituras, presença, reconexão, retry, erro e operações de recuperação ou proteção não renovam esse prazo.
 Comandos e recuperação revalidam a expiração após obter o lock da raiz, com rejeição no instante exato do limite.
 
-A migration `0019_game_expiration.sql` registra a expiração de acesso de forma durável e encerra as Sessões ativas e leases da Partida.
+A migration `0020_game_expiration.sql` registra a expiração de acesso de forma durável e encerra as Sessões ativas e leases da Partida.
 Cada instância verifica até 100 candidatas por segundo com `SKIP LOCKED`, e a decisão final sempre consulta `clock_timestamp()` depois do lock.
 A autenticação também aplica esse gate sob demanda.
 O processamento é idempotente, notifica as outras instâncias após o commit e não modifica o histórico oficial.

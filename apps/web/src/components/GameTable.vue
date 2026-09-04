@@ -156,10 +156,11 @@ function canAcquire(cardId: string): boolean {
     <header class="game-table__heading">
       <div>
         <p>Mesa oficial v{{ game.snapshot.state_version }}</p>
-        <h3 id="game-table-heading" tabindex="-1">Sua fase de ação</h3>
+        <h3 id="game-table-heading" tabindex="-1">Sua mesa</h3>
       </div>
       <div class="hero-resource-ledger" aria-label="Seus recursos oficiais">
         <span>Vida {{ game.participant.resources.health }}</span>
+        <span v-if="game.participant.stunned">Atordoado até o fim deste turno</span>
         <strong>
           Ataque {{ game.participant.resources.attack }} · Influência
           {{ game.participant.resources.influence }}
@@ -171,8 +172,22 @@ function canAcquire(cardId: string): boolean {
       <span>Compra {{ game.table.draw_pile_count }}</span>
       <span>Descarte {{ game.table.discard_pile_count }}</span>
       <span>Hogwarts {{ game.table.hogwarts_deck_count }}</span>
-      <span>Vilões {{ game.table.villain_deck_count }}</span>
+      <span>Vilões: {{ game.table.villain_deck_count }} na reserva · {{ game.table.villain_discard_count }} derrotados</span>
     </div>
+
+    <section v-if="game.table.current_location" class="table-zone" aria-labelledby="location-heading">
+      <div class="table-zone__heading">
+        <h4 id="location-heading">{{ game.table.current_location.name }}</h4>
+        <span>Controle {{ game.table.current_location.control }} / {{ game.table.current_location.control_limit }}</span>
+      </div>
+      <p>
+        Locais restantes {{ game.table.location_deck_count }} ·
+        Locais perdidos {{ game.table.location_discard_count }}
+      </p>
+      <p v-if="game.game.status === 'in_progress' && game.table.current_location.control === game.table.current_location.control_limit">
+        O Local está cheio de Controle. Remova Controle antes de encerrar o turno para preservá-lo.
+      </p>
+    </section>
 
     <section class="table-zone" aria-labelledby="villains-heading">
       <div class="table-zone__heading">
