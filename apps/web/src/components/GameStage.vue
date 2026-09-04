@@ -18,6 +18,7 @@ const props = defineProps<{
   selectedChoiceOptions: string[]
 }>()
 const emit = defineEmits<{
+  accessInvalidated: [reason: 'session_revoked' | 'participant_protected' | 'room_protected']
   'update:selectedChoiceOptions': [value: string[]]
 }>()
 
@@ -650,6 +651,7 @@ function acquireCard(cardId: string): void {
       <RecoveryManagement
         :participant="game.participant"
         :participants="game.participants"
+        @access-invalidated="emit('accessInvalidated', $event)"
       />
 
       <details class="snapshot-details">

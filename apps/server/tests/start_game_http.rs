@@ -1543,6 +1543,28 @@ fn command_request(
     )
 }
 
+fn list_device_sessions_request(cookie: &str) -> Request<Body> {
+    Request::builder()
+        .uri("/api/session/device-sessions")
+        .header(header::COOKIE, cookie)
+        .body(Body::empty())
+        .expect("the device session list request must be valid")
+}
+
+fn revoke_device_session_request(
+    cookie: &str,
+    session_id: &str,
+    idempotency_key: &str,
+) -> Request<Body> {
+    json_request(
+        "PUT",
+        &format!("/api/session/device-sessions/{session_id}/revocation"),
+        &json!({}),
+        Some(cookie),
+        Some(idempotency_key),
+    )
+}
+
 fn resolve_choice_request(
     cookie: &str,
     command_id: uuid::Uuid,
@@ -5234,6 +5256,477 @@ async fn commands_for_the_same_state_version_have_one_acceptance_and_one_stale_r
     assert_eq!(artifacts, (1, 1));
 }
 
+async fn non_current_device_session_id(room: &ReadyRoom) -> String {
+    let sessions = room
+        .app
+        .clone()
+        .oneshot(list_device_sessions_request(&room.host_cookie))
+        .await
+        .expect("the device session list must receive a response");
+    assert_eq!(sessions.status(), StatusCode::OK);
+    response_json(sessions).await["sessions"]
+        .as_array()
+        .expect("device sessions must be an array")
+        .iter()
+        .find(|session| session["current"] == false)
+        .and_then(|session| session["id"].as_str())
+        .expect("the second device session must be listed")
+        .to_owned()
+}
+
+async fn wait_for_race_to_reach_game_lock(database: &PgPool, revocation_key: &str) {
+    let observation_deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let completed_revocation = sqlx::query_scalar::<_, bool>(
+            r"
+            SELECT EXISTS(
+                SELECT 1
+                FROM device_session_revocation_requests
+                WHERE idempotency_key = $1
+                  AND completed_at IS NOT NULL
+            )
+            ",
+        )
+        .bind(revocation_key)
+        .fetch_one(database)
+        .await
+        .expect("the revocation receipt must be observable");
+        let waiting_requests = sqlx::query_scalar::<_, i64>(
+            r"
+            SELECT COUNT(*)
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'
+            ",
+        )
+        .fetch_one(database)
+        .await
+        .expect("waiting requests must be observable");
+        if completed_revocation || waiting_requests >= 2 {
+            return;
+        }
+        assert!(
+            Instant::now() < observation_deadline,
+            "the racing requests must reach the database fence"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+async fn assert_revocation_command_order(
+    room: &ReadyRoom,
+    command_id: uuid::Uuid,
+    command_status: StatusCode,
+) {
+    let ordering = sqlx::query_as::<_, (i64, bool)>(
+        r"
+        SELECT
+            COUNT(receipts.command_id),
+            COALESCE(bool_and(receipts.created_at <= events.created_at), TRUE)
+        FROM identity_security_events AS events
+        JOIN rooms ON rooms.id = events.room_id
+        LEFT JOIN game_command_receipts AS receipts
+          ON receipts.room_id = rooms.id
+         AND receipts.command_id = $2
+        WHERE rooms.code = $1
+          AND events.event_type = 'session_revoked'
+        ",
+    )
+    .bind(&room.room_code)
+    .bind(command_id)
+    .fetch_one(&room.database)
+    .await
+    .expect("the committed command and revocation order must be queryable");
+    assert!(
+        ordering.1,
+        "an accepted command must commit before the revocation event"
+    );
+    assert_eq!(ordering.0, i64::from(command_status == StatusCode::OK));
+}
+
+async fn wait_for_requests_blocked_by(database: &PgPool, blocker_pid: i32, minimum: i64) {
+    let observation_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let waiting_requests = sqlx::query_scalar::<_, i64>(
+            r"
+            WITH RECURSIVE blocked(pid) AS (
+                SELECT $1::INTEGER
+                UNION
+                SELECT activity.pid
+                FROM pg_stat_activity AS activity
+                JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+            )
+            SELECT COUNT(*) - 1 FROM blocked
+            ",
+        )
+        .bind(blocker_pid)
+        .fetch_one(database)
+        .await
+        .expect("requests blocked by the database fence must be observable");
+        if waiting_requests >= minimum {
+            return;
+        }
+        assert!(
+            Instant::now() < observation_deadline,
+            "expected {minimum} requests blocked by the database fence, observed {waiting_requests}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+#[tokio::test]
+async fn device_session_revocation_and_a_command_linearize_at_the_game_lock() {
+    let room = ready_room().await;
+    start_ready_game(&room, "revocation-command-race-start").await;
+    let second_host_cookie = additional_session_for_participant(&room, "host").await;
+    let second_session_id = non_current_device_session_id(&room).await;
+    let command_id = uuid::Uuid::new_v4();
+    let revocation_key = unique_key("revocation-command-race");
+
+    let mut fence = room
+        .database
+        .begin()
+        .await
+        .expect("the linearization fence must begin");
+    sqlx::query(
+        r"
+        SELECT games.id
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        FOR UPDATE OF games
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *fence)
+    .await
+    .expect("the game root must be lockable");
+
+    let barrier = Arc::new(Barrier::new(3));
+    let command = {
+        let app = room.app.clone();
+        let barrier = barrier.clone();
+        let cookie = second_host_cookie.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            app.oneshot(command_request(&cookie, command_id, 1))
+                .await
+                .expect("the racing command must receive a response")
+        })
+    };
+    let revocation = {
+        let app = room.app.clone();
+        let barrier = barrier.clone();
+        let cookie = room.host_cookie.clone();
+        let session_id = second_session_id.clone();
+        let key = revocation_key.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            app.oneshot(revoke_device_session_request(&cookie, &session_id, &key))
+                .await
+                .expect("the racing revocation must receive a response")
+        })
+    };
+    barrier.wait().await;
+    wait_for_race_to_reach_game_lock(&room.database, &revocation_key).await;
+
+    fence
+        .commit()
+        .await
+        .expect("the linearization fence must release");
+    let command = command.await.expect("the command task must finish");
+    let revocation = revocation.await.expect("the revocation task must finish");
+    assert_eq!(revocation.status(), StatusCode::OK);
+    assert!(
+        command.status() == StatusCode::OK || command.status() == StatusCode::UNAUTHORIZED,
+        "the command must commit before revocation or lose authorization after it"
+    );
+
+    assert_revocation_command_order(&room, command_id, command.status()).await;
+
+    let post_commit_command = room
+        .app
+        .clone()
+        .oneshot(command_request(
+            &second_host_cookie,
+            uuid::Uuid::new_v4(),
+            if command.status() == StatusCode::OK {
+                2
+            } else {
+                1
+            },
+        ))
+        .await
+        .expect("the post-revocation command must receive a response");
+    assert_eq!(post_commit_command.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response_json(post_commit_command).await["error"]["code"],
+        "SESSION_INVALID"
+    );
+}
+
+async fn lock_game_fence(room: &ReadyRoom) -> (sqlx::Transaction<'_, sqlx::Postgres>, i32) {
+    let mut fence = room
+        .database
+        .begin()
+        .await
+        .expect("the replacement linearization fence must begin");
+    let fence_pid = sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()")
+        .fetch_one(&mut *fence)
+        .await
+        .expect("the replacement fence backend must be identifiable");
+    sqlx::query(
+        r"
+        SELECT games.id
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        FOR UPDATE OF games
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *fence)
+    .await
+    .expect("the replacement game root must be lockable");
+    (fence, fence_pid)
+}
+
+async fn assert_replacement_command_order(
+    room: &ReadyRoom,
+    recovery_attempt_id: uuid::Uuid,
+    command_id: uuid::Uuid,
+    command_status: StatusCode,
+) {
+    let ordering = sqlx::query_as::<_, (i64, bool)>(
+        r"
+        SELECT
+            COUNT(receipts.command_id),
+            COALESCE(bool_and(receipts.created_at <= credentials.consumed_at), TRUE)
+        FROM recovery_credentials AS credentials
+        JOIN participants ON participants.id = credentials.participant_id
+        JOIN rooms ON rooms.id = participants.room_id
+        LEFT JOIN game_command_receipts AS receipts
+          ON receipts.room_id = rooms.id
+         AND receipts.command_id = $3
+        WHERE rooms.code = $1
+          AND credentials.recovery_attempt_id = $2
+        ",
+    )
+    .bind(&room.room_code)
+    .bind(recovery_attempt_id)
+    .bind(command_id)
+    .fetch_one(&room.database)
+    .await
+    .expect("the committed command and replacement order must be queryable");
+    assert!(
+        ordering.1,
+        "an accepted command must commit before the device replacement"
+    );
+    assert_eq!(ordering.0, i64::from(command_status == StatusCode::OK));
+}
+
+async fn pause_revocation_across_game_start<'a>(
+    room: &'a ReadyRoom,
+    session_id: &str,
+) -> (
+    tokio::task::JoinHandle<Response<Body>>,
+    sqlx::Transaction<'a, sqlx::Postgres>,
+    i32,
+) {
+    let mut room_fence = room
+        .database
+        .begin()
+        .await
+        .expect("the room fence must begin");
+    let room_pid = sqlx::query_scalar::<_, i32>(
+        "SELECT pg_backend_pid() FROM rooms WHERE code = $1 FOR UPDATE",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *room_fence)
+    .await
+    .expect("the lobby root must be locked before the game exists");
+    let mut device_fence = room
+        .database
+        .begin()
+        .await
+        .expect("the device fence must begin");
+    let device_pid = sqlx::query_scalar::<_, i32>(
+        "SELECT pg_backend_pid() FROM device_sessions WHERE id = $1 FOR UPDATE",
+    )
+    .bind(uuid::Uuid::parse_str(session_id).expect("the device ID must be a UUID"))
+    .fetch_one(&mut *device_fence)
+    .await
+    .expect("the target device must be locked before revocation");
+
+    let start = {
+        let app = room.app.clone();
+        let request = start_request(
+            &room.host_cookie,
+            &unique_key("access-start-race"),
+            &room.manifest,
+            "adventure:001",
+        );
+        tokio::spawn(async move { app.oneshot(request).await.expect("game start must respond") })
+    };
+    wait_for_requests_blocked_by(&room.database, room_pid, 1).await;
+    let revocation = {
+        let app = room.app.clone();
+        let request = revoke_device_session_request(
+            &room.host_cookie,
+            session_id,
+            &unique_key("access-start-race-revoke"),
+        );
+        tokio::spawn(async move { app.oneshot(request).await.expect("revocation must respond") })
+    };
+    wait_for_requests_blocked_by(&room.database, room_pid, 2).await;
+    room_fence
+        .commit()
+        .await
+        .expect("the lobby fence must release");
+    assert_eq!(
+        start.await.expect("game start must finish").status(),
+        StatusCode::CREATED
+    );
+    wait_for_requests_blocked_by(&room.database, device_pid, 1).await;
+    (revocation, device_fence, device_pid)
+}
+
+#[tokio::test]
+async fn revocation_waiting_for_game_start_locks_the_new_game_before_invalidating_access() {
+    let room = ready_room().await;
+    let second_cookie = additional_session_for_participant(&room, "host").await;
+    let second_session_id = non_current_device_session_id(&room).await;
+    let (revocation, device_fence, device_pid) =
+        pause_revocation_across_game_start(&room, &second_session_id).await;
+
+    let command = {
+        let app = room.app.clone();
+        tokio::spawn(async move {
+            app.oneshot(command_request(&second_cookie, uuid::Uuid::new_v4(), 1))
+                .await
+                .expect("the command during revocation must respond")
+        })
+    };
+    wait_for_requests_blocked_by(&room.database, device_pid, 2).await;
+    device_fence
+        .commit()
+        .await
+        .expect("the device fence must release");
+    assert_eq!(
+        revocation.await.expect("revocation must finish").status(),
+        StatusCode::OK
+    );
+    let command = command.await.expect("the command must finish");
+    assert_eq!(command.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response_json(command).await["error"]["code"],
+        "SESSION_INVALID"
+    );
+}
+
+#[tokio::test]
+async fn device_replacement_and_a_command_linearize_at_the_game_lock() {
+    let room = ready_room().await;
+    start_ready_game(&room, "replacement-command-race-start").await;
+    let second_host_cookie = additional_session_for_participant(&room, "host").await;
+    let second_session_id = non_current_device_session_id(&room).await;
+    let recovery_attempt_id = uuid::Uuid::new_v4();
+    let candidates = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recover",
+            &json!({
+                "recovery_token": room.host_recovery_token,
+                "recovery_password": "a long uncommon passphrase",
+                "recovery_attempt_id": recovery_attempt_id.to_string()
+            }),
+            None,
+            None,
+        ))
+        .await
+        .expect("replacement discovery must receive a response");
+    assert_eq!(candidates.status(), StatusCode::CONFLICT);
+
+    let command_id = uuid::Uuid::new_v4();
+    let (fence, fence_pid) = lock_game_fence(&room).await;
+
+    let barrier = Arc::new(Barrier::new(3));
+    let command = {
+        let app = room.app.clone();
+        let barrier = barrier.clone();
+        let cookie = second_host_cookie.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            app.oneshot(command_request(&cookie, command_id, 1))
+                .await
+                .expect("the command racing replacement must receive a response")
+        })
+    };
+    let replacement = {
+        let app = room.app.clone();
+        let barrier = barrier.clone();
+        let recovery_token = room.host_recovery_token.clone();
+        let replacement_session_id = second_session_id.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            app.oneshot(json_request(
+                "POST",
+                "/api/session/recover",
+                &json!({
+                    "recovery_token": recovery_token,
+                    "recovery_password": "a long uncommon passphrase",
+                    "recovery_attempt_id": recovery_attempt_id.to_string(),
+                    "replace_session_id": replacement_session_id
+                }),
+                None,
+                None,
+            ))
+            .await
+            .expect("the racing replacement must receive a response")
+        })
+    };
+    barrier.wait().await;
+    wait_for_requests_blocked_by(&room.database, fence_pid, 2).await;
+
+    fence
+        .commit()
+        .await
+        .expect("the replacement linearization fence must release");
+    let command = command.await.expect("the command task must finish");
+    let replacement = replacement.await.expect("the replacement task must finish");
+    assert_eq!(replacement.status(), StatusCode::OK);
+    assert!(
+        command.status() == StatusCode::OK || command.status() == StatusCode::UNAUTHORIZED,
+        "the command must commit before replacement or lose authorization after it"
+    );
+
+    assert_replacement_command_order(&room, recovery_attempt_id, command_id, command.status())
+        .await;
+
+    let post_replacement_command = room
+        .app
+        .clone()
+        .oneshot(command_request(
+            &second_host_cookie,
+            uuid::Uuid::new_v4(),
+            if command.status() == StatusCode::OK {
+                2
+            } else {
+                1
+            },
+        ))
+        .await
+        .expect("the post-replacement command must receive a response");
+    assert_eq!(post_replacement_command.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response_json(post_replacement_command).await["error"]["code"],
+        "SESSION_INVALID"
+    );
+}
+
 #[tokio::test]
 async fn a_locked_game_does_not_block_a_command_for_another_game() {
     let first_room = ready_room().await;
@@ -6320,7 +6813,162 @@ async fn a_revoked_session_closes_its_existing_websocket_before_delivering_an_ev
 }
 
 #[tokio::test]
-async fn a_replaced_session_loses_v1_websocket_authorization_at_the_recovery_commit() {
+async fn device_session_revocation_closes_the_target_websocket_within_two_seconds() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-device-session-revocation").await;
+    let second_host_cookie = additional_session_for_participant(&room, "host").await;
+    let sessions = room
+        .app
+        .clone()
+        .oneshot(list_device_sessions_request(&room.host_cookie))
+        .await
+        .expect("the device session list must receive a response");
+    let sessions = response_json(sessions).await;
+    let second_session_id = sessions["sessions"]
+        .as_array()
+        .expect("device sessions must be an array")
+        .iter()
+        .find(|session| session["current"] == false)
+        .and_then(|session| session["id"].as_str())
+        .expect("the second device session must be listed")
+        .to_owned();
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let (status, _, mut target_socket) = websocket_handshake(
+        address,
+        "/api/games/current/events",
+        Some(&second_host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let _ = target_socket.read_text().await;
+
+    let committed_at = Instant::now();
+    let revoked = room
+        .app
+        .clone()
+        .oneshot(revoke_device_session_request(
+            &room.host_cookie,
+            &second_session_id,
+            &unique_key("close-revoked-session"),
+        ))
+        .await
+        .expect("device session revocation must receive a response");
+    assert_eq!(revoked.status(), StatusCode::OK);
+
+    let close_code = tokio::time::timeout(Duration::from_secs(2), target_socket.read_close_code())
+        .await
+        .expect("the revoked device connection must close within the p95 target");
+    assert_eq!(close_code, 1008);
+    assert!(committed_at.elapsed() <= Duration::from_secs(2));
+    server.abort();
+}
+
+#[tokio::test]
+async fn device_session_revocation_closes_connections_within_p95_and_p99_targets() {
+    const CONNECTION_COUNT: usize = 100;
+
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-device-session-revocation-percentiles").await;
+    let second_host_cookie = additional_session_for_participant(&room, "host").await;
+    let sessions = room
+        .app
+        .clone()
+        .oneshot(list_device_sessions_request(&room.host_cookie))
+        .await
+        .expect("the device session list must receive a response");
+    let sessions = response_json(sessions).await;
+    let second_session_id = sessions["sessions"]
+        .as_array()
+        .expect("device sessions must be an array")
+        .iter()
+        .find(|session| session["current"] == false)
+        .and_then(|session| session["id"].as_str())
+        .expect("the second device session must be listed")
+        .to_owned();
+    let second_state =
+        AppState::with_content_manifests(room.database.clone(), vec![room.manifest.clone()])
+            .with_session_token_key(*b"test-session-token-key-000000000");
+    initialize(&second_state)
+        .await
+        .expect("the remote connection owner must initialize");
+    let (address, server) = start_network_server(build_router(second_state)).await;
+
+    let mut connection_tasks = JoinSet::new();
+    for index in 0..CONNECTION_COUNT {
+        let cookie = second_host_cookie.clone();
+        connection_tasks.spawn(async move {
+            let (path, protocol) = match index % 3 {
+                0 => ("/api/games/current/events", "hogwarts.realtime.v1"),
+                1 => ("/api/games/current/events", "hogwarts.realtime.v2"),
+                _ => ("/api/session/events", "hogwarts.session.v1"),
+            };
+            let (status, _, mut socket) = websocket_handshake(
+                address,
+                path,
+                Some(&cookie),
+                Some("http://127.0.0.1:5173"),
+                Some(protocol),
+            )
+            .await;
+            assert_eq!(status, 101);
+            let _ = socket.read_text().await;
+            socket
+        });
+    }
+    let mut sockets = Vec::with_capacity(CONNECTION_COUNT);
+    while let Some(result) = connection_tasks.join_next().await {
+        sockets.push(result.expect("each target WebSocket must connect"));
+    }
+    assert_eq!(sockets.len(), CONNECTION_COUNT);
+
+    let started_at = Instant::now();
+    let revoked = room
+        .app
+        .clone()
+        .oneshot(revoke_device_session_request(
+            &room.host_cookie,
+            &second_session_id,
+            &unique_key("close-revoked-session-percentiles"),
+        ))
+        .await
+        .expect("device session revocation must receive a response");
+    assert_eq!(revoked.status(), StatusCode::OK);
+
+    let mut close_tasks = JoinSet::new();
+    for mut socket in sockets {
+        close_tasks.spawn(async move {
+            let code = tokio::time::timeout(Duration::from_secs(5), socket.read_close_code())
+                .await
+                .expect("every revoked connection must close within the p99 target");
+            (started_at.elapsed(), code)
+        });
+    }
+    let mut latencies = Vec::with_capacity(CONNECTION_COUNT);
+    while let Some(result) = close_tasks.join_next().await {
+        let (latency, code) = result.expect("each close observation must complete");
+        assert_eq!(code, 1008);
+        latencies.push(latency);
+    }
+    latencies.sort_unstable();
+    let p95 = latencies[94];
+    let p99 = latencies[98];
+    eprintln!("cross-instance mixed-channel revocation: p95={p95:?}, p99={p99:?}");
+    assert!(
+        p95 <= Duration::from_secs(2),
+        "revocation close p95 was {p95:?}"
+    );
+    assert!(
+        p99 <= Duration::from_secs(5),
+        "revocation close p99 was {p99:?}"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_replaced_session_loses_cross_instance_v1_websocket_authorization_at_the_recovery_commit()
+{
     let room = ready_room().await;
     start_ready_game(&room, "realtime-device-replacement").await;
 
@@ -6346,7 +6994,13 @@ async fn a_replaced_session_loses_v1_websocket_authorization_at_the_recovery_com
         .as_str()
         .expect("recovery must rotate the individual credential");
 
-    let (address, server) = start_network_server(room.app.clone()).await;
+    let second_state =
+        AppState::with_content_manifests(room.database.clone(), vec![room.manifest.clone()])
+            .with_session_token_key(*b"test-session-token-key-000000000");
+    initialize(&second_state)
+        .await
+        .expect("the second application instance must initialize");
+    let (address, server) = start_network_server(build_router(second_state)).await;
     let (status, _, mut replaced_socket) = websocket_handshake(
         address,
         "/api/games/current/events",

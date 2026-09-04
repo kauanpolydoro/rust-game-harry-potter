@@ -8,6 +8,7 @@ import {
   type GameCommandReceipt,
   type GameProjectionResponse,
 } from '../contracts/identity-access.generated'
+import { useRoomAccessStore } from './roomAccess'
 
 type GameCommandStatus =
   | 'idle'
@@ -175,6 +176,14 @@ export const useGameCommandStore = defineStore('gameCommand', {
     }
   },
   actions: {
+    clearPrivateState(): void {
+      this.status = 'idle'
+      this.pendingIntent = null
+      this.pendingOverlay = null
+      this.receipt = null
+      this.errorCode = null
+      removePendingIntent()
+    },
     async endHeroActions(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
       return this.execute(game, { type: 'end_hero_actions' })
     },
@@ -216,6 +225,8 @@ export const useGameCommandStore = defineStore('gameCommand', {
       if (this.status === 'submitting' || this.status === 'recovering' || this.pendingIntent) {
         return null
       }
+      const roomAccess = useRoomAccessStore()
+      const sessionGeneration = roomAccess.sessionGeneration
 
       const request = createRequest(
         intent,
@@ -245,6 +256,9 @@ export const useGameCommandStore = defineStore('gameCommand', {
           },
           method: 'POST',
         })
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return null
+        }
         if (response.ok && isExecuteGameCommandResponse(result)) {
           return this.accept(result.receipt, result.projection)
         }
@@ -260,6 +274,9 @@ export const useGameCommandStore = defineStore('gameCommand', {
         }
         return null
       } catch (error) {
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return null
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'uncertain'
         return null
@@ -277,6 +294,8 @@ export const useGameCommandStore = defineStore('gameCommand', {
         removePendingIntent()
         return null
       }
+      const roomAccess = useRoomAccessStore()
+      const sessionGeneration = roomAccess.sessionGeneration
 
       this.status = 'recovering'
       this.errorCode = null
@@ -289,6 +308,9 @@ export const useGameCommandStore = defineStore('gameCommand', {
             headers: { Accept: 'application/json' },
           },
         )
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return null
+        }
         if (response.ok && isExecuteGameCommandResponse(result)) {
           return this.accept(result.receipt, result.projection)
         }
@@ -304,6 +326,9 @@ export const useGameCommandStore = defineStore('gameCommand', {
         }
         return null
       } catch (error) {
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return null
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'uncertain'
         return null

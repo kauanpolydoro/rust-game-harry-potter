@@ -397,6 +397,31 @@ test('a guest creates a private room and becomes its host', async ({ context, pa
   expect(session).toMatchObject({ httpOnly: true, sameSite: 'Strict', secure: true })
 })
 
+test('a participant revokes the current session and the browser removes private state', async ({
+  context,
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByLabel('Seu nome').fill('Minerva')
+  await page.getByLabel('Senha de recuperação').fill('a long uncommon passphrase')
+  await page.getByRole('button', { name: 'Criar sala privada' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Sala pronta' })).toBeVisible()
+
+  await page.locator('details.access-protection > summary').click()
+  await page.getByRole('button', { name: 'Encerrar esta sessão' }).click()
+
+  await expect(page.getByRole('heading', { level: 2, name: 'Acesso protegido' })).toBeVisible()
+  await expect(
+    page.getByText(
+      'Esta sessão foi revogada. O estado privado e as ações pendentes deste navegador foram removidos.',
+    ),
+  ).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('hogwarts.session.expected'))).toBeNull()
+  expect((await context.cookies()).some((cookie) => cookie.name === '__Host-session')).toBe(false)
+  const rejected = await page.request.get('/api/session')
+  expect(rejected.status()).toBe(401)
+})
+
 test('a guest joins with an available hero and keeps the same position after reload', async ({
   browser,
   page,

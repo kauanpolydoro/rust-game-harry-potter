@@ -471,6 +471,23 @@ describe('official game synchronization', () => {
     }
   })
 
+  it('marks the session invalid when the server closes the game stream for policy', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    socket?.receive(synchronizedMessage(roomAccess.game))
+
+    socket?.serverClose(1008)
+
+    expect(sync.status).toBe('failed')
+    expect(sync.sessionInvalidated).toBe(true)
+    vi.advanceTimersByTime(30_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
   it('resets the retry sequence only after the connection remains stable', () => {
     const roomAccess = useRoomAccessStore()
     roomAccess.game = projection()

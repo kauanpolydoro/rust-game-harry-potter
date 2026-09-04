@@ -849,6 +849,7 @@ input {
 }
 
 .recovery-management > summary,
+.access-protection > summary,
 .assisted-recovery > summary {
   min-height: 2.75rem;
   padding-block: 0.85rem;
@@ -856,6 +857,113 @@ input {
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+.access-protection {
+  border-bottom: 1px solid var(--brass-quiet);
+}
+
+.access-protection > summary {
+  color: var(--warning);
+}
+
+.access-protection__body {
+  display: grid;
+  gap: 1.5rem;
+  padding-bottom: 1.25rem;
+}
+
+.access-protection__body > section,
+.emergency-protection {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.emergency-protection {
+  margin: 0;
+  padding-top: 1.25rem;
+  border: 0;
+  border-top: 1px solid rgb(111 99 63 / 55%);
+}
+
+.access-protection h3,
+.access-protection p {
+  margin: 0;
+}
+
+.access-protection h3 {
+  color: var(--chalk);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.access-protection p {
+  max-width: 34rem;
+  color: var(--chalk-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.device-session-list {
+  margin: 0;
+  padding: 0;
+  border-block: 1px solid var(--brass-quiet);
+  list-style: none;
+}
+
+.device-session-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid rgb(111 99 63 / 55%);
+}
+
+.device-session-list li:last-child {
+  border-bottom: 0;
+}
+
+.device-session-list li > span {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.device-session-list strong {
+  color: var(--chalk);
+  overflow-wrap: anywhere;
+}
+
+.device-session-list small {
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.access-danger-action,
+.secondary-button--danger {
+  color: var(--warning);
+}
+
+.secondary-button--danger {
+  border-color: var(--warning);
+}
+
+@media (max-width: 27rem) {
+  .device-session-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .device-session-list .text-button {
+    width: fit-content;
+    padding-inline: 0;
+  }
 }
 
 .recovery-management__body {

@@ -39,6 +39,11 @@ class FakeWebSocket {
     this.readyState = FakeWebSocket.CLOSED
     this.onclose?.({ code: 1000 })
   }
+
+  serverClose(code: number): void {
+    this.readyState = FakeWebSocket.CLOSED
+    this.onclose?.({ code })
+  }
 }
 
 const passwordEvent = {
@@ -108,6 +113,36 @@ describe('security event synchronization', () => {
     expect(security.latestNotice).toEqual(assistedEvent)
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
+  })
+
+  it('marks a revoked session as terminal and accepts room protection as link supersession', () => {
+    const security = useSecuritySyncStore()
+    security.connect()
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    const roomProtection = {
+      actor_position: 1,
+      current_session_preserved: true,
+      cursor: 1,
+      event_version: 1,
+      occurred_at: '2026-09-04T18:00:00Z',
+      password_generation: 2,
+      recovery_epoch: 2,
+      revoked_sessions: 3,
+      type: 'room_protected',
+    }
+    socket?.receive({
+      cursor: 1,
+      events: [roomProtection],
+      protocol_version: 1,
+      type: 'security_snapshot',
+    })
+
+    expect(security.latestNotice).toEqual(roomProtection)
+    expect(security.credentialWasSuperseded(1, 0)).toBe(true)
+    socket?.serverClose(1008)
+    expect(security.status).toBe('failed')
+    expect(security.sessionInvalidated).toBe(true)
   })
 
   it('rejects a malformed or regressive event batch instead of displaying it', () => {

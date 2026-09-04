@@ -284,19 +284,22 @@ async fn password_rotation_artifacts(database: &PgPool, room_code: &str) -> (i64
     .expect("the single committed rotation must be queryable")
 }
 
-async fn wait_for_waiting_rotation_queries(database: &PgPool) {
+async fn wait_for_waiting_rotation_queries(database: &PgPool, blocker_pid: i32) {
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let waiting = sqlx::query_scalar::<_, i64>(
                 r"
-                SELECT COUNT(*)
-                FROM pg_stat_activity
-                WHERE datname = current_database()
-                  AND usename = current_user
-                  AND wait_event_type = 'Lock'
-                  AND query LIKE '%FOR UPDATE OF rooms%'
+                WITH RECURSIVE blocked(pid) AS (
+                    SELECT $1::INTEGER
+                    UNION
+                    SELECT activity.pid
+                    FROM pg_stat_activity AS activity
+                    JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+                )
+                SELECT COUNT(*) - 1 FROM blocked
                 ",
             )
+            .bind(blocker_pid)
             .fetch_one(database)
             .await
             .expect("the waiting rotation queries must be observable");
@@ -688,11 +691,13 @@ async fn concurrent_password_rotation_retries_share_one_committed_result() {
         .begin()
         .await
         .expect("the lock transaction must begin");
-    sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM rooms WHERE code = $1 FOR UPDATE")
-        .bind(&room.room_code)
-        .fetch_one(&mut *blocker)
-        .await
-        .expect("the test must hold the room lock");
+    let blocker_pid = sqlx::query_scalar::<_, i32>(
+        "SELECT pg_backend_pid() FROM rooms WHERE code = $1 FOR UPDATE",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *blocker)
+    .await
+    .expect("the test must hold the room lock");
 
     let barrier = Arc::new(tokio::sync::Barrier::new(3));
     let first = {
@@ -731,7 +736,7 @@ async fn concurrent_password_rotation_retries_share_one_committed_result() {
     };
     let release = async {
         barrier.wait().await;
-        wait_for_waiting_rotation_queries(&database).await;
+        wait_for_waiting_rotation_queries(&database, blocker_pid).await;
         blocker
             .commit()
             .await

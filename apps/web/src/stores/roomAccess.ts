@@ -198,6 +198,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
     startIdempotencyKey: string | null
     pendingStartInput: StartGameRequest | null
     sessionExpected: boolean
+    sessionGeneration: number
     issuedRecoveryToken: string | null
     recoveryAttemptId: string | null
     replacementSessions: Array<RecoverySessionSummary>
@@ -215,12 +216,29 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       startIdempotencyKey: null,
       pendingStartInput: null,
       sessionExpected: sessionIsExpected(),
+      sessionGeneration: 0,
       issuedRecoveryToken: null,
       recoveryAttemptId: loadRecoveryAttemptId(),
       replacementSessions: [],
     }
   },
   actions: {
+    clearAuthenticatedSession(): void {
+      this.sessionGeneration += 1
+      this.roomLookup = null
+      this.lobby = null
+      this.game = null
+      this.errorCode = null
+      this.startIdempotencyKey = null
+      this.pendingStartInput = null
+      this.sessionExpected = false
+      this.issuedRecoveryToken = null
+      this.replacementSessions = []
+      this.clearPendingJoinIntent()
+      this.clearParticipationRecoveryAttempt()
+      this.status = 'idle'
+      markSessionExpected(false)
+    },
     clearPendingJoinIntent(): void {
       this.idempotencyKey = null
       this.pendingInput = null
@@ -394,6 +412,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return false
       }
 
+      const sessionGeneration = this.sessionGeneration
       this.status = 'recovering_participation'
       this.errorCode = null
       const recoveryAttemptId = this.recoveryAttemptId ?? crypto.randomUUID()
@@ -413,6 +432,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'POST',
         })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         if (response.status === 409 && isRecoveryReplacementRequiredResponse(result)) {
           this.replacementSessions = result.sessions
           this.status = 'choosing_recovery_session'
@@ -443,6 +465,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         this.status = 'failed'
         return false
       } catch (error) {
+        if (this.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         const recoveryError = transportErrorCode(error)
         this.errorCode = recoveryError
         this.status = 'failed'
@@ -461,6 +486,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
 
+      const sessionGeneration = this.sessionGeneration
       this.status = 'restoring'
       this.errorCode = null
       try {
@@ -469,6 +495,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.game = null
@@ -495,6 +524,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           markSessionExpected(false)
         }
       } catch (error) {
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
@@ -504,6 +536,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
 
+      const sessionGeneration = this.sessionGeneration
       this.status = 'selecting_hero'
       this.errorCode = null
       try {
@@ -517,6 +550,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'PUT',
         })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.status = 'ready'
@@ -526,6 +562,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
       } catch (error) {
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
@@ -535,6 +574,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
 
+      const sessionGeneration = this.sessionGeneration
       this.status = 'setting_readiness'
       this.errorCode = null
       try {
@@ -548,6 +588,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'PUT',
         })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.status = 'ready'
@@ -557,6 +600,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
       } catch (error) {
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
@@ -566,6 +612,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
 
+      const sessionGeneration = this.sessionGeneration
       this.status = 'starting_game'
       this.errorCode = null
       this.startIdempotencyKey ??= crypto.randomUUID()
@@ -582,6 +629,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'POST',
         })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         if (response.ok && isGameProjectionResponse(result)) {
           this.game = result
           this.lobby = null
@@ -598,6 +648,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           this.pendingStartInput = null
         }
       } catch (error) {
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
@@ -607,6 +660,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
 
+      const sessionGeneration = this.sessionGeneration
       this.status = 'restoring'
       this.errorCode = null
       try {
@@ -615,6 +669,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.game = null
@@ -631,6 +688,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
       } catch (error) {
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }

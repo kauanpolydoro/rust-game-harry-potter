@@ -58,6 +58,14 @@ struct SessionSecurityEvent {
     password_generation: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     recovery_generation: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revoked_sessions: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery_epoch: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_session_preserved: Option<bool>,
     occurred_at: String,
 }
 
@@ -87,6 +95,37 @@ enum SessionEventsFailure {
     Send(String),
     WriteTimeout,
     InvalidPosition,
+}
+
+struct SessionEventSignals {
+    security: broadcast::Receiver<()>,
+    revocation: broadcast::Receiver<()>,
+    shutdown: watch::Receiver<bool>,
+}
+
+struct SessionEventIntervals {
+    reconciliation: tokio::time::Interval,
+    session_revalidation: tokio::time::Interval,
+    heartbeat: tokio::time::Interval,
+}
+
+impl SessionEventIntervals {
+    fn new(now: tokio::time::Instant) -> Self {
+        Self {
+            reconciliation: session_event_interval(
+                now + SESSION_EVENTS_RECONCILIATION_INTERVAL,
+                SESSION_EVENTS_RECONCILIATION_INTERVAL,
+            ),
+            session_revalidation: session_event_interval(
+                now + SESSION_EVENTS_SESSION_REVALIDATION_INTERVAL,
+                SESSION_EVENTS_SESSION_REVALIDATION_INTERVAL,
+            ),
+            heartbeat: session_event_interval(
+                now + SESSION_EVENTS_HEARTBEAT_INTERVAL,
+                SESSION_EVENTS_HEARTBEAT_INTERVAL,
+            ),
+        }
+    }
 }
 
 impl std::fmt::Display for SessionEventsFailure {
@@ -154,12 +193,45 @@ async fn serve_session_events(
     requested_cursor: Option<i64>,
 ) {
     let signal = state.subscribe_to_security_events(room_id);
+    let revocation_signal = state.subscribe_to_session_revocation(session.session_id);
     let shutdown = state.subscribe_to_shutdown();
     if *shutdown.borrow() {
         close_socket(&mut socket, close_code::RESTART, "server is shutting down").await;
         drop(signal);
+        drop(revocation_signal);
         state.prune_security_event_channel(room_id);
+        state.prune_session_revocation_channel(session.session_id);
         return;
+    }
+    match session_is_active(&state, session).await {
+        Ok(true) => {}
+        Ok(false) => {
+            close_socket(
+                &mut socket,
+                close_code::POLICY,
+                "session is no longer active",
+            )
+            .await;
+            drop(signal);
+            drop(revocation_signal);
+            state.prune_security_event_channel(room_id);
+            state.prune_session_revocation_channel(session.session_id);
+            return;
+        }
+        Err(_) => {
+            tracing::warn!(%room_id, participant_id = %session.participant_id, "initial session revalidation failed");
+            close_socket(
+                &mut socket,
+                close_code::ERROR,
+                "session revalidation failed",
+            )
+            .await;
+            drop(signal);
+            drop(revocation_signal);
+            state.prune_security_event_channel(room_id);
+            state.prune_session_revocation_channel(session.session_id);
+            return;
+        }
     }
     let mut cursor = requested_cursor.unwrap_or(0);
     if let Err(error) = synchronize_until_current(
@@ -180,7 +252,9 @@ async fn serve_session_events(
         )
         .await;
         drop(signal);
+        drop(revocation_signal);
         state.prune_security_event_channel(room_id);
+        state.prune_session_revocation_channel(session.session_id);
         return;
     }
 
@@ -190,11 +264,15 @@ async fn serve_session_events(
         session,
         room_id,
         &mut cursor,
-        signal,
-        shutdown,
+        SessionEventSignals {
+            security: signal,
+            revocation: revocation_signal,
+            shutdown,
+        },
     )
     .await;
     state.prune_security_event_channel(room_id);
+    state.prune_session_revocation_channel(session.session_id);
 }
 
 async fn session_event_loop(
@@ -203,29 +281,15 @@ async fn session_event_loop(
     session: AuthenticatedSession,
     room_id: Uuid,
     cursor: &mut i64,
-    mut signal: broadcast::Receiver<()>,
-    mut shutdown: watch::Receiver<bool>,
+    signals: SessionEventSignals,
 ) {
     let now = tokio::time::Instant::now();
-    let mut reconciliation = tokio::time::interval_at(
-        now + SESSION_EVENTS_RECONCILIATION_INTERVAL,
-        SESSION_EVENTS_RECONCILIATION_INTERVAL,
-    );
-    let mut session_revalidation = tokio::time::interval_at(
-        now + SESSION_EVENTS_SESSION_REVALIDATION_INTERVAL,
-        SESSION_EVENTS_SESSION_REVALIDATION_INTERVAL,
-    );
-    let mut heartbeat = tokio::time::interval_at(
-        now + SESSION_EVENTS_HEARTBEAT_INTERVAL,
-        SESSION_EVENTS_HEARTBEAT_INTERVAL,
-    );
-    for interval in [
-        &mut reconciliation,
-        &mut session_revalidation,
-        &mut heartbeat,
-    ] {
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    }
+    let mut intervals = SessionEventIntervals::new(now);
+    let SessionEventSignals {
+        mut security,
+        mut revocation,
+        mut shutdown,
+    } = signals;
     let connection_lifetime = tokio::time::sleep(SESSION_EVENTS_MAX_CONNECTION_AGE);
     tokio::pin!(connection_lifetime);
 
@@ -237,11 +301,42 @@ async fn session_event_loop(
                 }
                 false
             }
-            notification = signal.recv() => {
-                matches!(notification, Ok(()) | Err(broadcast::error::RecvError::Lagged(_)))
+            notification = security.recv() => {
+                if matches!(notification, Ok(()) | Err(broadcast::error::RecvError::Lagged(_))) {
+                    match session_is_active(state, session).await {
+                        Ok(true) => true,
+                        Ok(false) => {
+                            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                            return;
+                        }
+                        Err(_) => {
+                            close_socket(socket, close_code::ERROR, "session revalidation failed").await;
+                            return;
+                        }
+                    }
+                } else {
+                    false
+                }
             }
-            _ = reconciliation.tick() => true,
-            _ = session_revalidation.tick() => {
+            notification = revocation.recv() => {
+                if matches!(notification, Ok(()) | Err(broadcast::error::RecvError::Lagged(_))) {
+                    match session_is_active(state, session).await {
+                        Ok(false) => {
+                            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                            return;
+                        }
+                        Ok(true) => false,
+                        Err(_) => {
+                            close_socket(socket, close_code::ERROR, "session revalidation failed").await;
+                            return;
+                        }
+                    }
+                } else {
+                    false
+                }
+            }
+            _ = intervals.reconciliation.tick() => true,
+            _ = intervals.session_revalidation.tick() => {
                 if let Ok(true) = session_is_active(state, session).await {
                     false
                 } else {
@@ -249,7 +344,7 @@ async fn session_event_loop(
                     return;
                 }
             }
-            _ = heartbeat.tick() => {
+            _ = intervals.heartbeat.tick() => {
                 if send_message(socket, Message::Ping(Vec::new().into())).await.is_err() {
                     return;
                 }
@@ -283,6 +378,15 @@ async fn session_event_loop(
             return;
         }
     }
+}
+
+fn session_event_interval(
+    first_tick: tokio::time::Instant,
+    period: Duration,
+) -> tokio::time::Interval {
+    let mut interval = tokio::time::interval_at(first_tick, period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    interval
 }
 
 async fn handle_client_message(

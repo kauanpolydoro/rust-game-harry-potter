@@ -10,7 +10,7 @@ BEGIN
       AND (entity -> 'resources' ->> 'health')::NUMERIC > 10
     LIMIT 1;
     IF incompatible_game IS NOT NULL THEN
-        RAISE EXCEPTION 'game % has legacy hero health above 10; schema version 18 requires explicit history migration', incompatible_game
+        RAISE EXCEPTION 'game % has legacy hero health above 10; schema version 19 requires explicit history migration', incompatible_game
             USING ERRCODE = '55000', HINT = 'Repair or quarantine the incompatible game with operator approval before retrying. No game data was rewritten.';
     END IF;
 END;
@@ -2791,4 +2791,4 @@ BEGIN
 END;
 $$;
 
-UPDATE application_metadata SET value = '18' WHERE key = 'schema_version';
+UPDATE application_metadata SET value = '19' WHERE key = 'schema_version';
