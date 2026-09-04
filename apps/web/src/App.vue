@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { isUncertainTransportFailure } from './api/http'
 import GameStage from './components/GameStage.vue'
+import RecoveryManagement from './components/RecoveryManagement.vue'
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
 import { takeRecoveryToken } from './recoveryCredential'
 import { type Availability, useHealthStore } from './stores/health'
@@ -10,12 +11,14 @@ import { useGameCommandStore } from './stores/gameCommand'
 import { useGameSyncStore } from './stores/gameSync'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
+import { useSecuritySyncStore } from './stores/securitySync'
 
 const health = useHealthStore()
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
+const securitySync = useSecuritySyncStore()
 const recoveryToken = ref(takeRecoveryToken())
 const entryMode = ref<'create' | 'join' | 'recover'>(
   recoveryToken.value ? 'recover' : 'create',
@@ -26,7 +29,6 @@ const roomCode = ref('')
 const selectedHero = ref<HeroId | ''>('')
 const passwordVisible = ref(false)
 const copyResult = ref<'idle' | 'copied' | 'failed'>('idle')
-const recoveryCopyResult = ref<'idle' | 'copied' | 'failed'>('idle')
 const selectedContentKey = ref('')
 
 if (!recoveryToken.value && roomAccess.pendingJoinIntent) {
@@ -54,11 +56,6 @@ const statusPresentation = {
 const currentStatus = computed(() => statusPresentation[health.availability])
 const lobby = computed(() => roomAccess.lobby)
 const game = computed(() => roomAccess.game)
-const issuedRecoveryLink = computed(() =>
-  roomAccess.issuedRecoveryToken
-    ? `${window.location.origin}${window.location.pathname}#recovery=${roomAccess.issuedRecoveryToken}`
-    : null,
-)
 const isHost = computed(() => lobby.value?.participant.role === 'host')
 const isRestoringSession = computed(
   () => roomAccess.status === 'restoring' && !lobby.value && !game.value,
@@ -478,23 +475,6 @@ async function copyRoomCode(): Promise<void> {
   }
 }
 
-async function copyRecoveryLink(): Promise<void> {
-  if (!issuedRecoveryLink.value) {
-    return
-  }
-  try {
-    await navigator.clipboard.writeText(issuedRecoveryLink.value)
-    recoveryCopyResult.value = 'copied'
-  } catch {
-    recoveryCopyResult.value = 'failed'
-  }
-}
-
-function dismissRecoveryLink(): void {
-  roomAccess.dismissRecoveryCredential()
-  recoveryCopyResult.value = 'idle'
-}
-
 watch([displayName, recoveryPassword], () => roomCreation.resetPendingRequest())
 watch(
   adventureChoices,
@@ -516,8 +496,22 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  () => Boolean(lobby.value || game.value),
+  (hasAuthenticatedSession) => {
+    if (hasAuthenticatedSession) {
+      securitySync.connect()
+    } else {
+      securitySync.disconnect()
+    }
+  },
+  { immediate: true },
+)
 
-onBeforeUnmount(() => gameSync.disconnect())
+onBeforeUnmount(() => {
+  gameSync.disconnect()
+  securitySync.disconnect()
+})
 
 onMounted(async () => {
   await Promise.all([
@@ -601,43 +595,10 @@ onMounted(async () => {
           <output aria-labelledby="room-code-label">{{ lobby.room.code }}</output>
         </div>
 
-        <section
-          v-if="issuedRecoveryLink"
-          class="recovery-credential"
-          aria-labelledby="recovery-credential-heading"
-        >
-          <h3 id="recovery-credential-heading">Guarde seu link individual</h3>
-          <p id="recovery-credential-guidance">
-            Ele recupera somente sua posição e exige também a senha da sala. Este link não será
-            exibido novamente depois que você sair desta tela.
-          </p>
-          <label for="issued-recovery-link">Link de recuperação</label>
-          <textarea
-            id="issued-recovery-link"
-            aria-describedby="recovery-credential-guidance"
-            readonly
-            rows="3"
-            :value="issuedRecoveryLink"
-          ></textarea>
-          <div class="recovery-credential-actions">
-            <button class="text-button" type="button" @click="copyRecoveryLink()">
-              {{ recoveryCopyResult === 'copied' ? 'Copiar link novamente' : 'Copiar link' }}
-            </button>
-            <button class="text-button" type="button" @click="dismissRecoveryLink()">
-              Já guardei o link
-            </button>
-          </div>
-          <p v-if="recoveryCopyResult === 'copied'" class="copy-feedback" role="status">
-            Link individual copiado.
-          </p>
-          <p
-            v-else-if="recoveryCopyResult === 'failed'"
-            class="copy-feedback copy-feedback--error"
-            role="alert"
-          >
-            Não foi possível copiar. Selecione o link e copie manualmente.
-          </p>
-        </section>
+        <RecoveryManagement
+          :participant="lobby.participant"
+          :participants="lobby.participants"
+        />
 
         <dl class="room-details">
           <div>

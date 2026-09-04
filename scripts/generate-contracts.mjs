@@ -44,6 +44,9 @@ const enumAliases = new Map([
 ])
 
 function typeScriptType(schema, indentationLevel) {
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+    return schema.oneOf.map((variant) => typeScriptType(variant, indentationLevel)).join(' | ')
+  }
   const enumAlias = enumAliases.get(schema)
   if (enumAlias) {
     return enumAlias
@@ -85,6 +88,12 @@ function typeScriptType(schema, indentationLevel) {
 }
 
 function validationExpression(schema, value) {
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+    const variants = schema.oneOf.map(
+      (variant) => `(${validationExpression(variant, value)})`,
+    )
+    return `([${variants.join(', ')}].filter(Boolean).length === 1)`
+  }
   if (typeof schema.$ref === 'string') {
     const definitionName = schema.$ref.split('/').at(-1)
     if (!identitySchema.$defs[definitionName]) {
@@ -117,7 +126,11 @@ function validationExpression(schema, value) {
     return checks.join(' && ')
   }
   if (schema.type === 'boolean') {
-    return `typeof ${value} === 'boolean'`
+    const checks = [`typeof ${value} === 'boolean'`]
+    if (Array.isArray(schema.enum)) {
+      checks.push(`(${schema.enum.map((entry) => `${value} === ${JSON.stringify(entry)}`).join(' || ')})`)
+    }
+    return checks.join(' && ')
   }
   if (schema.type === 'integer') {
     const checks = [`typeof ${value} === 'number'`, `Number.isInteger(${value})`]
@@ -154,7 +167,9 @@ function validationExpression(schema, value) {
     const checks = [`isRecord(${value})`]
     if (schema.additionalProperties === false) {
       checks.push(
-        `Object.keys(${value}).every((key) => ${JSON.stringify(properties.map(([name]) => name))}.includes(key))`,
+        properties.length === 0
+          ? `Object.keys(${value}).length === 0`
+          : `Object.keys(${value}).every((key) => ${JSON.stringify(properties.map(([name]) => name))}.includes(key))`,
       )
     }
     for (const [name, property] of properties) {
@@ -177,6 +192,9 @@ const generatedDefinitions = Object.entries(identitySchema.$defs)
   .map(([name, schema]) => {
     if (schema.type !== 'object' || !schema.properties) {
       throw new TypeError(`identity-access.schema.json definition ${name} must be an object`)
+    }
+    if (Object.keys(schema.properties).length === 0) {
+      return `export type ${name} = Record<string, never>`
     }
     return `export interface ${name} ${typeScriptType(schema, 1)}`
   })

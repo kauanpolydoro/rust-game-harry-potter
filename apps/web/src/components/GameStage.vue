@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import { useGameCommandStore } from '../stores/gameCommand'
 import { useGameSyncStore } from '../stores/gameSync'
 import { useRoomAccessStore } from '../stores/roomAccess'
+import RecoveryManagement from './RecoveryManagement.vue'
 
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
@@ -258,6 +259,11 @@ function presenceLabel(position: number): string {
           </li>
         </ol>
       </div>
+
+      <RecoveryManagement
+        :participant="game.participant"
+        :participants="game.participants"
+      />
 
       <details class="snapshot-details">
         <summary>Ver versões do Snapshot</summary>

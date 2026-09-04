@@ -490,6 +490,79 @@ async fn ready_room() -> ReadyRoom {
     }
 }
 
+#[tokio::test]
+async fn routine_recovery_rotation_and_regeneration_do_not_renew_game_retention() {
+    let room = ready_room().await;
+    start_ready_game(&room, "recovery-management-retention").await;
+    let before = sqlx::query_as::<_, (i64, i64, String, String, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            games.last_game_action_at::text,
+            games.expires_at::text,
+            (SELECT COUNT(*) FROM game_events WHERE game_events.game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the initial retention state must be queryable");
+
+    let rotated = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PUT",
+            "/api/session/recovery-password",
+            &json!({
+                "current_recovery_password": "a long uncommon passphrase",
+                "new_recovery_password": "a newer uncommon recovery phrase"
+            }),
+            Some(&room.host_cookie),
+            Some(&unique_key("retention-rotation")),
+        ))
+        .await
+        .expect("password rotation must receive a response");
+    assert_eq!(rotated.status(), StatusCode::OK);
+
+    let regenerated = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recovery-credential",
+            &json!({}),
+            Some(&room.guest_cookie),
+            Some(&unique_key("retention-regeneration")),
+        ))
+        .await
+        .expect("recovery credential regeneration must receive a response");
+    assert_eq!(regenerated.status(), StatusCode::OK);
+
+    let after = sqlx::query_as::<_, (i64, i64, String, String, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            games.last_game_action_at::text,
+            games.expires_at::text,
+            (SELECT COUNT(*) FROM game_events WHERE game_events.game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the final retention state must be queryable");
+    assert_eq!(after, before);
+}
+
 fn assert_initial_synchronization_projection(projection: &Value) {
     assert_eq!(projection["snapshot"]["snapshot_version"], 1);
     assert_eq!(projection["snapshot"]["state_version"], 1);

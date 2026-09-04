@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
 import { useGameCommandStore } from './stores/gameCommand'
+import { useRoomAccessStore } from './stores/roomAccess'
 
 class SynchronizedWebSocket {
   static readonly CONNECTING = 0
@@ -28,6 +29,17 @@ class SynchronizedWebSocket {
       this.readyState = SynchronizedWebSocket.OPEN
       this.protocol = this.requestedProtocol
       this.onopen?.()
+      if (this.requestedProtocol === 'hogwarts.session.v1') {
+        this.onmessage?.({
+          data: JSON.stringify({
+            cursor: 0,
+            events: [],
+            protocol_version: 1,
+            type: 'security_snapshot',
+          }),
+        })
+        return
+      }
       const request = new URL(this.url)
       this.onmessage?.({
         data: JSON.stringify({
@@ -1235,7 +1247,10 @@ describe('application shell', () => {
     expect(
       await screen.findByRole('button', { name: 'Concluir Artes das Trevas' }),
     ).toBeEnabled()
-    const socket = SynchronizedWebSocket.instances[0]
+    expect(screen.getByText('Gerenciar recuperação')).toBeVisible()
+    const socket = SynchronizedWebSocket.instances.find(
+      (candidate) => candidate.requestedProtocol === 'hogwarts.realtime.v2',
+    )
     socket?.receive({
       blocked: true,
       game_id: gameProjectionResponse().game.id,
@@ -1387,6 +1402,10 @@ describe('application shell', () => {
     expect(screen.getAllByText('Luna')[0]).toBeVisible()
     expect(screen.getAllByText('Posição 2')[0]).toBeVisible()
     expect(screen.getAllByText('Hermione')[0]).toBeVisible()
+    await fireEvent.click(screen.getByText('Gerenciar recuperação'))
+    expect(screen.getByRole('button', { name: 'Gerar novo link para mim' })).toBeVisible()
+    expect(screen.queryByLabelText('Senha atual da sala')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ajudar participante sem acesso')).not.toBeInTheDocument()
     expect(request).toHaveBeenNthCalledWith(
       2,
       '/api/session',
@@ -1396,10 +1415,12 @@ describe('application shell', () => {
 
   it('shows realtime connection failure and offers an explicit retry', async () => {
     class FailingWebSocket {
-      static attempts = 0
+      static attemptedProtocols: string[] = []
 
-      constructor() {
-        FailingWebSocket.attempts += 1
+      constructor(_url: string | URL, protocol: string | string[]) {
+        FailingWebSocket.attemptedProtocols.push(
+          Array.isArray(protocol) ? (protocol[0] ?? '') : protocol,
+        )
         throw new Error('socket unavailable')
       }
     }
@@ -1427,7 +1448,11 @@ describe('application shell', () => {
 
     expect(await screen.findByText('Atualizações automáticas interrompidas.')).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: 'Reconectar atualizações' }))
-    expect(FailingWebSocket.attempts).toBe(2)
+    expect(
+      FailingWebSocket.attemptedProtocols.filter(
+        (protocol) => protocol === 'hogwarts.realtime.v2',
+      ),
+    ).toHaveLength(2)
   })
 
   it('keeps the active command frozen until realtime convergence is proven', async () => {
@@ -1435,7 +1460,7 @@ describe('application shell', () => {
       static readonly CONNECTING = 0
       static readonly OPEN = 1
       static readonly CLOSED = 3
-      static instance: ControlledWebSocket | null = null
+      static instances: ControlledWebSocket[] = []
 
       readonly requestedProtocol: string
       protocol = ''
@@ -1447,7 +1472,7 @@ describe('application shell', () => {
 
       constructor(_url: string | URL, protocol: string | string[]) {
         this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
-        ControlledWebSocket.instance = this
+        ControlledWebSocket.instances.push(this)
       }
 
       open(): void {
@@ -1487,11 +1512,14 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
-    ControlledWebSocket.instance?.open()
+    const gameSocket = ControlledWebSocket.instances.find(
+      (socket) => socket.requestedProtocol === 'hogwarts.realtime.v2',
+    )
+    gameSocket?.open()
     expect(screen.getByRole('button', { name: 'Sincronizando partida' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Concluir Artes das Trevas' })).toBeNull()
 
-    ControlledWebSocket.instance?.receive({
+    gameSocket?.receive({
       cursor: 0,
       digest: game.snapshot.digest,
       protocol_version: 2,
@@ -1505,7 +1533,7 @@ describe('application shell', () => {
     gapProjection.snapshot.sequence = 2
     gapProjection.snapshot.state_version = 3
     gapProjection.snapshot.digest = `blake3:${'e'.repeat(64)}`
-    ControlledWebSocket.instance?.receive({
+    gameSocket?.receive({
       cursor: 2,
       events: [
         {
@@ -1814,5 +1842,287 @@ describe('application shell', () => {
     expect(screen.getByText('Artes das Trevas')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+  })
+
+  it('prefers direct recovery renewal and makes host-assisted impersonation risk explicit', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const credentialResponse = (delivery: 'direct' | 'host_assisted') => ({
+      delivery,
+      participant: {
+        display_name: delivery === 'direct' ? 'Minerva' : 'Luna',
+        position: delivery === 'direct' ? 1 : 2,
+      },
+      recovery_generation: 2,
+      recovery_token: (delivery === 'direct' ? 'd' : 'e').repeat(64),
+      ...(delivery === 'host_assisted'
+        ? {
+            risk_message_key: 'participant.recovery.host_assisted_impersonation_risk',
+          }
+        : {}),
+      security_event: {
+        actor_position: 1,
+        cursor: delivery === 'direct' ? 9 : 3,
+        delivery,
+        event_version: 1,
+        occurred_at: '2026-09-04T18:00:00Z',
+        recovery_generation: 2,
+        target_position: delivery === 'direct' ? 1 : 2,
+        type: 'recovery_credential_regenerated',
+      },
+    })
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(readyHostLobbyResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session/recovery-credential') {
+        return Promise.resolve(
+          new Response(JSON.stringify(credentialResponse('direct')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session/recovery-password') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              password_generation: 2,
+              security_event: {
+                actor_position: 1,
+                cursor: 2,
+                event_version: 1,
+                occurred_at: '2026-09-04T18:01:00Z',
+                password_generation: 2,
+                type: 'recovery_password_rotated',
+              },
+            }),
+            { headers: { 'Content-Type': 'application/json' }, status: 200 },
+          ),
+        )
+      }
+      if (url === '/api/rooms/current/participants/2/recovery-credential') {
+        return Promise.resolve(
+          new Response(JSON.stringify(credentialResponse('host_assisted')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+
+    await fireEvent.click(screen.getByText('Gerenciar recuperação'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Gerar novo link para mim' }))
+    expect(await screen.findByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${'d'.repeat(64)}`,
+    )
+    const directCredentialHeading = screen.getByRole('heading', {
+      level: 3,
+      name: 'Novo link emitido para Minerva.',
+    })
+    await waitFor(() => expect(directCredentialHeading).toHaveFocus())
+    expect(
+      screen.getByText('Novo link confirmado. As cópias anteriores não funcionam mais.'),
+    ).toHaveAttribute('role', 'status')
+
+    const securitySocket = SynchronizedWebSocket.instances.find(
+      (socket) => socket.requestedProtocol === 'hogwarts.session.v1',
+    )
+    securitySocket?.receive({
+      cursor: 9,
+      events: [credentialResponse('direct').security_event],
+      protocol_version: 1,
+      type: 'security_snapshot',
+    })
+    expect(screen.getByLabelText('Link de recuperação')).toBeVisible()
+    securitySocket?.receive({
+      cursor: 1,
+      events: [
+        {
+          actor_position: 1,
+          cursor: 1,
+          event_version: 1,
+          occurred_at: '2026-09-04T18:01:00Z',
+          password_generation: 2,
+          type: 'recovery_password_rotated',
+        },
+      ],
+      protocol_version: 1,
+      type: 'security_snapshot',
+    })
+    expect(
+      await screen.findByText('A senha de recuperação foi alterada. Suas sessões continuam ativas.'),
+    ).toHaveAttribute('role', 'status')
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Link de recuperação')).not.toBeInTheDocument(),
+    )
+
+    await fireEvent.update(
+      screen.getByLabelText('Senha atual da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.update(
+      screen.getByLabelText('Nova senha de recuperação'),
+      'a newer uncommon recovery phrase',
+    )
+    const rotatePassword = screen.getByRole('button', { name: 'Alterar senha da sala' })
+    expect(rotatePassword).toBeDisabled()
+    await fireEvent.update(
+      screen.getByLabelText('Confirmar nova senha'),
+      'a different uncommon recovery phrase',
+    )
+    expect(screen.getByText('As novas senhas não coincidem.')).toHaveAttribute('role', 'alert')
+    expect(rotatePassword).toBeDisabled()
+    await fireEvent.update(
+      screen.getByLabelText('Confirmar nova senha'),
+      'a newer uncommon recovery phrase',
+    )
+    expect(screen.queryByText('As novas senhas não coincidem.')).not.toBeInTheDocument()
+    const showNewPasswords = screen.getByRole('button', { name: 'Mostrar novas senhas' })
+    expect(showNewPasswords).toHaveAttribute(
+      'aria-controls',
+      'new-room-recovery-password new-room-recovery-password-confirmation',
+    )
+    await fireEvent.click(showNewPasswords)
+    expect(screen.getByLabelText('Nova senha de recuperação')).toHaveAttribute('type', 'text')
+    expect(screen.getByLabelText('Confirmar nova senha')).toHaveAttribute('type', 'text')
+    await fireEvent.click(screen.getByRole('button', { name: 'Ocultar novas senhas' }))
+    expect(rotatePassword).toBeEnabled()
+    await fireEvent.click(rotatePassword)
+    expect(await screen.findByText('Senha da sala alterada.')).toBeVisible()
+    await Promise.resolve()
+    expect(screen.getByText('Senha da sala alterada.')).toBeVisible()
+
+    await fireEvent.click(screen.getByText('Ajudar participante sem acesso'))
+    expect(
+      screen.getByText(
+        'Quem receber o novo link e souber a senha da sala poderá assumir a participação escolhida.',
+      ),
+    ).toBeVisible()
+    const assistedParticipant = screen.getByLabelText('Participante sem acesso')
+    await fireEvent.update(assistedParticipant, '2')
+    expect(assistedParticipant).toHaveValue('2')
+    await fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Entendo que o link permite personificar este participante',
+      }),
+    )
+    const assistedButton = screen.getByRole('button', { name: 'Gerar link com assistência' })
+    expect(assistedButton).toBeEnabled()
+    await fireEvent.click(assistedButton)
+    await waitFor(() =>
+      expect(request.mock.calls.some(([url]) =>
+        String(url) === '/api/rooms/current/participants/2/recovery-credential'
+      )).toBe(true),
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+        `${window.location.origin}${window.location.pathname}#recovery=${'e'.repeat(64)}`,
+      ),
+    )
+    const assistedCredentialHeading = screen.getByRole('heading', {
+      level: 3,
+      name: 'Novo link emitido para Luna.',
+    })
+    expect(assistedCredentialHeading).toBeVisible()
+    await waitFor(() => expect(assistedCredentialHeading).toHaveFocus())
+  })
+
+  it('preserves the host link while an assisted link is delivered and prevents overwrites', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const hostToken = 'c'.repeat(64)
+    const assistedToken = 'e'.repeat(64)
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(readyHostLobbyResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/rooms/current/participants/2/recovery-credential') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              delivery: 'host_assisted',
+              participant: { display_name: 'Luna', position: 2 },
+              recovery_generation: 2,
+              recovery_token: assistedToken,
+              risk_message_key: 'participant.recovery.host_assisted_impersonation_risk',
+              security_event: {
+                actor_position: 1,
+                cursor: 1,
+                delivery: 'host_assisted',
+                event_version: 1,
+                occurred_at: '2026-09-04T18:00:00Z',
+                recovery_generation: 2,
+                target_position: 2,
+                type: 'recovery_credential_regenerated',
+              },
+            }),
+            { headers: { 'Content-Type': 'application/json' }, status: 200 },
+          ),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+    const pinia = createPinia()
+    useRoomAccessStore(pinia).issuedRecoveryToken = hostToken
+
+    render(App, { global: { plugins: [pinia] } })
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${hostToken}`,
+    )
+
+    await fireEvent.click(screen.getByText('Gerenciar recuperação'))
+    await fireEvent.click(screen.getByText('Ajudar participante sem acesso'))
+    await fireEvent.update(screen.getByLabelText('Participante sem acesso'), '2')
+    await fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Entendo que o link permite personificar este participante',
+      }),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Gerar link com assistência' }))
+    await waitFor(() =>
+      expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+        `${window.location.origin}${window.location.pathname}#recovery=${assistedToken}`,
+      ),
+    )
+    expect(screen.getByRole('button', { name: 'Gerar novo link para mim' })).toBeDisabled()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Já guardei o link' }))
+    expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${hostToken}`,
+    )
   })
 })

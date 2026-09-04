@@ -206,6 +206,100 @@ test('a participant uses an individual link once to recover the same position on
   }
 })
 
+test('recovery rotation preserves sessions and replaces direct and assisted credentials', async ({
+  browser,
+  page: hostPage,
+}) => {
+  const currentPassword = 'a long uncommon passphrase'
+  const newPassword = 'a different uncommon passphrase'
+  const guestContext = await browser.newContext()
+  const guestPage = await guestContext.newPage()
+
+  try {
+    await hostPage.goto('/')
+    await hostPage.getByLabel('Seu nome').fill('Minerva')
+    await hostPage.getByLabel('Senha de recuperação').fill(currentPassword)
+    await hostPage.getByRole('button', { name: 'Criar sala privada' }).click()
+    const roomCode = await hostPage.locator('output').textContent()
+    const originalRecoveryLink = await hostPage.getByLabel('Link de recuperação').inputValue()
+
+    await guestPage.goto('/')
+    await guestPage.getByRole('button', { name: 'Entrar em uma sala' }).click()
+    await guestPage.getByLabel('Código da sala').fill(roomCode ?? '')
+    await guestPage.getByRole('button', { name: 'Localizar sala' }).click()
+    await guestPage.getByLabel('Seu nome').fill('Luna')
+    await guestPage.getByRole('radio', { name: 'Hermione' }).check()
+    await guestPage.getByRole('button', { name: 'Entrar na sala' }).click()
+    await expect(guestPage.getByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+
+    await hostPage.reload()
+    await expect(hostPage.getByText('Luna', { exact: true })).toBeVisible()
+    await hostPage.locator('details.recovery-management > summary').click()
+    await hostPage.getByLabel('Senha atual da sala').fill(currentPassword)
+    await hostPage.getByLabel('Nova senha de recuperação').fill(newPassword)
+    await hostPage.getByLabel('Confirmar nova senha').fill(newPassword)
+    await hostPage.getByRole('button', { name: 'Alterar senha da sala' }).click()
+
+    await expect(hostPage.getByText('Senha da sala alterada.', { exact: true })).toBeVisible()
+    await expect(
+      guestPage.getByText(
+        'A senha de recuperação foi alterada. Suas sessões continuam ativas.',
+        { exact: true },
+      ),
+    ).toBeVisible()
+    await expect(hostPage.getByRole('heading', { level: 2, name: 'Sala pronta' })).toBeVisible()
+    await expect(guestPage.getByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+
+    const obsoleteLinkContext = await browser.newContext()
+    const obsoleteLinkPage = await obsoleteLinkContext.newPage()
+    try {
+      await obsoleteLinkPage.goto(originalRecoveryLink)
+      await obsoleteLinkPage.getByLabel('Senha de recuperação da sala').fill(newPassword)
+      await obsoleteLinkPage.getByRole('button', { name: 'Recuperar minha posição' }).click()
+      await expect(
+        obsoleteLinkPage.getByText(
+          'Não foi possível recuperar a participação. Confira o link e a senha da sala.',
+        ),
+      ).toBeVisible()
+    } finally {
+      await obsoleteLinkContext.close()
+    }
+
+    await hostPage.getByRole('button', { name: 'Gerar novo link para mim' }).click()
+    const directRecoveryLink = await hostPage.getByLabel('Link de recuperação').inputValue()
+    expect(directRecoveryLink).not.toBe(originalRecoveryLink)
+
+    const recoveredContext = await browser.newContext()
+    const recoveredPage = await recoveredContext.newPage()
+    try {
+      await recoveredPage.goto(directRecoveryLink)
+      await recoveredPage.getByLabel('Senha de recuperação da sala').fill(newPassword)
+      await recoveredPage.getByRole('button', { name: 'Recuperar minha posição' }).click()
+      await expect(
+        recoveredPage.getByRole('heading', { level: 2, name: 'Sala pronta' }),
+      ).toBeVisible()
+    } finally {
+      await recoveredContext.close()
+    }
+
+    await hostPage.getByRole('button', { name: 'Já guardei o link' }).click()
+    await hostPage.locator('details.assisted-recovery > summary').click()
+    await expect(hostPage.getByText('Risco de personificação', { exact: true })).toBeVisible()
+    await hostPage
+      .getByLabel('Participante sem acesso')
+      .selectOption({ label: 'Posição 2 · Luna' })
+    await hostPage
+      .getByLabel('Entendo que o link permite personificar este participante')
+      .check()
+    await hostPage.getByRole('button', { name: 'Gerar link com assistência' }).click()
+    await expect(
+      hostPage.getByRole('heading', { level: 3, name: 'Novo link emitido para Luna.' }),
+    ).toBeVisible()
+  } finally {
+    await guestContext.close()
+  }
+})
+
 test('a player replays a missed event and falls back to Snapshot within recovery SLOs', async ({
   browser,
   page: hostPage,

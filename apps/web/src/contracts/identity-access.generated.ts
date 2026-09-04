@@ -32,6 +32,79 @@ export interface RecoverParticipationRequest {
   recovery_attempt_id: string
 }
 
+export interface RotateRecoveryPasswordRequest {
+  current_recovery_password: string
+  new_recovery_password: string
+}
+
+export type RegenerateOwnRecoveryCredentialRequest = Record<string, never>
+
+export interface RegenerateAssistedRecoveryCredentialRequest {
+  host_assistance_risk_acknowledged: true
+}
+
+export interface RecoveryParticipant {
+  display_name: string
+  position: number
+}
+
+export interface RecoveryPasswordRotatedSecurityEvent {
+  event_version: 1
+  cursor: number
+  type: "recovery_password_rotated"
+  actor_position: number
+  password_generation: number
+  occurred_at: string
+}
+
+export interface RecoveryCredentialRegeneratedSecurityEvent {
+  event_version: 1
+  cursor: number
+  type: "recovery_credential_regenerated"
+  actor_position: number
+  target_position: number
+  delivery: "direct" | "host_assisted"
+  recovery_generation: number
+  occurred_at: string
+}
+
+export interface RotateRecoveryPasswordResponse {
+  password_generation: number
+  security_event: RecoveryPasswordRotatedSecurityEvent
+}
+
+export interface DirectRecoveryCredentialResponse {
+  delivery: "direct"
+  participant: RecoveryParticipant
+  recovery_generation: number
+  recovery_token: string
+  security_event: RecoveryCredentialRegeneratedSecurityEvent
+}
+
+export interface AssistedRecoveryCredentialResponse {
+  delivery: "host_assisted"
+  participant: RecoveryParticipant
+  recovery_generation: number
+  recovery_token: string
+  risk_message_key: "participant.recovery.host_assisted_impersonation_risk"
+  security_event: RecoveryCredentialRegeneratedSecurityEvent
+}
+
+export interface SecuritySnapshotMessage {
+  protocol_version: 1
+  type: "security_snapshot"
+  cursor: number
+  events: Array<RecoveryPasswordRotatedSecurityEvent | RecoveryCredentialRegeneratedSecurityEvent>
+}
+
+export interface SecurityEventsMessage {
+  protocol_version: 1
+  type: "security_events"
+  from_cursor: number
+  cursor: number
+  events: Array<RecoveryPasswordRotatedSecurityEvent | RecoveryCredentialRegeneratedSecurityEvent>
+}
+
 export interface StartGameRequest {
   adventure_id: string
   manifest_digest: string
@@ -287,6 +360,50 @@ export function isSetReadinessRequest(value: unknown): value is SetReadinessRequ
 
 export function isRecoverParticipationRequest(value: unknown): value is RecoverParticipationRequest {
   return isRecord(value) && Object.keys(value).every((key) => ["recovery_token","recovery_password","recovery_attempt_id"].includes(key)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["recovery_password"] === 'string' && [...value["recovery_password"]].length >= 1 && [...value["recovery_password"]].length <= 128 && typeof value["recovery_attempt_id"] === 'string' && isUuid(value["recovery_attempt_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["recovery_attempt_id"])
+}
+
+export function isRotateRecoveryPasswordRequest(value: unknown): value is RotateRecoveryPasswordRequest {
+  return isRecord(value) && Object.keys(value).every((key) => ["current_recovery_password","new_recovery_password"].includes(key)) && typeof value["current_recovery_password"] === 'string' && [...value["current_recovery_password"]].length >= 1 && [...value["current_recovery_password"]].length <= 128 && typeof value["new_recovery_password"] === 'string' && [...value["new_recovery_password"]].length >= 12 && [...value["new_recovery_password"]].length <= 128
+}
+
+export function isRegenerateOwnRecoveryCredentialRequest(value: unknown): value is RegenerateOwnRecoveryCredentialRequest {
+  return isRecord(value) && Object.keys(value).length === 0
+}
+
+export function isRegenerateAssistedRecoveryCredentialRequest(value: unknown): value is RegenerateAssistedRecoveryCredentialRequest {
+  return isRecord(value) && Object.keys(value).every((key) => ["host_assistance_risk_acknowledged"].includes(key)) && typeof value["host_assistance_risk_acknowledged"] === 'boolean' && (value["host_assistance_risk_acknowledged"] === true)
+}
+
+export function isRecoveryParticipant(value: unknown): value is RecoveryParticipant {
+  return isRecord(value) && Object.keys(value).every((key) => ["display_name","position"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4
+}
+
+export function isRecoveryPasswordRotatedSecurityEvent(value: unknown): value is RecoveryPasswordRotatedSecurityEvent {
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","cursor","type","actor_position","password_generation","occurred_at"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1) && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "recovery_password_rotated") && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["password_generation"] === 'number' && Number.isInteger(value["password_generation"]) && value["password_generation"] >= 2 && typeof value["occurred_at"] === 'string' && isRfc3339DateTime(value["occurred_at"])
+}
+
+export function isRecoveryCredentialRegeneratedSecurityEvent(value: unknown): value is RecoveryCredentialRegeneratedSecurityEvent {
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","cursor","type","actor_position","target_position","delivery","recovery_generation","occurred_at"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1) && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "recovery_credential_regenerated") && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["target_position"] === 'number' && Number.isInteger(value["target_position"]) && value["target_position"] >= 1 && value["target_position"] <= 4 && typeof value["delivery"] === 'string' && (value["delivery"] === "direct" || value["delivery"] === "host_assisted") && typeof value["recovery_generation"] === 'number' && Number.isInteger(value["recovery_generation"]) && value["recovery_generation"] >= 2 && typeof value["occurred_at"] === 'string' && isRfc3339DateTime(value["occurred_at"])
+}
+
+export function isRotateRecoveryPasswordResponse(value: unknown): value is RotateRecoveryPasswordResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["password_generation","security_event"].includes(key)) && typeof value["password_generation"] === 'number' && Number.isInteger(value["password_generation"]) && value["password_generation"] >= 2 && isRecoveryPasswordRotatedSecurityEvent(value["security_event"])
+}
+
+export function isDirectRecoveryCredentialResponse(value: unknown): value is DirectRecoveryCredentialResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["delivery","participant","recovery_generation","recovery_token","security_event"].includes(key)) && typeof value["delivery"] === 'string' && (value["delivery"] === "direct") && isRecoveryParticipant(value["participant"]) && typeof value["recovery_generation"] === 'number' && Number.isInteger(value["recovery_generation"]) && value["recovery_generation"] >= 2 && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && isRecoveryCredentialRegeneratedSecurityEvent(value["security_event"])
+}
+
+export function isAssistedRecoveryCredentialResponse(value: unknown): value is AssistedRecoveryCredentialResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["delivery","participant","recovery_generation","recovery_token","risk_message_key","security_event"].includes(key)) && typeof value["delivery"] === 'string' && (value["delivery"] === "host_assisted") && isRecoveryParticipant(value["participant"]) && typeof value["recovery_generation"] === 'number' && Number.isInteger(value["recovery_generation"]) && value["recovery_generation"] >= 2 && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["risk_message_key"] === 'string' && (value["risk_message_key"] === "participant.recovery.host_assisted_impersonation_risk") && isRecoveryCredentialRegeneratedSecurityEvent(value["security_event"])
+}
+
+export function isSecuritySnapshotMessage(value: unknown): value is SecuritySnapshotMessage {
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","events"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "security_snapshot") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && Array.isArray(value["events"]) && value["events"].every((entry) => ([(isRecoveryPasswordRotatedSecurityEvent(entry)), (isRecoveryCredentialRegeneratedSecurityEvent(entry))].filter(Boolean).length === 1))
+}
+
+export function isSecurityEventsMessage(value: unknown): value is SecurityEventsMessage {
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","from_cursor","cursor","events"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "security_events") && typeof value["from_cursor"] === 'number' && Number.isInteger(value["from_cursor"]) && value["from_cursor"] >= 0 && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && Array.isArray(value["events"]) && value["events"].every((entry) => ([(isRecoveryPasswordRotatedSecurityEvent(entry)), (isRecoveryCredentialRegeneratedSecurityEvent(entry))].filter(Boolean).length === 1))
 }
 
 export function isStartGameRequest(value: unknown): value is StartGameRequest {
