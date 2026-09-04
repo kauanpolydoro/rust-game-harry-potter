@@ -51,6 +51,7 @@ input:focus-visible,
 select:focus-visible,
 summary:focus-visible,
 .hero-option:has(input:focus-visible),
+.choice-option:has(input:focus-visible),
 .room-stage h2:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 4px;
@@ -443,7 +444,8 @@ input {
 }
 
 .hero-fieldset,
-.hero-selection fieldset {
+.hero-selection fieldset,
+.effect-choice fieldset {
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -452,6 +454,7 @@ input {
 
 .hero-fieldset legend,
 .hero-selection legend,
+.effect-choice legend,
 .participant-lineup h3 {
   margin: 0 0 0.65rem;
   color: var(--chalk);
@@ -484,6 +487,41 @@ input {
   line-height: 1.55;
 }
 
+.effect-choice .choice-cause {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.65rem;
+  align-items: baseline;
+  margin-top: 0.65rem;
+  font-size: 0.78rem;
+}
+
+.choice-cause strong {
+  color: var(--chalk);
+}
+
+.choice-cause code {
+  max-width: 100%;
+  color: var(--brass);
+  overflow-wrap: anywhere;
+}
+
+.choice-cause-accessible {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.effect-choice fieldset {
+  margin-top: 0.9rem;
+}
+
 .effect-choice ol,
 .effect-history ol {
   display: grid;
@@ -508,12 +546,14 @@ input {
   font-weight: 700;
 }
 
-.hero-options {
+.hero-options,
+.choice-options {
   display: grid;
   border-block: 1px solid var(--brass-quiet);
 }
 
-.hero-option {
+.hero-option,
+.choice-option {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -525,22 +565,26 @@ input {
   cursor: pointer;
 }
 
-.hero-option:last-child {
+.hero-option:last-child,
+.choice-option:last-child {
   border-bottom: 0;
 }
 
-.hero-option input {
+.hero-option input,
+.choice-option input {
   width: 1.1rem;
   height: 1.1rem;
   margin: 0;
   accent-color: var(--brass);
 }
 
-.hero-option span {
+.hero-option span,
+.choice-option span {
   font-weight: 700;
 }
 
-.hero-option small {
+.hero-option small,
+.choice-option small {
   color: var(--ready);
   font-size: 0.78rem;
 }

@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+const MAX_CARD_INSTANCE_ID_LENGTH: usize = 256;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CatalogId(String);
 
@@ -55,8 +57,11 @@ impl CardInstanceId {
     ///
     /// # Errors
     ///
-    /// Returns an error when the identifier is empty or not namespaced.
+    /// Returns an error when the identifier is empty, too long or not namespaced.
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
+        if value.chars().count() > MAX_CARD_INSTANCE_ID_LENGTH {
+            return Err(InvalidId);
+        }
         parse_namespaced_id(value).map(Self)
     }
 

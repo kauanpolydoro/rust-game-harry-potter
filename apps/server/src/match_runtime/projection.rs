@@ -1,7 +1,7 @@
 use game_domain::{
     EffectChangeCause, EffectDie, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
-    EffectResource, EffectZone, GameCommand, GameStatus, InitialGameState, PendingEffectChoiceKind,
-    legal_game_commands,
+    EffectResource, EffectZone, GameCommandType, GameStatus, InitialGameState,
+    PendingEffectChoiceKind, legal_game_commands,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -53,6 +53,8 @@ struct ChoiceSummary {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cause: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     responsible_position: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,7 +176,8 @@ pub(crate) async fn projection_for_participant(
         legal_game_commands(&domain_state, actor_position, &effect_rules)
             .into_iter()
             .map(|command| match command {
-                GameCommand::CompleteDarkArts => "complete_dark_arts".to_owned(),
+                GameCommandType::CompleteDarkArts => "complete_dark_arts".to_owned(),
+                GameCommandType::ResolveChoice => "resolve_choice".to_owned(),
             })
             .collect()
     };
@@ -275,6 +278,7 @@ fn choice_summary(state: &InitialGameState) -> ChoiceSummary {
         return ChoiceSummary {
             status: "none",
             id: None,
+            cause: None,
             responsible_position: None,
             kind: None,
             options: Vec::new(),
@@ -285,6 +289,7 @@ fn choice_summary(state: &InitialGameState) -> ChoiceSummary {
     ChoiceSummary {
         status: "pending",
         id: Some(choice.id.clone()),
+        cause: Some(choice.cause.clone()),
         responsible_position: Some(choice.responsible_position),
         kind: Some(match choice.kind {
             PendingEffectChoiceKind::Effect => "effect",

@@ -2,8 +2,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, GAME_EVENT_VERSION, StoredCommandGame, StoredCommandReceipt, StoredGame,
-    StoredGameEvent, StoredGameStart, StoredRoomActor, StoredRoomParticipant,
+    ApiError, StoredCommandGame, StoredCommandReceipt, StoredGame, StoredGameEvent,
+    StoredGameStart, StoredRoomActor, StoredRoomParticipant,
 };
 use crate::content_catalog::SelectedContent;
 
@@ -18,6 +18,7 @@ pub(super) struct NewGame<'a> {
     pub(super) actor: &'a StoredRoomActor,
     pub(super) content: &'a SelectedContent,
     pub(super) state: &'a game_domain::InitialGameState,
+    pub(super) snapshot_version: u16,
     pub(super) state_digest: &'a str,
     pub(super) snapshot_json: &'a str,
     pub(super) seed: &'a [u8; 32],
@@ -31,8 +32,10 @@ pub(super) struct NewGameCommand<'a> {
     pub(super) command_type: &'a str,
     pub(super) payload_digest: &'a str,
     pub(super) state: &'a game_domain::InitialGameState,
+    pub(super) snapshot_version: u16,
     pub(super) state_digest: &'a str,
     pub(super) snapshot_json: &'a str,
+    pub(super) event_version: u16,
     pub(super) event_type: &'a str,
     pub(super) event_json: &'a str,
 }
@@ -167,7 +170,7 @@ pub(super) async fn persist_game(
     .bind(game.state.content_version())
     .bind(game.state.ruleset_version())
     .bind(
-        i16::try_from(game.state.snapshot_version())
+        i16::try_from(game.snapshot_version)
             .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
     )
     .bind(
@@ -196,7 +199,7 @@ pub(super) async fn persist_game(
         transaction,
         game.id,
         game.state.sequence(),
-        game.state.snapshot_version(),
+        game.snapshot_version,
         game.state_digest,
     )
     .await
@@ -349,7 +352,7 @@ pub(super) async fn persist_game_command(
         transaction,
         command.game_id,
         command.state.sequence(),
-        command.state.snapshot_version(),
+        command.snapshot_version,
         command.state_digest,
     )
     .await?;
@@ -401,6 +404,7 @@ async fn update_game_after_command(
             snapshot = $5::jsonb,
             prng_counter = $6,
             status = $7,
+            snapshot_version = $8,
             last_game_action_at = clock_timestamp(),
             expires_at = clock_timestamp() + INTERVAL '7 days'
         WHERE id = $1
@@ -424,6 +428,10 @@ async fn update_game_after_command(
         game_domain::GameStatus::Lost => "lost",
         game_domain::GameStatus::Won => "won",
     })
+    .bind(
+        i16::try_from(command.snapshot_version)
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
     .fetch_one(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("persist game state after command", error))?;
@@ -456,7 +464,7 @@ async fn insert_game_event(
     .bind(room_id)
     .bind(counters.sequence)
     .bind(
-        i16::try_from(GAME_EVENT_VERSION)
+        i16::try_from(command.event_version)
             .map_err(|error| ApiError::internal_with("append game event", error))?,
     )
     .bind(command.event_type)

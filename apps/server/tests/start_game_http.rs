@@ -35,14 +35,49 @@ struct ReadyRoom {
 }
 
 fn playable_manifest() -> ContentManifest {
-    playable_manifest_variant(false)
+    playable_manifest_variant(None)
 }
 
 fn terminal_manifest() -> ContentManifest {
-    playable_manifest_variant(true)
+    playable_manifest_variant(Some(json!({ "type": "terminal", "outcome": "won" })))
 }
 
-fn playable_manifest_variant(terminal: bool) -> ContentManifest {
+fn each_hero_choice_manifest() -> ContentManifest {
+    playable_manifest_variant(Some(json!({
+        "type": "choice",
+        "audience": "each_hero",
+        "options": [
+            {
+                "type": "apply",
+                "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": { "min": 1, "max": 1 }
+                },
+                "operation": {
+                    "type": "modify_resource",
+                    "resource": "attack",
+                    "amount": 1
+                }
+            },
+            {
+                "type": "apply",
+                "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": { "min": 1, "max": 1 }
+                },
+                "operation": {
+                    "type": "modify_resource",
+                    "resource": "influence",
+                    "amount": 1
+                }
+            }
+        ]
+    })))
+}
+
+fn playable_manifest_variant(effect_override: Option<Value>) -> ContentManifest {
     let entries = (0..171).map(playable_fixture_entry).collect::<Vec<_>>();
     let mut candidate = json!({
         "schema_version": 1,
@@ -128,8 +163,8 @@ fn playable_manifest_variant(terminal: bool) -> ContentManifest {
         }],
         "entries": entries
     });
-    if terminal {
-        candidate["rules"][0]["effect"] = json!({ "type": "terminal", "outcome": "won" });
+    if let Some(effect) = effect_override {
+        candidate["rules"][0]["effect"] = effect;
     }
     import_playable_candidate(&candidate)
 }
@@ -344,6 +379,81 @@ async fn insert_test_event(
     .expect("the official event must be inserted for the integrity test");
 }
 
+fn v3_pairing_payload(event_type: &str) -> Value {
+    let mut payload = json!({
+        "event_version": 3,
+        "type": event_type,
+        "sequence": 1,
+        "state_version": 2,
+        "turn": 1,
+        "actor_position": 1,
+        "effects": [],
+        "effect_stop": "stable",
+        "choice": null,
+        "prng_counter": 0
+    });
+    if event_type == "choice_resolved" {
+        payload["choice_id"] = json!("choice:pairing");
+        payload["choice_cause"] = json!("rule:functional");
+        payload["selected_options"] = json!([]);
+    }
+    payload
+}
+
+async fn assert_v3_choice_payload_rejected(
+    room: &ReadyRoom,
+    game_id: uuid::Uuid,
+    room_id: uuid::Uuid,
+    actor_id: uuid::Uuid,
+    payload: Value,
+    description: &str,
+) {
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the invalid v3 choice transaction must start");
+    sqlx::query("UPDATE games SET sequence = 2, state_version = 3 WHERE id = $1")
+        .bind(game_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("the test cursor must advance inside the transaction");
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_version,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, 2, 3, 'dark_arts_completed', $3, $4, 3, $5)
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(actor_id)
+    .bind(payload)
+    .execute(&mut *transaction)
+    .await
+    .expect_err(description);
+    assert_database_error_code(&error, "23514");
+    assert!(
+        error
+            .to_string()
+            .contains("game event payload must match the v3 codec shape")
+    );
+    transaction
+        .rollback()
+        .await
+        .expect("the rejected v3 choice transaction must roll back");
+}
+
 fn json_request(
     method: &str,
     uri: &str,
@@ -504,6 +614,45 @@ fn command_request(
     )
 }
 
+fn resolve_choice_request(
+    cookie: &str,
+    command_id: uuid::Uuid,
+    expected_state_version: u64,
+    choice_id: &str,
+    selected_options: &[&str],
+) -> Request<Body> {
+    json_request(
+        "POST",
+        "/api/games/current/commands",
+        &json!({
+            "command_id": command_id.to_string(),
+            "expected_state_version": expected_state_version,
+            "type": "resolve_choice",
+            "choice_id": choice_id,
+            "selected_options": selected_options
+        }),
+        Some(cookie),
+        None,
+    )
+}
+
+async fn command_result(
+    app: &axum::Router,
+    cookie: &str,
+    command_id: uuid::Uuid,
+) -> Response<Body> {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/games/current/commands/{command_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("the command result request must be valid"),
+        )
+        .await
+        .expect("the command result lookup must receive a response")
+}
+
 async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
     let response = room
         .app
@@ -518,6 +667,83 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
         .expect("game start must receive a response");
     assert_eq!(response.status(), StatusCode::CREATED);
     response_json(response).await
+}
+
+async fn authoritative_command_state(room: &ReadyRoom) -> (i64, i64, i64, i64, String) {
+    sqlx::query_as::<_, (i64, i64, i64, i64, String)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            (SELECT count(*) FROM game_events WHERE game_events.game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_command_receipts.game_id = games.id),
+            games.expires_at::text
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the authoritative command state must be queryable")
+}
+
+async fn assert_choice_codec_versions(room: &ReadyRoom) {
+    let versions = sqlx::query_as::<_, (i16, i16, i16)>(
+        r"
+        SELECT
+            games.snapshot_version,
+            first_event.event_version,
+            second_event.event_version
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        JOIN game_events AS first_event
+          ON first_event.game_id = games.id
+         AND first_event.sequence = 1
+        JOIN game_events AS second_event
+          ON second_event.game_id = games.id
+         AND second_event.sequence = 2
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the promoted Snapshot and v3 events must be queryable");
+    assert_eq!(versions, (2, 3, 3));
+}
+
+async fn assert_winning_choice_artifacts(room: &ReadyRoom, winning_command_id: uuid::Uuid) {
+    let stored = sqlx::query_as::<_, (i64, i64, i64, i64, uuid::Uuid, String, String)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            (SELECT count(*) FROM game_events WHERE game_id = games.id),
+            (SELECT count(*) FROM game_command_receipts WHERE game_id = games.id),
+            events.command_id,
+            events.event_type,
+            receipts.command_type
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        JOIN game_events AS events
+          ON events.game_id = games.id
+         AND events.sequence = 2
+        JOIN game_command_receipts AS receipts
+          ON receipts.game_id = events.game_id
+         AND receipts.command_id = events.command_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the winning choice artifacts must remain paired");
+    assert_eq!((stored.0, stored.1, stored.2, stored.3), (3, 2, 2, 2));
+    assert_eq!(stored.4, winning_command_id);
+    assert_eq!(stored.5, "choice_resolved");
+    assert_eq!(stored.6, "resolve_choice");
 }
 
 fn realtime_path(projection: &Value) -> String {
@@ -1069,9 +1295,24 @@ async fn sealed_room_rejects_entry_hero_readiness_and_position_changes() {
 }
 
 async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration: &str) {
-    let stored =
-        sqlx::query_as::<_, (i64, i64, i64, String, String, String, i64, i64, bool, bool)>(
-            r"
+    let stored = sqlx::query_as::<
+        _,
+        (
+            i64,
+            i64,
+            i64,
+            String,
+            String,
+            String,
+            i64,
+            i64,
+            bool,
+            bool,
+            i16,
+            i16,
+        ),
+    >(
+        r"
             SELECT
                 games.state_version,
                 games.sequence,
@@ -1082,7 +1323,9 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
                 receipts.accepted_state_version,
                 receipts.accepted_sequence,
                 games.expires_at = receipts.expires_at,
-                games.expires_at > $2::timestamptz
+                games.expires_at > $2::timestamptz,
+                games.snapshot_version,
+                events.event_version
             FROM games
             JOIN rooms ON rooms.id = games.room_id
             JOIN game_events AS events ON events.game_id = games.id
@@ -1091,12 +1334,12 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
              AND receipts.command_id = events.command_id
             WHERE rooms.code = $1
             ",
-        )
-        .bind(&room.room_code)
-        .bind(initial_expiration)
-        .fetch_one(&room.database)
-        .await
-        .expect("every committed command artifact must be queryable together");
+    )
+    .bind(&room.room_code)
+    .bind(initial_expiration)
+    .fetch_one(&room.database)
+    .await
+    .expect("every committed command artifact must be queryable together");
     assert_eq!(stored.0, 2);
     assert_eq!(stored.1, 1);
     assert_eq!(stored.2, 1);
@@ -1105,8 +1348,11 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     assert_eq!(stored.7, 1);
     assert!(stored.8, "the receipt and game must share one expiration");
     assert!(stored.9, "an accepted action must renew retention");
+    assert_eq!(stored.10, 1);
+    assert_eq!(stored.11, 2);
     let snapshot: Value = serde_json::from_str(&stored.3).expect("snapshot must be JSON");
     let event: Value = serde_json::from_str(&stored.5).expect("event must be JSON");
+    assert_eq!(snapshot["snapshot_version"], 1);
     assert_eq!(snapshot["state_version"], 2);
     assert_eq!(snapshot["sequence"], 1);
     assert_eq!(snapshot["turn"]["phase"], "hero_action");
@@ -1235,6 +1481,201 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
         recovered["projection"]["snapshot"],
         accepted["projection"]["snapshot"]
     );
+}
+
+#[tokio::test]
+async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command_artifacts() {
+    let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    start_ready_game(&room, "each-hero-choice-start").await;
+
+    let complete_response = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the complete Dark Arts command must receive a response");
+    assert_eq!(complete_response.status(), StatusCode::OK);
+    let completed = response_json(complete_response).await;
+    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 2);
+    assert_eq!(completed["projection"]["snapshot"]["state_version"], 2);
+    assert_eq!(completed["projection"]["snapshot"]["sequence"], 1);
+    assert_eq!(completed["projection"]["turn"]["active_position"], 1);
+    assert_eq!(completed["projection"]["choice"]["status"], "pending");
+    assert_eq!(
+        completed["projection"]["choice"]["cause"],
+        "rule:functional"
+    );
+    assert_eq!(completed["projection"]["choice"]["responsible_position"], 1);
+    assert_eq!(
+        completed["projection"]["choice"]["options"],
+        json!(["option:1", "option:2"])
+    );
+    assert_eq!(
+        completed["projection"]["legal_actions"],
+        json!(["resolve_choice"])
+    );
+    let choice_id = completed["projection"]["choice"]["id"]
+        .as_str()
+        .expect("the global choice ID must be present")
+        .to_owned();
+    let before_rejection = authoritative_command_state(&room).await;
+    assert_eq!(
+        (
+            before_rejection.0,
+            before_rejection.1,
+            before_rejection.2,
+            before_rejection.3,
+        ),
+        (2, 1, 1, 1)
+    );
+
+    let rejected_command_id = uuid::Uuid::new_v4();
+    let rejected_response = room
+        .app
+        .clone()
+        .oneshot(resolve_choice_request(
+            &room.guest_cookie,
+            rejected_command_id,
+            2,
+            &choice_id,
+            &["option:1"],
+        ))
+        .await
+        .expect("the unassigned choice command must receive a response");
+    assert_eq!(rejected_response.status(), StatusCode::FORBIDDEN);
+    let rejected = response_json(rejected_response).await;
+    assert_eq!(rejected["error"]["code"], "CHOICE_NOT_ASSIGNED");
+    assert_eq!(rejected["error"]["category"], "authorization");
+    assert_eq!(rejected["error"]["message_key"], "game.choice.not_assigned");
+    assert_eq!(authoritative_command_state(&room).await, before_rejection);
+
+    let missing_receipt = command_result(&room.app, &room.guest_cookie, rejected_command_id).await;
+    assert_eq!(missing_receipt.status(), StatusCode::NOT_FOUND);
+
+    let resolve_response = room
+        .app
+        .clone()
+        .oneshot(resolve_choice_request(
+            &room.host_cookie,
+            uuid::Uuid::new_v4(),
+            2,
+            &choice_id,
+            &["option:1"],
+        ))
+        .await
+        .expect("the assigned choice command must receive a response");
+    assert_eq!(resolve_response.status(), StatusCode::OK);
+    let resolved = response_json(resolve_response).await;
+    assert_eq!(resolved["receipt"]["type"], "resolve_choice");
+    assert_eq!(resolved["receipt"]["accepted_state_version"], 3);
+    assert_eq!(resolved["receipt"]["accepted_sequence"], 2);
+    assert_eq!(resolved["projection"]["snapshot"]["state_version"], 3);
+    assert_eq!(resolved["projection"]["snapshot"]["sequence"], 2);
+    assert_eq!(resolved["projection"]["turn"]["active_position"], 1);
+    assert_eq!(resolved["projection"]["choice"]["status"], "pending");
+    assert_eq!(resolved["projection"]["choice"]["cause"], "rule:functional");
+    assert_eq!(resolved["projection"]["choice"]["responsible_position"], 2);
+    assert_eq!(
+        resolved["projection"]["choice"]["options"],
+        json!(["option:1", "option:2"])
+    );
+    assert_eq!(resolved["projection"]["legal_actions"], json!([]));
+
+    assert_choice_codec_versions(&room).await;
+}
+
+#[tokio::test]
+async fn two_sessions_for_the_responsible_participant_accept_one_choice_resolution() {
+    let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    start_ready_game(&room, "choice-session-race-start").await;
+    let completed = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the choice-producing command must receive a response");
+    assert_eq!(completed.status(), StatusCode::OK);
+    let completed = response_json(completed).await;
+    let choice_id = completed["projection"]["choice"]["id"]
+        .as_str()
+        .expect("the first participant choice must be present")
+        .to_owned();
+    let second_host_cookie = additional_session_for_participant(&room, "host").await;
+    let first_command_id = uuid::Uuid::new_v4();
+    let second_command_id = uuid::Uuid::new_v4();
+    let barrier = Arc::new(Barrier::new(2));
+
+    let first = {
+        let app = room.app.clone();
+        let cookie = room.host_cookie.clone();
+        let barrier = Arc::clone(&barrier);
+        let choice_id = choice_id.clone();
+        async move {
+            barrier.wait().await;
+            app.oneshot(resolve_choice_request(
+                &cookie,
+                first_command_id,
+                2,
+                &choice_id,
+                &["option:1"],
+            ))
+            .await
+            .expect("the first session must receive a response")
+        }
+    };
+    let second = {
+        let app = room.app.clone();
+        let cookie = second_host_cookie.clone();
+        let barrier = Arc::clone(&barrier);
+        async move {
+            barrier.wait().await;
+            app.oneshot(resolve_choice_request(
+                &cookie,
+                second_command_id,
+                2,
+                &choice_id,
+                &["option:1"],
+            ))
+            .await
+            .expect("the second session must receive a response")
+        }
+    };
+    let (first_response, second_response) = tokio::join!(first, second);
+    let (winning_command_id, losing_command_id, accepted_response, stale_response) =
+        match (first_response.status(), second_response.status()) {
+            (StatusCode::OK, StatusCode::CONFLICT) => (
+                first_command_id,
+                second_command_id,
+                first_response,
+                second_response,
+            ),
+            (StatusCode::CONFLICT, StatusCode::OK) => (
+                second_command_id,
+                first_command_id,
+                second_response,
+                first_response,
+            ),
+            statuses => panic!("expected one accepted and one stale response, got {statuses:?}"),
+        };
+    let accepted = response_json(accepted_response).await;
+    assert_eq!(
+        response_json(stale_response).await["error"]["code"],
+        "STALE_STATE_VERSION"
+    );
+
+    let recovered = command_result(&room.app, &second_host_cookie, winning_command_id).await;
+    assert_eq!(recovered.status(), StatusCode::OK);
+    let recovered = response_json(recovered).await;
+    assert_eq!(recovered["receipt"], accepted["receipt"]);
+    assert_eq!(recovered["projection"]["snapshot"]["state_version"], 3);
+    assert_eq!(
+        command_result(&room.app, &second_host_cookie, losing_command_id)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    assert_winning_choice_artifacts(&room, winning_command_id).await;
 }
 
 #[tokio::test]
@@ -1693,6 +2134,66 @@ async fn a_v2_event_rejects_an_incomplete_closed_effect_outcome() {
 }
 
 #[tokio::test]
+async fn v3_choice_payload_limits_match_the_domain_decoder() {
+    let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    start_ready_game(&room, "event-v3-cursor-limit-start").await;
+    let response = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the choice-producing command must receive a response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let (game_id, room_id, actor_id, payload) =
+        sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid, String)>(
+            r"
+        SELECT games.id, games.room_id, events.actor_participant_id, events.payload::text
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        JOIN game_events AS events
+          ON events.game_id = games.id
+         AND events.sequence = 1
+        WHERE rooms.code = $1
+        ",
+        )
+        .bind(&room.room_code)
+        .fetch_one(&room.database)
+        .await
+        .expect("the persisted v3 choice event must be queryable");
+    let mut base: Value =
+        serde_json::from_str(&payload).expect("the persisted choice event must be JSON");
+    base["sequence"] = json!(2);
+    base["state_version"] = json!(3);
+    let mut oversized_path = base.clone();
+    oversized_path["choice"]["continuation"]["choice_cursor"]["path"] =
+        Value::Array(vec![json!({ "type": "condition_then" }); 4097]);
+    let mut oversized_option = base.clone();
+    oversized_option["choice"]["options"][0] = json!("x".repeat(257));
+    let mut invalid_effect = base.clone();
+    invalid_effect["choice"]["min"] = json!(0);
+    let mut target_selects_all = base.clone();
+    target_selects_all["choice"]["kind"] = json!("target");
+    target_selects_all["choice"]["min"] = json!(0);
+    target_selects_all["choice"]["max"] = json!(2);
+    let mut target_selects_none = base;
+    target_selects_none["choice"]["kind"] = json!("target");
+    target_selects_none["choice"]["min"] = json!(0);
+    target_selects_none["choice"]["max"] = json!(0);
+
+    for (description, payload) in [
+        ("oversized cursor path", oversized_path),
+        ("oversized choice option", oversized_option),
+        ("effect choice cardinality", invalid_effect),
+        ("target choice selecting every option", target_selects_all),
+        ("target choice with a zero maximum", target_selects_none),
+    ] {
+        assert_v3_choice_payload_rejected(&room, game_id, room_id, actor_id, payload, description)
+            .await;
+    }
+}
+
+#[tokio::test]
 async fn a_game_snapshot_cannot_advance_without_official_history() {
     let room = ready_room().await;
     start_ready_game(&room, "orphan-snapshot-start").await;
@@ -1998,6 +2499,111 @@ async fn a_receipt_must_identify_the_actor_and_version_of_its_event() {
         .rollback()
         .await
         .expect("the receipt integrity transaction must roll back");
+}
+
+#[tokio::test]
+async fn v3_events_require_the_matching_command_type_at_commit() {
+    let room = ready_room().await;
+    start_ready_game(&room, "event-command-pair-start").await;
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            SELECT games.id, games.room_id, games.started_by_participant_id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the pairing test game must exist");
+
+    for (event_type, wrong_command_type) in [
+        ("dark_arts_completed", "resolve_choice"),
+        ("choice_resolved", "complete_dark_arts"),
+    ] {
+        let payload = v3_pairing_payload(event_type);
+        let command_id = uuid::Uuid::new_v4();
+        let mut transaction = room
+            .database
+            .begin()
+            .await
+            .expect("the event-command pairing transaction must start");
+        sqlx::query("UPDATE games SET sequence = 1, state_version = 2 WHERE id = $1")
+            .bind(game_id)
+            .execute(&mut *transaction)
+            .await
+            .expect("the pairing test cursor must advance inside the transaction");
+        sqlx::query(
+            r"
+            INSERT INTO game_events (
+                game_id,
+                room_id,
+                sequence,
+                event_version,
+                event_type,
+                command_id,
+                actor_participant_id,
+                state_version,
+                payload
+            )
+            VALUES ($1, $2, 1, 3, $3, $4, $5, 2, $6)
+            ",
+        )
+        .bind(game_id)
+        .bind(room_id)
+        .bind(event_type)
+        .bind(command_id)
+        .bind(actor_id)
+        .bind(payload)
+        .execute(&mut *transaction)
+        .await
+        .expect("the individually valid v3 event must reach the deferred pairing guard");
+        sqlx::query(
+            r"
+            INSERT INTO game_command_receipts (
+                game_id,
+                room_id,
+                command_id,
+                actor_participant_id,
+                command_type,
+                expected_state_version,
+                payload_digest,
+                accepted_state_version,
+                accepted_sequence,
+                expires_at
+            )
+            SELECT
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                1,
+                'blake3:0000000000000000000000000000000000000000000000000000000000000000',
+                2,
+                1,
+                expires_at
+            FROM games
+            WHERE id = $1
+            ",
+        )
+        .bind(game_id)
+        .bind(room_id)
+        .bind(command_id)
+        .bind(actor_id)
+        .bind(wrong_command_type)
+        .execute(&mut *transaction)
+        .await
+        .expect("the individually valid receipt must reach the deferred pairing guard");
+
+        let error = transaction
+            .commit()
+            .await
+            .expect_err("a v3 event cannot commit with the other command type");
+        assert_database_error_code(&error, "23514");
+        assert!(error.to_string().contains("receipt"));
+    }
 }
 
 #[tokio::test]
@@ -2766,6 +3372,44 @@ fn participant_presence(message: &Value, position: usize) -> &str {
         .expect("the participant presence must be present")
 }
 
+fn assert_public_choice_resolution_event(
+    serialized: &str,
+    first_choice_id: &str,
+    expected_choice: &Value,
+) {
+    let event_batch: Value =
+        serde_json::from_str(serialized).expect("the choice event batch must be JSON");
+    let event = &event_batch["events"][0];
+    assert_eq!(event["event_version"], 3);
+    assert_eq!(event["type"], "choice_resolved");
+    assert_eq!(event["choice_id"], first_choice_id);
+    assert_eq!(event["choice_cause"], "rule:functional");
+    assert_eq!(event["selected_options"], json!(["option:1"]));
+    assert_eq!(event["effect_stop"], "choice");
+    assert_eq!(event["choice"], *expected_choice);
+    assert!(event.get("command_id").is_none());
+    assert_no_private_choice_continuation(serialized);
+}
+
+fn assert_reconnected_choice_snapshot(serialized: &str, expected_choice: &Value) {
+    let snapshot: Value =
+        serde_json::from_str(serialized).expect("the reconnect Snapshot must be JSON");
+    assert_eq!(snapshot["type"], "snapshot");
+    assert_eq!(snapshot["projection"]["choice"], *expected_choice);
+    assert_eq!(
+        snapshot["projection"]["legal_actions"],
+        json!(["resolve_choice"])
+    );
+    assert_eq!(snapshot["projection"]["turn"]["active_position"], 1);
+    assert_no_private_choice_continuation(serialized);
+}
+
+fn assert_no_private_choice_continuation(serialized: &str) {
+    for private_field in ["continuation", "choice_cursor", "queue", "steps_completed"] {
+        assert!(!serialized.contains(private_field));
+    }
+}
+
 async fn current_official_state(room: &ReadyRoom) -> (i64, i64, String, i64) {
     sqlx::query_as::<_, (i64, i64, String, i64)>(
         r"
@@ -3080,6 +3724,117 @@ async fn heartbeat_presence_blocks_only_the_required_offline_participant_without
     assert!(automatic.get("required_participant_position").is_none());
     assert_eq!(participant_presence(&automatic, 1), "offline");
     assert_eq!(automatic["blocked"], false);
+    server.abort();
+}
+
+#[tokio::test]
+async fn responsible_choice_survives_offline_and_reconnect_without_mutating_the_game() {
+    let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    start_ready_game(&room, "choice-presence-start").await;
+    let completed = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the choice-producing command must receive a response");
+    assert_eq!(completed.status(), StatusCode::OK);
+    let completed = response_json(completed).await;
+    let first_choice_id = completed["projection"]["choice"]["id"]
+        .as_str()
+        .expect("the first participant choice must be present")
+        .to_owned();
+    let (address, server) = start_network_server(room.app.clone()).await;
+
+    let mut host_socket = connect_current_game(address, &room.host_cookie).await;
+    let host_initial = host_socket.read_presence().await;
+    assert_eq!(host_initial["required_participant_position"], 1);
+    assert_eq!(host_initial["blocked"], false);
+    assert_eq!(participant_presence(&host_initial, 2), "offline");
+
+    let mut guest_socket = connect_current_game(address, &room.guest_cookie).await;
+    let guest_initial = guest_socket.read_presence().await;
+    assert_eq!(guest_initial["required_participant_position"], 1);
+    assert_eq!(guest_initial["blocked"], false);
+    let host_sees_guest = host_socket.read_presence().await;
+    assert_eq!(participant_presence(&host_sees_guest, 2), "online");
+
+    let resolution_command_id = uuid::Uuid::new_v4();
+    let resolved = room
+        .app
+        .clone()
+        .oneshot(resolve_choice_request(
+            &room.host_cookie,
+            resolution_command_id,
+            2,
+            &first_choice_id,
+            &["option:1"],
+        ))
+        .await
+        .expect("the first participant must resolve their choice");
+    assert_eq!(resolved.status(), StatusCode::OK);
+    let resolved = response_json(resolved).await;
+    let expected_choice = &resolved["projection"]["choice"];
+    assert_eq!(expected_choice["responsible_position"], 2);
+
+    let serialized_event = tokio::time::timeout(Duration::from_secs(2), guest_socket.read_text())
+        .await
+        .expect("the choice resolution event must reach the other participant");
+    assert_public_choice_resolution_event(&serialized_event, &first_choice_id, expected_choice);
+
+    let required_online = host_socket.read_presence().await;
+    assert_eq!(required_online["required_participant_position"], 2);
+    assert_eq!(participant_presence(&required_online, 2), "online");
+    assert_eq!(required_online["blocked"], false);
+    let before_disconnect = authoritative_command_state(&room).await;
+
+    drop(guest_socket);
+    let reconnecting = tokio::time::timeout(Duration::from_secs(2), host_socket.read_presence())
+        .await
+        .expect("disconnect must publish reconnecting presence");
+    assert_eq!(reconnecting["required_participant_position"], 2);
+    assert_eq!(participant_presence(&reconnecting, 2), "reconnecting");
+    assert_eq!(reconnecting["blocked"], true);
+
+    sqlx::query(
+        r"
+        UPDATE game_realtime_connections AS connections
+        SET connected_at = clock_timestamp() - INTERVAL '62 seconds',
+            last_heartbeat_at = clock_timestamp() - INTERVAL '61 seconds'
+        FROM participants, rooms
+        WHERE connections.participant_id = participants.id
+          AND participants.room_id = rooms.id
+          AND rooms.code = $1
+          AND participants.position = 2
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&room.database)
+    .await
+    .expect("the responsible participant heartbeat must be ageable");
+    let offline = tokio::time::timeout(Duration::from_secs(7), host_socket.read_presence())
+        .await
+        .expect("presence reconciliation must publish the responsible participant offline");
+    assert_eq!(offline["required_participant_position"], 2);
+    assert_eq!(participant_presence(&offline, 2), "offline");
+    assert_eq!(offline["blocked"], true);
+    assert_eq!(authoritative_command_state(&room).await, before_disconnect);
+
+    let (status, _, mut reconnected_socket) = websocket_handshake(
+        address,
+        "/api/games/current/events",
+        Some(&room.guest_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v2"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let reconnected_snapshot = reconnected_socket.read_text().await;
+    assert_reconnected_choice_snapshot(&reconnected_snapshot, expected_choice);
+    let online_again = reconnected_socket.read_presence().await;
+    assert_eq!(online_again["required_participant_position"], 2);
+    assert_eq!(participant_presence(&online_again, 2), "online");
+    assert_eq!(online_again["blocked"], false);
+    assert_eq!(authoritative_command_state(&room).await, before_disconnect);
     server.abort();
 }
 

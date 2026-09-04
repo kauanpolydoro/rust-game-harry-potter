@@ -36,6 +36,8 @@ pub enum Effect {
         operation: Operation,
     },
     Choice {
+        #[serde(default, skip_serializing_if = "EffectChoiceAudience::is_actor")]
+        audience: EffectChoiceAudience,
         options: Vec<Self>,
     },
     Condition {
@@ -62,6 +64,24 @@ pub enum Effect {
     Terminal {
         outcome: GameOutcome,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectChoiceAudience {
+    #[default]
+    Actor,
+    EachHero,
+}
+
+impl EffectChoiceAudience {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde skip_serializing_if requires a shared reference"
+    )]
+    fn is_actor(&self) -> bool {
+        *self == Self::Actor
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

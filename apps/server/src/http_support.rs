@@ -79,6 +79,8 @@ enum ErrorCode {
     StaleStateVersion,
     #[serde(rename = "GAME_ACTION_NOT_ALLOWED")]
     GameActionNotAllowed,
+    #[serde(rename = "CHOICE_NOT_ASSIGNED")]
+    ChoiceNotAssigned,
     #[serde(rename = "GAME_EXPIRED")]
     GameExpired,
     #[serde(rename = "COMMAND_NOT_FOUND")]
@@ -156,6 +158,8 @@ enum MessageKey {
     StaleStateVersion,
     #[serde(rename = "game.action.not_allowed")]
     GameActionNotAllowed,
+    #[serde(rename = "game.choice.not_assigned")]
+    ChoiceNotAssigned,
     #[serde(rename = "game.expired")]
     GameExpired,
     #[serde(rename = "game.command.not_found")]
@@ -385,6 +389,16 @@ impl ApiError {
         Self::conflict(
             ErrorCode::GameActionNotAllowed,
             MessageKey::GameActionNotAllowed,
+        )
+    }
+
+    pub(crate) const fn choice_not_assigned() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            ErrorCode::ChoiceNotAssigned,
+            ErrorCategory::Authorization,
+            RetryPolicy::AfterCorrection,
+            MessageKey::ChoiceNotAssigned,
         )
     }
 

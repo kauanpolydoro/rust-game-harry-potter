@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   isErrorResponse,
+  isExecuteGameCommandRequest,
   isGameProjectionResponse,
+  isRealtimeGameEvent,
   isRealtimePresenceMessage,
   isRecoveredLobbyResponse,
   isRecoveryReplacementRequiredResponse,
@@ -56,6 +58,190 @@ function projection() {
 }
 
 describe('generated identity contract guards', () => {
+  it('discriminates choice commands, choice summaries and their official events', () => {
+    const commandId = 'dc8213d3-2941-4ef0-9ce8-b97cc6623410'
+    const choice = {
+      cause: 'rule:functional',
+      id: 'rule:functional:effect:0',
+      kind: 'effect',
+      max: 1,
+      min: 1,
+      options: ['option:1', 'option:2'],
+      responsible_position: 2,
+      status: 'pending',
+    }
+    const command = {
+      choice_id: choice.id,
+      command_id: commandId,
+      expected_state_version: 2,
+      selected_options: ['option:2'],
+      type: 'resolve_choice',
+    }
+    const darkArtsEvent = {
+      actor_position: 1,
+      effect_stop: 'stable',
+      effects: [],
+      event_version: 3,
+      prng_counter: 0,
+      sequence: 1,
+      state_version: 2,
+      turn: 1,
+      type: 'dark_arts_completed',
+    }
+    const event = {
+      actor_position: 2,
+      choice_cause: choice.cause,
+      choice_id: choice.id,
+      command_id: commandId,
+      effect_stop: 'stable',
+      effects: [],
+      event_version: 3,
+      prng_counter: 0,
+      selected_options: ['option:2'],
+      sequence: 2,
+      state_version: 3,
+      turn: 1,
+      type: 'choice_resolved',
+    }
+
+    expect(isExecuteGameCommandRequest(command)).toBe(true)
+    expect(isExecuteGameCommandRequest({ ...command, selected_options: [] })).toBe(true)
+    expect(
+      isExecuteGameCommandRequest({
+        ...command,
+        type: 'complete_dark_arts',
+      }),
+    ).toBe(false)
+    expect(isExecuteGameCommandRequest({ ...command, choice_id: undefined })).toBe(false)
+    expect(isRealtimeGameEvent(event)).toBe(true)
+    expect(isRealtimeGameEvent({ ...event, event_version: 2 })).toBe(false)
+    expect(isRealtimeGameEvent(darkArtsEvent)).toBe(true)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice,
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(true)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, cause: undefined },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, min: 2, max: 1 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, max: 3 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, min: 0, max: 0 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, max: 2 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, kind: 'target' },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(true)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, kind: 'target', min: 0, max: 0 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, kind: 'target', max: choice.options.length },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, options: ['o'.repeat(257), 'option:2'] },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(isRealtimeGameEvent({ ...event, effect_stop: 'choice' })).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...event,
+        choice,
+        effect_stop: 'stable',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...event,
+        choice,
+        effect_stop: 'terminal',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...event,
+        choice: { ...choice, kind: 'target' },
+        effect_stop: 'choice',
+      }),
+    ).toBe(true)
+    expect(
+      isRealtimeGameEvent({ ...darkArtsEvent, effect_stop: 'choice' }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'stable',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'terminal',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'choice',
+      }),
+    ).toBe(true)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'choice',
+        event_version: 2,
+      }),
+    ).toBe(true)
+  })
+
   it('validates every field in the public error envelope', () => {
     const error = {
       error: {

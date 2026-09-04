@@ -332,6 +332,7 @@ class GameSyncConnection {
     if (this.listeningForBrowserState || typeof window === 'undefined') {
       return
     }
+    window.addEventListener('offline', this.handleOffline)
     window.addEventListener('online', this.handleOnline)
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.listeningForBrowserState = true
@@ -341,9 +342,20 @@ class GameSyncConnection {
     if (!this.listeningForBrowserState || typeof window === 'undefined') {
       return
     }
+    window.removeEventListener('offline', this.handleOffline)
     window.removeEventListener('online', this.handleOnline)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     this.listeningForBrowserState = false
+  }
+
+  private readonly handleOffline = (): void => {
+    if (!this.activeGameId || this.isOnline()) {
+      return
+    }
+    this.clearReconnectTimer()
+    this.callbacks.discardAnimations()
+    this.closeCurrentSocket()
+    this.callbacks.updateStatus('failed')
   }
 
   private readonly handleOnline = (): void => {
@@ -523,7 +535,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       cursor.value = message.cursor
       digest.value = message.projection.snapshot.digest
       snapshotVersion.value = message.projection.snapshot.snapshot_version
-      roomAccess.replaceGameProjection(message.projection)
+      roomAccess.advanceGameProjection(message.projection)
       connection.markSynchronized()
       return
     }

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::codec::{command_domain_state, decode_persisted_event, decode_persisted_snapshot};
 use super::{
-    GameProjectionResponse, PersistedEffectChoice, PersistedEffectOutcome, StoredGameEvent,
+    GameProjectionResponse, PersistedEffectOutcome, PersistedEventChoice, StoredGameEvent,
     postgres, projection_for_participant,
 };
 use crate::{
@@ -150,13 +150,31 @@ struct RealtimeGameEvent {
     state_version: i64,
     turn: u32,
     actor_position: i16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice_cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected_options: Option<Vec<String>>,
     effects: Vec<PersistedEffectOutcome>,
     effect_stop: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    choice: Option<PersistedEffectChoice>,
+    choice: Option<RealtimeChoiceSummary>,
     prng_counter: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     command_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct RealtimeChoiceSummary {
+    status: &'static str,
+    id: String,
+    cause: String,
+    responsible_position: u8,
+    kind: String,
+    options: Vec<String>,
+    min: u16,
+    max: u16,
 }
 
 struct RealtimePosition {
@@ -1070,31 +1088,92 @@ fn realtime_event(
         && i64::try_from(payload.sequence).ok() == Some(stored.sequence)
         && i64::try_from(payload.state_version).ok() == Some(stored.state_version)
         && i16::from(payload.actor_position) == stored.actor_position;
-    if !metadata_matches || stored.event_type != "dark_arts_completed" {
+    if !metadata_matches {
         return Err(ApiError::internal());
     }
+    let event_type = match (payload.event_version, stored.event_type.as_str()) {
+        (1..=3, "dark_arts_completed") => "dark_arts_completed",
+        (3, "choice_resolved") => "choice_resolved",
+        _ => return Err(ApiError::internal()),
+    };
+    let choice = payload
+        .choice
+        .as_ref()
+        .map(realtime_choice_summary)
+        .transpose()?;
     if !matches!(
         payload.effect_stop.as_str(),
         "stable" | "choice" | "terminal"
-    ) || (payload.effect_stop == "choice") != payload.choice.is_some()
+    ) || (payload.effect_stop == "choice") != choice.is_some()
     {
         return Err(ApiError::internal());
     }
 
     Ok(RealtimeGameEvent {
         event_version: stored.event_version,
-        event_type: "dark_arts_completed",
+        event_type,
         sequence: stored.sequence,
         state_version: stored.state_version,
         turn: payload.turn,
         actor_position: stored.actor_position,
+        choice_id: payload.choice_id,
+        choice_cause: payload.choice_cause,
+        selected_options: payload.selected_options,
         effects: payload.effects,
         effect_stop: payload.effect_stop,
-        choice: payload.choice,
+        choice,
         prng_counter: payload.prng_counter,
         command_id: (stored.actor_participant_id == participant_id)
             .then(|| stored.command_id.to_string()),
     })
+}
+
+fn realtime_choice_summary(
+    choice: &PersistedEventChoice,
+) -> Result<RealtimeChoiceSummary, ApiError> {
+    let (id, cause, responsible_position, kind, options, min, max) = match choice {
+        PersistedEventChoice::Current(choice) => (
+            choice.id.clone(),
+            choice.cause.clone(),
+            choice.responsible_position,
+            choice.kind.clone(),
+            choice.options.clone(),
+            choice.min,
+            choice.max,
+        ),
+        PersistedEventChoice::Legacy(choice) => (
+            choice.id.clone(),
+            legacy_choice_cause(&choice.id, &choice.kind)?,
+            choice.responsible_position,
+            choice.kind.clone(),
+            choice.options.clone(),
+            choice.min,
+            choice.max,
+        ),
+    };
+    Ok(RealtimeChoiceSummary {
+        status: "pending",
+        id,
+        cause,
+        responsible_position,
+        kind,
+        options,
+        min,
+        max,
+    })
+}
+
+fn legacy_choice_cause(id: &str, kind: &str) -> Result<String, ApiError> {
+    let marker = match kind {
+        "effect" => ":effect:",
+        "target" => ":target:",
+        _ => return Err(ApiError::internal()),
+    };
+    let (cause, index) = id.rsplit_once(marker).ok_or_else(ApiError::internal)?;
+    if cause.is_empty() || index.parse::<usize>().is_err() {
+        return Err(ApiError::internal());
+    }
+    Ok(cause.to_owned())
 }
 
 fn events_are_contiguous(

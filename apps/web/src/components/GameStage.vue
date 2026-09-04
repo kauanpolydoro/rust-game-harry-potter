@@ -7,6 +7,15 @@ import { useGameSyncStore } from '../stores/gameSync'
 import { useRoomAccessStore } from '../stores/roomAccess'
 import RecoveryCredential from './RecoveryCredential.vue'
 
+const props = defineProps<{
+  choiceInputDisabled: boolean
+  isChoiceResponsible: boolean
+  selectedChoiceOptions: string[]
+}>()
+const emit = defineEmits<{
+  'update:selectedChoiceOptions': [value: string[]]
+}>()
+
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
@@ -42,6 +51,8 @@ const commandError = computed(() => {
       return 'O estado oficial avançou. Atualize a partida e decida novamente.'
     case 'GAME_ACTION_NOT_ALLOWED':
       return 'Esta ação não está disponível para você no estado oficial atual.'
+    case 'CHOICE_NOT_ASSIGNED':
+      return 'A escolha oficial pertence a outro participante. Aguarde a sincronização da partida antes de tentar novamente.'
     case 'GAME_EXPIRED':
       return 'A partida expirou e não aceita novas ações.'
     case null:
@@ -71,11 +82,16 @@ const realtimeStatus = computed(() => {
   }
 })
 
-const pendingChoiceOwner = computed(() =>
-  game.value?.participants.find(
-    (participant) => participant.position === game.value?.choice.responsible_position,
-  ),
-)
+const pendingChoiceOwner = computed(() => {
+  const currentGame = game.value
+  const choice = currentGame?.choice
+  if (!currentGame || choice?.status !== 'pending') {
+    return undefined
+  }
+  return currentGame.participants.find(
+    (participant) => participant.position === choice.responsible_position,
+  )
+})
 
 function formatExpiration(value: string): string {
   const expiration = new Date(value)
@@ -157,13 +173,74 @@ function zoneLabel(zone?: string): string {
   }
 }
 
-function choiceOptionLabel(option: string): string {
+function choiceOptionParticipant(option: string) {
   const heroPosition = /^hero:(\d+)$/.exec(option)?.[1]
   if (heroPosition !== undefined) {
-    return participantName(Number(heroPosition))
+    return game.value?.participants.find(
+      (participant) => participant.position === Number(heroPosition),
+    )
+  }
+  return undefined
+}
+
+function choiceOptionLabel(option: string): string {
+  const participant = choiceOptionParticipant(option)
+  if (participant) {
+    return participant.display_name
   }
   const optionNumber = /^option:(\d+)$/.exec(option)?.[1]
   return optionNumber === undefined ? option : `Opção ${optionNumber}`
+}
+
+function choiceOptionHeroLabel(option: string): string | null {
+  return choiceOptionParticipant(option)?.hero.name ?? null
+}
+
+function choiceSelectionLegend(minimum: number, maximum: number): string {
+  if (minimum === maximum) {
+    return `Selecione ${minimum} ${minimum === 1 ? 'opção' : 'opções'}`
+  }
+  if (minimum === 0) {
+    return `Selecione até ${maximum} ${maximum === 1 ? 'opção' : 'opções'}`
+  }
+  return `Selecione de ${minimum} a ${maximum} opções`
+}
+
+function choiceOptionAtLimit(option: string): boolean {
+  const choice = game.value?.choice
+  if (
+    choice?.status !== 'pending' ||
+    (choice.min === 1 && choice.max === 1) ||
+    props.selectedChoiceOptions.includes(option)
+  ) {
+    return false
+  }
+  const selectedCount = choice.options.filter((candidate) =>
+    props.selectedChoiceOptions.includes(candidate),
+  ).length
+  return selectedCount >= choice.max
+}
+
+function updateChoiceOption(option: string, event: Event): void {
+  const choice = game.value?.choice
+  if (choice?.status !== 'pending') {
+    return
+  }
+  const checked = (event.currentTarget as HTMLInputElement).checked
+  if (choice.max === 1) {
+    emit('update:selectedChoiceOptions', checked ? [option] : [])
+    return
+  }
+  const selectedOptions = new Set(props.selectedChoiceOptions)
+  if (checked) {
+    selectedOptions.add(option)
+  } else {
+    selectedOptions.delete(option)
+  }
+  emit(
+    'update:selectedChoiceOptions',
+    choice.options.filter((candidate) => selectedOptions.has(candidate)),
+  )
 }
 
 function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
@@ -355,7 +432,7 @@ function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
         aria-labelledby="effect-choice-heading"
       >
         <h3 id="effect-choice-heading">Escolha oficial pendente</h3>
-        <p>
+        <p id="pending-choice-cardinality">
           {{ pendingChoiceOwner?.display_name ?? 'O participante responsável' }} precisa escolher
           {{
             (game.choice.min ?? 1) === (game.choice.max ?? 1)
@@ -364,7 +441,58 @@ function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
           }}
           entre as opções elegíveis.
         </p>
-        <ol>
+        <p id="pending-choice-cause" class="choice-cause">
+          <strong aria-hidden="true">Causa oficial</strong>
+          <code aria-hidden="true">{{ game.choice.cause }}</code>
+          <span class="choice-cause-accessible">Causa oficial {{ game.choice.cause }}</span>
+        </p>
+        <fieldset
+          v-if="
+            props.isChoiceResponsible &&
+            game.choice.min >= 0 &&
+            game.choice.max >= game.choice.min &&
+            game.choice.max <= game.choice.options.length
+          "
+          aria-describedby="pending-choice-cardinality pending-choice-cause"
+          :aria-busy="props.choiceInputDisabled"
+          :disabled="props.choiceInputDisabled"
+        >
+          <legend>{{ choiceSelectionLegend(game.choice.min, game.choice.max) }}</legend>
+          <div class="choice-options">
+            <label
+              v-for="(option, index) in game.choice.options"
+              :key="option"
+              class="choice-option"
+            >
+              <input
+                :id="`pending-choice-option-${index}`"
+                :aria-describedby="
+                  choiceOptionHeroLabel(option)
+                    ? `pending-choice-option-hero-${index}`
+                    : undefined
+                "
+                :aria-labelledby="`pending-choice-option-name-${index}`"
+                :checked="props.selectedChoiceOptions.includes(option)"
+                :disabled="choiceOptionAtLimit(option)"
+                name="pending-choice-option"
+                :type="game.choice.min === 1 && game.choice.max === 1 ? 'radio' : 'checkbox'"
+                :value="option"
+                @change="updateChoiceOption(option, $event)"
+              />
+              <span :id="`pending-choice-option-name-${index}`">
+                {{ choiceOptionLabel(option) }}
+              </span>
+              <small
+                v-if="choiceOptionHeroLabel(option)"
+                :id="`pending-choice-option-hero-${index}`"
+              >
+                Herói {{ choiceOptionHeroLabel(option) }}
+              </small>
+              <small v-else aria-hidden="true">Elegível</small>
+            </label>
+          </div>
+        </fieldset>
+        <ol v-else>
           <li v-for="option in game.choice.options" :key="option">{{ choiceOptionLabel(option) }}</li>
         </ol>
       </section>
