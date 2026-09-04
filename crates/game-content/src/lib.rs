@@ -11,8 +11,8 @@ mod schema;
 mod effects;
 
 pub use effects::{
-    Cardinality, Condition, Die, Effect, EffectRule, EffectTrigger, Eligibility, GameOutcome,
-    Operation, Resource, ResourceCost, Selector, TargetOwner, Zone,
+    Cardinality, Condition, Die, Effect, EffectChoiceAudience, EffectRule, EffectTrigger,
+    Eligibility, GameOutcome, Operation, Resource, ResourceCost, Selector, TargetOwner, Zone,
 };
 pub use ids::{CardInstanceId, CatalogId, InvalidId, RuleId};
 pub use manifest::{

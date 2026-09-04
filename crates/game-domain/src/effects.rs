@@ -1,6 +1,10 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 const MAX_EXECUTION_STEPS: usize = 4_096;
+const MAX_CHOICE_OPTIONS: usize = 4_096;
+const MAX_CHOICE_SELECTIONS: u16 = 32;
+const MAX_CHOICE_VALUE_LENGTH: usize = 256;
+const MAX_RUNTIME_RULE_ID_LENGTH: usize = 244;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EffectResource {
@@ -132,6 +136,7 @@ pub enum EffectDefinition {
         operation: EffectOperation,
     },
     Choice {
+        audience: EffectChoiceAudience,
         options: Vec<Self>,
     },
     Condition {
@@ -154,6 +159,12 @@ pub enum EffectDefinition {
     Terminal {
         outcome: EffectGameOutcome,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectChoiceAudience {
+    Actor,
+    EachHero,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,7 +282,9 @@ impl EffectWorld {
             .map(|entity| entity.id.as_str())
             .collect::<Vec<_>>();
         ids.sort_unstable();
-        if ids.iter().any(|id| id.is_empty())
+        if ids
+            .iter()
+            .any(|id| id.is_empty() || id.chars().count() > MAX_CHOICE_VALUE_LENGTH)
             || ids.windows(2).any(|pair| pair[0] == pair[1])
             || self.entities.iter().any(|entity| {
                 entity
@@ -353,11 +366,48 @@ pub enum PendingEffectChoiceKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingEffectChoice {
     pub id: String,
+    pub cause: String,
     pub responsible_position: u8,
     pub kind: PendingEffectChoiceKind,
     pub options: Vec<String>,
     pub min: u16,
     pub max: u16,
+    pub continuation: EffectContinuation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectContinuation {
+    pub choice_cursor: EffectCursor,
+    pub queue: Vec<QueuedEffect>,
+    pub steps_completed: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectCursor {
+    pub rule_id: String,
+    pub path: Vec<EffectPathSegment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectPathSegment {
+    ChoiceOption(u16),
+    ConditionThen,
+    ConditionOtherwise,
+    RepeatEffect,
+    RollOutcome(u16),
+    SequenceEffect(u16),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueuedEffect {
+    Definition {
+        cursor: EffectCursor,
+        actor_position: u8,
+    },
+    EffectChoice {
+        cursor: EffectCursor,
+        responsible_position: u8,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,6 +426,7 @@ pub struct EffectResolution {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectExecutionError {
+    InvalidChoice,
     InvalidDefinition,
     InvalidRoll,
     StepLimitExceeded,
@@ -388,22 +439,60 @@ pub trait EffectRoller {
 
 struct EffectExecutor<'a> {
     world: &'a mut EffectWorld,
-    actor_position: u8,
+    rules: &'a [EffectRule],
     roller: &'a mut dyn EffectRoller,
-    queue: VecDeque<(String, EffectDefinition)>,
+    queue: VecDeque<QueuedEffect>,
     outcomes: Vec<EffectOutcome>,
     rolls_consumed: u64,
     steps: usize,
 }
 
+impl EffectCursor {
+    fn root(rule_id: &str) -> Self {
+        Self {
+            rule_id: rule_id.to_owned(),
+            path: Vec::new(),
+        }
+    }
+
+    fn child(&self, segment: EffectPathSegment) -> Self {
+        let mut child = self.clone();
+        child.path.push(segment);
+        child
+    }
+}
+
 impl EffectExecutor<'_> {
     fn run(mut self) -> Result<EffectResolution, EffectExecutionError> {
-        while let Some((rule_id, effect)) = self.queue.pop_front() {
+        while let Some(queued) = self.queue.pop_front() {
             self.steps += 1;
             if self.steps > MAX_EXECUTION_STEPS {
                 return Err(EffectExecutionError::StepLimitExceeded);
             }
-            if let Some(stop) = self.execute_definition(rule_id, effect)? {
+            let stop = match queued {
+                QueuedEffect::Definition {
+                    cursor,
+                    actor_position,
+                } => {
+                    let effect = effect_at_cursor(self.rules, &cursor)
+                        .ok_or(EffectExecutionError::InvalidDefinition)?
+                        .clone();
+                    self.execute_definition(cursor, actor_position, effect)?
+                }
+                QueuedEffect::EffectChoice {
+                    cursor,
+                    responsible_position,
+                } => {
+                    let EffectDefinition::Choice { options, .. } =
+                        effect_at_cursor(self.rules, &cursor)
+                            .ok_or(EffectExecutionError::InvalidDefinition)?
+                    else {
+                        return Err(EffectExecutionError::InvalidDefinition);
+                    };
+                    self.execute_choice(&cursor, responsible_position, options.len())?
+                }
+            };
+            if let Some(stop) = stop {
                 return Ok(self.finish(stop));
             }
         }
@@ -412,64 +501,96 @@ impl EffectExecutor<'_> {
 
     fn execute_definition(
         &mut self,
-        rule_id: String,
+        cursor: EffectCursor,
+        actor_position: u8,
         effect: EffectDefinition,
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
         match effect {
             EffectDefinition::Apply { target, operation } => {
-                self.execute_apply(rule_id, &target, &operation)
+                self.execute_apply(&cursor, actor_position, &target, &operation)
             }
-            EffectDefinition::Choice { options } => self.execute_choice(&rule_id, &options),
+            EffectDefinition::Choice { audience, options } => match audience {
+                EffectChoiceAudience::Actor => {
+                    self.execute_choice(&cursor, actor_position, options.len())
+                }
+                EffectChoiceAudience::EachHero => {
+                    let positions = hero_positions(self.world);
+                    let Some((&first, remaining)) = positions.split_first() else {
+                        return Err(EffectExecutionError::InvalidDefinition);
+                    };
+                    for responsible_position in remaining.iter().rev() {
+                        self.queue.push_front(QueuedEffect::EffectChoice {
+                            cursor: cursor.clone(),
+                            responsible_position: *responsible_position,
+                        });
+                    }
+                    self.execute_choice(&cursor, first, options.len())
+                }
+            },
             EffectDefinition::Condition {
                 condition,
-                then,
+                then: _,
                 otherwise,
             } => {
                 if !condition_is_valid(&condition) {
                     return Err(EffectExecutionError::InvalidDefinition);
                 }
-                let selected = if condition_is_true(self.world, self.actor_position, &condition) {
-                    Some(*then)
+                let selected = if condition_is_true(self.world, actor_position, &condition) {
+                    Some(EffectPathSegment::ConditionThen)
                 } else {
-                    otherwise.map(|effect| *effect)
+                    otherwise.map(|_| EffectPathSegment::ConditionOtherwise)
                 };
                 if let Some(selected) = selected {
-                    self.queue.push_front((rule_id, selected));
+                    self.queue.push_front(QueuedEffect::Definition {
+                        cursor: cursor.child(selected),
+                        actor_position,
+                    });
                 }
                 Ok(None)
             }
             EffectDefinition::NoOp => {
                 self.outcomes.push(EffectOutcome::NoOp {
-                    rule_id,
+                    rule_id: cursor.rule_id,
                     reason: EffectNoOpReason::Explicit,
                 });
                 Ok(None)
             }
-            EffectDefinition::Repeat { times, effect } => {
+            EffectDefinition::Repeat { times, effect: _ } => {
                 if times == 0 {
                     return Err(EffectExecutionError::InvalidDefinition);
                 }
+                let child = cursor.child(EffectPathSegment::RepeatEffect);
                 for _ in 0..times {
-                    self.queue.push_front((rule_id.clone(), (*effect).clone()));
+                    self.queue.push_front(QueuedEffect::Definition {
+                        cursor: child.clone(),
+                        actor_position,
+                    });
                 }
                 Ok(None)
             }
             EffectDefinition::Roll {
                 die,
                 outcomes: roll_outcomes,
-            } => self.execute_roll(rule_id, die, &roll_outcomes),
+            } => self.execute_roll(&cursor, actor_position, die, &roll_outcomes),
             EffectDefinition::Sequence { effects } => {
                 if effects.is_empty() {
                     return Err(EffectExecutionError::InvalidDefinition);
                 }
-                for effect in effects.into_iter().rev() {
-                    self.queue.push_front((rule_id.clone(), effect));
+                for index in (0..effects.len()).rev() {
+                    let index = u16::try_from(index)
+                        .map_err(|_| EffectExecutionError::InvalidDefinition)?;
+                    self.queue.push_front(QueuedEffect::Definition {
+                        cursor: cursor.child(EffectPathSegment::SequenceEffect(index)),
+                        actor_position,
+                    });
                 }
                 Ok(None)
             }
             EffectDefinition::Terminal { outcome } => {
-                self.outcomes
-                    .push(EffectOutcome::Terminal { rule_id, outcome });
+                self.outcomes.push(EffectOutcome::Terminal {
+                    rule_id: cursor.rule_id,
+                    outcome,
+                });
                 Ok(Some(EffectStop::Terminal(outcome)))
             }
         }
@@ -477,22 +598,23 @@ impl EffectExecutor<'_> {
 
     fn execute_apply(
         &mut self,
-        rule_id: String,
+        cursor: &EffectCursor,
+        actor_position: u8,
         target: &EffectSelector,
         operation: &EffectOperation,
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
         if !selector_is_valid(target) || !operation_is_valid_for_zone(operation, target.zone) {
             return Err(EffectExecutionError::InvalidDefinition);
         }
-        let candidates = eligible_entity_indices(self.world, self.actor_position, target);
+        let candidates = eligible_entity_indices(self.world, actor_position, target);
         if target.max == 0 {
             self.outcomes.push(EffectOutcome::NoOp {
-                rule_id,
+                rule_id: cursor.rule_id.clone(),
                 reason: EffectNoOpReason::ZeroCardinality,
             });
         } else if candidates.len() < usize::from(target.min) {
             self.outcomes.push(EffectOutcome::NoOp {
-                rule_id,
+                rule_id: cursor.rule_id.clone(),
                 reason: EffectNoOpReason::NoEligibleTarget,
             });
         } else if candidates.len() > usize::from(target.max) {
@@ -501,16 +623,24 @@ impl EffectExecutor<'_> {
                 .map(|index| self.world.entities[index].id.clone())
                 .collect();
             return Ok(Some(EffectStop::Choice(PendingEffectChoice {
-                id: format!("{rule_id}:target:{}", self.steps - 1),
-                responsible_position: self.actor_position,
+                id: format!("{}:target:{}", cursor.rule_id, self.steps - 1),
+                cause: cursor.rule_id.clone(),
+                responsible_position: actor_position,
                 kind: PendingEffectChoiceKind::Target,
                 options,
                 min: target.min,
                 max: target.max,
+                continuation: self.continuation(cursor),
             })));
         } else {
             for index in candidates {
-                apply_operation(self.world, index, &rule_id, operation, &mut self.outcomes)?;
+                apply_operation(
+                    self.world,
+                    index,
+                    &cursor.rule_id,
+                    operation,
+                    &mut self.outcomes,
+                )?;
             }
         }
         Ok(None)
@@ -518,27 +648,31 @@ impl EffectExecutor<'_> {
 
     fn execute_choice(
         &self,
-        rule_id: &str,
-        options: &[EffectDefinition],
+        cursor: &EffectCursor,
+        responsible_position: u8,
+        option_count: usize,
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
-        if options.len() < 2 {
+        if option_count < 2 {
             return Err(EffectExecutionError::InvalidDefinition);
         }
         Ok(Some(EffectStop::Choice(PendingEffectChoice {
-            id: format!("{rule_id}:effect:{}", self.steps - 1),
-            responsible_position: self.actor_position,
+            id: format!("{}:effect:{}", cursor.rule_id, self.steps - 1),
+            cause: cursor.rule_id.clone(),
+            responsible_position,
             kind: PendingEffectChoiceKind::Effect,
-            options: (1..=options.len())
+            options: (1..=option_count)
                 .map(|index| format!("option:{index}"))
                 .collect(),
             min: 1,
             max: 1,
+            continuation: self.continuation(cursor),
         })))
     }
 
     fn execute_roll(
         &mut self,
-        rule_id: String,
+        cursor: &EffectCursor,
+        actor_position: u8,
         die: EffectDie,
         roll_outcomes: &[EffectDefinition],
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
@@ -557,13 +691,23 @@ impl EffectExecutor<'_> {
             .checked_add(1)
             .ok_or(EffectExecutionError::InvalidDefinition)?;
         self.outcomes.push(EffectOutcome::DieRolled {
-            rule_id: rule_id.clone(),
+            rule_id: cursor.rule_id.clone(),
             die,
             result,
         });
-        self.queue
-            .push_front((rule_id, roll_outcomes[usize::from(result - 1)].clone()));
+        self.queue.push_front(QueuedEffect::Definition {
+            cursor: cursor.child(EffectPathSegment::RollOutcome(u16::from(result - 1))),
+            actor_position,
+        });
         Ok(None)
+    }
+
+    fn continuation(&self, choice_cursor: &EffectCursor) -> EffectContinuation {
+        EffectContinuation {
+            choice_cursor: choice_cursor.clone(),
+            queue: self.queue.iter().cloned().collect(),
+            steps_completed: self.steps,
+        }
     }
 
     fn finish(self, stop: EffectStop) -> EffectResolution {
@@ -575,6 +719,162 @@ impl EffectExecutor<'_> {
     }
 }
 
+fn effect_at_cursor<'a>(
+    rules: &'a [EffectRule],
+    cursor: &EffectCursor,
+) -> Option<&'a EffectDefinition> {
+    let rule = rules.iter().find(|rule| rule.id == cursor.rule_id)?;
+    let mut effect = &rule.effect;
+    for segment in &cursor.path {
+        effect = match (effect, segment) {
+            (EffectDefinition::Choice { options, .. }, EffectPathSegment::ChoiceOption(index)) => {
+                options.get(usize::from(*index))?
+            }
+            (EffectDefinition::Condition { then, .. }, EffectPathSegment::ConditionThen) => then,
+            (
+                EffectDefinition::Condition {
+                    otherwise: Some(otherwise),
+                    ..
+                },
+                EffectPathSegment::ConditionOtherwise,
+            ) => otherwise,
+            (EffectDefinition::Repeat { effect, .. }, EffectPathSegment::RepeatEffect) => effect,
+            (EffectDefinition::Roll { outcomes, .. }, EffectPathSegment::RollOutcome(index)) => {
+                outcomes.get(usize::from(*index))?
+            }
+            (EffectDefinition::Sequence { effects }, EffectPathSegment::SequenceEffect(index)) => {
+                effects.get(usize::from(*index))?
+            }
+            _ => return None,
+        };
+    }
+    Some(effect)
+}
+
+fn hero_positions(world: &EffectWorld) -> Vec<u8> {
+    let mut positions = world
+        .entities
+        .iter()
+        .filter(|entity| entity.zone == EffectZone::Heroes)
+        .filter_map(|entity| entity.owner_position)
+        .collect::<Vec<_>>();
+    positions.sort_unstable();
+    positions.dedup();
+    positions
+}
+
+pub(crate) fn effect_choice_selection_is_valid(
+    choice: &PendingEffectChoice,
+    selected_options: &[String],
+) -> bool {
+    let selected = selected_options
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    selected.len() == selected_options.len()
+        && (usize::from(choice.min)..=usize::from(choice.max)).contains(&selected.len())
+        && selected_options
+            .iter()
+            .all(|option| choice.options.contains(option))
+}
+
+pub(crate) fn normalize_effect_choice_selection(
+    choice: &PendingEffectChoice,
+    selected_options: &[String],
+) -> Option<Vec<String>> {
+    if !effect_choice_selection_is_valid(choice, selected_options) {
+        return None;
+    }
+    Some(
+        choice
+            .options
+            .iter()
+            .filter(|option| selected_options.contains(option))
+            .cloned()
+            .collect(),
+    )
+}
+
+pub(crate) fn resume_effects(
+    world: &mut EffectWorld,
+    pending: &PendingEffectChoice,
+    selected_options: &[String],
+    rules: &[EffectRule],
+    roller: &mut dyn EffectRoller,
+) -> Result<EffectResolution, EffectExecutionError> {
+    if !effect_rules_are_valid(rules) {
+        return Err(EffectExecutionError::InvalidDefinition);
+    }
+    if !effect_choice_selection_is_valid(pending, selected_options)
+        || pending.cause != pending.continuation.choice_cursor.rule_id
+        || pending.continuation.steps_completed > MAX_EXECUTION_STEPS
+    {
+        return Err(EffectExecutionError::InvalidChoice);
+    }
+    let definition = effect_at_cursor(rules, &pending.continuation.choice_cursor)
+        .ok_or(EffectExecutionError::InvalidChoice)?;
+    let mut queue = pending
+        .continuation
+        .queue
+        .iter()
+        .cloned()
+        .collect::<VecDeque<_>>();
+    let mut outcomes = Vec::new();
+
+    match (pending.kind, definition) {
+        (PendingEffectChoiceKind::Effect, EffectDefinition::Choice { options, .. }) => {
+            if pending.options.len() != options.len() || selected_options.len() != 1 {
+                return Err(EffectExecutionError::InvalidChoice);
+            }
+            let selected_index = pending
+                .options
+                .iter()
+                .position(|option| option == &selected_options[0])
+                .ok_or(EffectExecutionError::InvalidChoice)?;
+            let selected_index =
+                u16::try_from(selected_index).map_err(|_| EffectExecutionError::InvalidChoice)?;
+            queue.push_front(QueuedEffect::Definition {
+                cursor: pending
+                    .continuation
+                    .choice_cursor
+                    .child(EffectPathSegment::ChoiceOption(selected_index)),
+                actor_position: pending.responsible_position,
+            });
+        }
+        (PendingEffectChoiceKind::Target, EffectDefinition::Apply { target, operation }) => {
+            let candidates = eligible_entity_indices(world, pending.responsible_position, target)
+                .into_iter()
+                .map(|index| world.entities[index].id.clone())
+                .collect::<Vec<_>>();
+            if candidates != pending.options {
+                return Err(EffectExecutionError::InvalidChoice);
+            }
+            for option in &pending.options {
+                if !selected_options.contains(option) {
+                    continue;
+                }
+                let index = world
+                    .entities
+                    .iter()
+                    .position(|entity| entity.id == *option)
+                    .ok_or(EffectExecutionError::InvalidChoice)?;
+                apply_operation(world, index, &pending.cause, operation, &mut outcomes)?;
+            }
+        }
+        _ => return Err(EffectExecutionError::InvalidChoice),
+    }
+
+    EffectExecutor {
+        world,
+        rules,
+        roller,
+        queue,
+        outcomes,
+        rolls_consumed: 0,
+        steps: pending.continuation.steps_completed,
+    }
+    .run()
+}
+
 #[must_use]
 pub fn effect_action_is_affordable(
     world: &EffectWorld,
@@ -582,6 +882,9 @@ pub fn effect_action_is_affordable(
     rules: &[EffectRule],
     trigger: EffectTrigger,
 ) -> bool {
+    if !effect_rules_are_valid(rules) {
+        return false;
+    }
     let costs = combined_costs(rules, trigger);
     costs.into_iter().all(|(resource, amount)| {
         world
@@ -597,13 +900,7 @@ pub(crate) fn execute_effects(
     trigger: EffectTrigger,
     roller: &mut dyn EffectRoller,
 ) -> Result<EffectResolution, EffectExecutionError> {
-    if rules.iter().any(|rule| {
-        rule.id.is_empty()
-            || rule
-                .cost
-                .iter()
-                .any(|cost| cost.amount == 0 || cost.resource == EffectResource::Control)
-    }) {
+    if !effect_rules_are_valid(rules) {
         return Err(EffectExecutionError::InvalidDefinition);
     }
     if !effect_action_is_affordable(world, actor_position, rules, trigger) {
@@ -614,11 +911,14 @@ pub(crate) fn execute_effects(
     let queue = rules
         .iter()
         .filter(|rule| rule.trigger == trigger)
-        .map(|rule| (rule.id.clone(), rule.effect.clone()))
+        .map(|rule| QueuedEffect::Definition {
+            cursor: EffectCursor::root(&rule.id),
+            actor_position,
+        })
         .collect::<VecDeque<_>>();
     EffectExecutor {
         world,
-        actor_position,
+        rules,
         roller,
         queue,
         outcomes,
@@ -626,6 +926,19 @@ pub(crate) fn execute_effects(
         steps: 0,
     }
     .run()
+}
+
+fn effect_rules_are_valid(rules: &[EffectRule]) -> bool {
+    let mut ids = BTreeSet::new();
+    rules.iter().all(|rule| {
+        !rule.id.is_empty()
+            && rule.id.chars().count() <= MAX_RUNTIME_RULE_ID_LENGTH
+            && ids.insert(rule.id.as_str())
+            && rule
+                .cost
+                .iter()
+                .all(|cost| cost.amount > 0 && cost.resource != EffectResource::Control)
+    })
 }
 
 fn pay_costs(
@@ -725,7 +1038,7 @@ pub(crate) fn apply_effect_outcomes(
 pub(crate) fn effect_transition_is_valid(
     outcomes: &[EffectOutcome],
     stop: &EffectStop,
-    actor_position: u8,
+    participant_positions: &[u8],
 ) -> bool {
     if outcomes.len() > MAX_EXECUTION_STEPS || outcomes.iter().any(|outcome| !outcome.is_valid()) {
         return false;
@@ -736,7 +1049,7 @@ pub(crate) fn effect_transition_is_valid(
         .count();
     match stop {
         EffectStop::Choice(choice) => {
-            terminal_count == 0 && choice.is_valid_for_actor(actor_position)
+            terminal_count == 0 && choice.is_valid_for_positions(participant_positions)
         }
         EffectStop::Stable => terminal_count == 0,
         EffectStop::Terminal(expected) => {
@@ -779,18 +1092,65 @@ impl EffectOutcome {
 }
 
 impl PendingEffectChoice {
-    fn is_valid_for_actor(&self, actor_position: u8) -> bool {
+    pub(crate) fn is_valid_for_positions(&self, participant_positions: &[u8]) -> bool {
         let options = self
             .options
             .iter()
             .collect::<std::collections::BTreeSet<_>>();
-        self.responsible_position == actor_position
+        participant_positions.contains(&self.responsible_position)
             && !self.id.is_empty()
+            && self.id.chars().count() <= MAX_CHOICE_VALUE_LENGTH
+            && !self.cause.is_empty()
+            && self.cause.chars().count() <= MAX_CHOICE_VALUE_LENGTH
             && self.options.len() >= 2
+            && self.options.len() <= MAX_CHOICE_OPTIONS
             && options.len() == self.options.len()
-            && options.iter().all(|option| !option.is_empty())
+            && options.iter().all(|option| {
+                !option.is_empty() && option.chars().count() <= MAX_CHOICE_VALUE_LENGTH
+            })
             && self.min <= self.max
+            && self.max <= MAX_CHOICE_SELECTIONS
             && usize::from(self.max) <= self.options.len()
+            && match self.kind {
+                PendingEffectChoiceKind::Effect => self.min == 1 && self.max == 1,
+                PendingEffectChoiceKind::Target => {
+                    self.max > 0 && usize::from(self.max) < self.options.len()
+                }
+            }
+            && self.continuation.steps_completed > 0
+            && self.continuation.steps_completed <= MAX_EXECUTION_STEPS
+            && self.continuation.choice_cursor.rule_id == self.cause
+            && self.continuation.choice_cursor.is_structurally_valid()
+            && self.continuation.queue.len() <= MAX_EXECUTION_STEPS
+            && self
+                .continuation
+                .queue
+                .iter()
+                .all(|queued| queued.is_valid_for_positions(participant_positions))
+    }
+}
+
+impl EffectCursor {
+    fn is_structurally_valid(&self) -> bool {
+        !self.rule_id.is_empty() && self.path.len() <= MAX_EXECUTION_STEPS
+    }
+}
+
+impl QueuedEffect {
+    fn is_valid_for_positions(&self, participant_positions: &[u8]) -> bool {
+        match self {
+            Self::Definition {
+                cursor,
+                actor_position,
+            } => cursor.is_structurally_valid() && participant_positions.contains(actor_position),
+            Self::EffectChoice {
+                cursor,
+                responsible_position,
+            } => {
+                cursor.is_structurally_valid()
+                    && participant_positions.contains(responsible_position)
+            }
+        }
     }
 }
 

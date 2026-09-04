@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use game_content::{
-    Condition, ContentManifest, Die, Effect, EffectRule, EffectTrigger, Eligibility, EntryKind,
-    GameOutcome, ManifestEntry, Operation, Resource, Selector, TargetOwner, Zone,
+    Condition, ContentManifest, Die, Effect, EffectChoiceAudience as ContentEffectChoiceAudience,
+    EffectRule, EffectTrigger, Eligibility, EntryKind, GameOutcome, ManifestEntry, Operation,
+    Resource, Selector, TargetOwner, Zone,
 };
 use serde::Serialize;
 use sqlx::PgPool;
@@ -240,7 +241,13 @@ fn compile_effect(
             target: effect_selector(target),
             operation: effect_operation(operation),
         },
-        Effect::Choice { options } => game_domain::EffectDefinition::Choice {
+        Effect::Choice { audience, options } => game_domain::EffectDefinition::Choice {
+            audience: match audience {
+                ContentEffectChoiceAudience::Actor => game_domain::EffectChoiceAudience::Actor,
+                ContentEffectChoiceAudience::EachHero => {
+                    game_domain::EffectChoiceAudience::EachHero
+                }
+            },
             options: options
                 .iter()
                 .map(|option| compile_effect(option, rules))

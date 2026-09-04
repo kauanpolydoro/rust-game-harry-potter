@@ -35,5 +35,5 @@ ALTER TABLE recovery_credentials
     ADD COLUMN replaced_device_session_id UUID REFERENCES device_sessions(id);
 
 UPDATE application_metadata
-SET value = '12'
+SET value = '13'
 WHERE key = 'schema_version';

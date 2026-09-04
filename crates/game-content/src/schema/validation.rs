@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    Condition, ContentSet, Effect, Eligibility, ImportFailure, Operation, Resource, RuleId,
-    Selector, Zone,
+    Condition, ContentSet, Effect, EffectChoiceAudience, Eligibility, ImportFailure, Operation,
+    Resource, RuleId, Selector, Zone,
 };
 
 use super::CandidateBundle;
@@ -12,7 +12,9 @@ const MAX_EFFECT_NODES: usize = 1_024;
 const MAX_BRANCHES: usize = 64;
 const MAX_REPEAT: u8 = 16;
 const MAX_RUNTIME_NODES: usize = 4_096;
+const MAX_RUNTIME_RULE_ID_LENGTH: usize = 244;
 const MAX_TARGETS: u16 = 32;
+const MAX_PARTICIPANT_HEROES: usize = 4;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
     validate_metadata(bundle)?;
@@ -300,6 +302,13 @@ pub(super) fn validate_runtime_rules(
     let mut compiled_nodes = 0;
     let mut runtime_nodes = 0;
     for root in roots {
+        if root.as_str().chars().count() > MAX_RUNTIME_RULE_ID_LENGTH {
+            return Err(ImportFailure {
+                message: format!(
+                    "runtime rule ID exceeds {MAX_RUNTIME_RULE_ID_LENGTH} characters: {root}"
+                ),
+            });
+        }
         let stats = rule_stats(root, &rules, &mut memo).ok_or_else(|| ImportFailure {
             message: format!("runtime rule {root} exceeds the closed effect execution limit"),
         })?;
@@ -344,7 +353,16 @@ fn effect_stats(
             reference_depth: 0,
             runtime_nodes: 1,
         }),
-        Effect::Choice { options } => branch_stats(options, 1, true, rules, memo),
+        Effect::Choice { audience, options } => {
+            let mut stats = branch_stats(options, 1, true, rules, memo)?;
+            if *audience == EffectChoiceAudience::EachHero {
+                stats.runtime_nodes = stats
+                    .runtime_nodes
+                    .checked_mul(MAX_PARTICIPANT_HEROES)
+                    .filter(|total| *total <= MAX_RUNTIME_NODES)?;
+            }
+            Some(stats)
+        }
         Effect::Condition {
             then, otherwise, ..
         } => {
@@ -542,7 +560,7 @@ impl Effect {
                 target.validate(rule_id)?;
                 operation.validate_zone(target.zone, rule_id)?;
             }
-            Self::Choice { options } => {
+            Self::Choice { options, .. } => {
                 if !(2..=MAX_BRANCHES).contains(&options.len()) {
                     return Err(ImportFailure {
                         message: format!(

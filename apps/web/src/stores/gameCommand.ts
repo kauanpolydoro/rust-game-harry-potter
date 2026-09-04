@@ -22,7 +22,7 @@ type GameCommandStatus =
 
 interface PendingGameIntent {
   commandId: string
-  commandType: 'complete_dark_arts'
+  commandType: ExecuteGameCommandRequest['type']
   createdAt: string
   gameId: string
 }
@@ -45,7 +45,7 @@ function loadPendingIntent(): PendingGameIntent | null {
       !isRecord(intent) ||
       typeof intent.commandId !== 'string' ||
       !uuidPattern.test(intent.commandId) ||
-      intent.commandType !== 'complete_dark_arts' ||
+      (intent.commandType !== 'complete_dark_arts' && intent.commandType !== 'resolve_choice') ||
       typeof intent.createdAt !== 'string' ||
       Number.isNaN(Date.parse(intent.createdAt)) ||
       typeof intent.gameId !== 'string' ||
@@ -99,15 +99,33 @@ export const useGameCommandStore = defineStore('gameCommand', {
   },
   actions: {
     async completeDarkArts(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
+      return this.submit(game, {
+        command_id: crypto.randomUUID(),
+        expected_state_version: game.snapshot.state_version,
+        type: 'complete_dark_arts',
+      })
+    },
+    async resolveChoice(
+      game: GameProjectionResponse,
+      choiceId: string,
+      selectedOptions: string[],
+    ): Promise<GameProjectionResponse | null> {
+      return this.submit(game, {
+        choice_id: choiceId,
+        command_id: crypto.randomUUID(),
+        expected_state_version: game.snapshot.state_version,
+        selected_options: selectedOptions,
+        type: 'resolve_choice',
+      })
+    },
+    async submit(
+      game: GameProjectionResponse,
+      request: ExecuteGameCommandRequest,
+    ): Promise<GameProjectionResponse | null> {
       if (this.status === 'submitting' || this.status === 'recovering' || this.pendingIntent) {
         return null
       }
 
-      const request: ExecuteGameCommandRequest = {
-        command_id: crypto.randomUUID(),
-        expected_state_version: game.snapshot.state_version,
-        type: 'complete_dark_arts',
-      }
       this.pendingIntent = {
         commandId: request.command_id,
         commandType: request.type,

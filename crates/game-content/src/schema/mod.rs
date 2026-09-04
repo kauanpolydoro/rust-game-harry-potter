@@ -343,7 +343,7 @@ impl FunctionalDefinition {
 impl Effect {
     fn references(&self) -> Vec<&RuleId> {
         match self {
-            Self::Choice { options }
+            Self::Choice { options, .. }
             | Self::Roll {
                 outcomes: options, ..
             }
@@ -372,7 +372,7 @@ impl Effect {
     ) -> bool {
         match self {
             Self::Apply { .. } | Self::Terminal { .. } => true,
-            Self::Choice { options } => options
+            Self::Choice { options, .. } => options
                 .iter()
                 .any(|option| option.has_operation(rules, visited)),
             Self::Condition {

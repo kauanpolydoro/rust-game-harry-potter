@@ -227,14 +227,25 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.pendingJoinIntent = null
       removePendingJoinIntent()
     },
-    replaceGameProjection(projection: GameProjectionResponse): void {
+    replaceGameProjection(projection: GameProjectionResponse): boolean {
       if (this.game && this.game.game.id !== projection.game.id) {
-        return
+        return false
       }
       this.game = projection
       this.lobby = null
       this.status = 'ready'
       this.errorCode = null
+      return true
+    },
+    advanceGameProjection(projection: GameProjectionResponse): boolean {
+      if (
+        this.game &&
+        (projection.snapshot.sequence < this.game.snapshot.sequence ||
+          projection.snapshot.state_version < this.game.snapshot.state_version)
+      ) {
+        return false
+      }
+      return this.replaceGameProjection(projection)
     },
     adoptCreatedRoom(room: CreateRoomResponse): void {
       const { recovery_token: recoveryToken, ...lobby } = room

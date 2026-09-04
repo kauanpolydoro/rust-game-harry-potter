@@ -4,7 +4,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { isUncertainTransportFailure } from './api/http'
 import GameStage from './components/GameStage.vue'
 import RecoveryCredential from './components/RecoveryCredential.vue'
-import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
+import type {
+  HeroId,
+  PendingChoiceSummary,
+  StartGameRequest,
+} from './contracts/identity-access.generated'
 import { takeRecoveryToken } from './recoveryCredential'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
@@ -25,6 +29,7 @@ const displayName = ref('')
 const recoveryPassword = ref('')
 const roomCode = ref('')
 const selectedHero = ref<HeroId | ''>('')
+const selectedChoiceOptions = ref<string[]>([])
 const passwordVisible = ref(false)
 const copyResult = ref<'idle' | 'copied' | 'failed'>('idle')
 const selectedContentKey = ref('')
@@ -55,6 +60,78 @@ const statusPresentation = {
 const currentStatus = computed(() => statusPresentation[health.availability])
 const lobby = computed(() => roomAccess.lobby)
 const game = computed(() => roomAccess.game)
+const pendingChoice = computed<PendingChoiceSummary | null>(() => {
+  const choice = game.value?.choice
+  return choice?.status === 'pending' ? choice : null
+})
+const pendingChoiceResponsibleName = computed(() => {
+  const choice = pendingChoice.value
+  if (!choice) {
+    return ''
+  }
+  return (
+    game.value?.participants.find(
+      (participant) => participant.position === choice.responsible_position,
+    )?.display_name ?? `a posição ${choice.responsible_position}`
+  )
+})
+const isResponsibleForPendingChoice = computed(() => {
+  const choice = pendingChoice.value
+  const participant = game.value?.participant
+  return Boolean(choice && participant && choice.responsible_position === participant.position)
+})
+const isSelectableChoiceForParticipant = computed(() => {
+  const choice = pendingChoice.value
+  return Boolean(
+    isResponsibleForPendingChoice.value &&
+      choice &&
+      choice.min >= 0 &&
+      choice.max >= choice.min &&
+      choice.max <= choice.options.length,
+  )
+})
+const commandSubmissionBlocked = computed(
+  () =>
+    gameSync.commandsFrozen ||
+    Boolean(gameCommand.pendingIntent) ||
+    ['submitting', 'recovering', 'stale', 'resyncing'].includes(gameCommand.status),
+)
+const choiceInputDisabled = computed(
+  () =>
+    commandSubmissionBlocked.value ||
+    game.value?.legal_actions.includes('resolve_choice') !== true,
+)
+const orderedSelectedChoiceOptions = computed(() => {
+  const choice = pendingChoice.value
+  if (!choice) {
+    return []
+  }
+  const selectedOptions = new Set(selectedChoiceOptions.value)
+  return choice.options.filter((option) => selectedOptions.has(option))
+})
+const canResolvePendingChoice = computed(
+  () => {
+    const choice = pendingChoice.value
+    const selectedCount = selectedChoiceOptions.value.length
+    return Boolean(
+      isSelectableChoiceForParticipant.value &&
+        !choiceInputDisabled.value &&
+        choice &&
+        orderedSelectedChoiceOptions.value.length === selectedCount &&
+        selectedCount >= choice.min &&
+        selectedCount <= choice.max,
+    )
+  },
+)
+const pendingChoiceFocusKey = computed(() => {
+  const choice = pendingChoice.value
+  return gameSync.status === 'connected' &&
+    isSelectableChoiceForParticipant.value &&
+    !choiceInputDisabled.value &&
+    choice
+    ? choice.id
+    : null
+})
 const isHost = computed(() => lobby.value?.participant.role === 'host')
 const isRestoringSession = computed(
   () => roomAccess.status === 'restoring' && !lobby.value && !game.value,
@@ -95,12 +172,7 @@ const canStartGame = computed(
 const canCompleteDarkArts = computed(
   () =>
     game.value?.legal_actions.includes('complete_dark_arts') === true &&
-    !gameSync.commandsFrozen &&
-    !gameCommand.pendingIntent &&
-    gameCommand.status !== 'submitting' &&
-    gameCommand.status !== 'recovering' &&
-    gameCommand.status !== 'stale' &&
-    gameCommand.status !== 'resyncing',
+    !commandSubmissionBlocked.value,
 )
 const serviceHeading = computed(() => {
   if (isRestoringSession.value) {
@@ -390,11 +462,34 @@ async function completeDarkArts(): Promise<void> {
   }
   const projection = await gameCommand.completeDarkArts(game.value)
   if (projection) {
-    roomAccess.game = projection
+    roomAccess.advanceGameProjection(projection)
     await nextTick()
     document.getElementById('game-heading')?.focus()
   } else if (gameCommand.status === 'stale') {
     await resyncStaleGame()
+  }
+}
+
+async function resolvePendingChoice(): Promise<void> {
+  const currentGame = game.value
+  const choice = pendingChoice.value
+  if (!currentGame || !choice || !canResolvePendingChoice.value) {
+    return
+  }
+
+  const projection = await gameCommand.resolveChoice(
+    currentGame,
+    choice.id,
+    orderedSelectedChoiceOptions.value,
+  )
+  if (projection) {
+    roomAccess.advanceGameProjection(projection)
+    await nextTick()
+    document.getElementById('game-heading')?.focus()
+  } else if (gameCommand.status === 'stale') {
+    await resyncStaleGame()
+  } else if (gameCommand.errorCode === 'CHOICE_NOT_ASSIGNED') {
+    gameSync.resynchronize()
   }
 }
 
@@ -418,7 +513,7 @@ async function recoverGameCommand(): Promise<void> {
   }
   const projection = await gameCommand.recoverPending(game.value.game.id)
   if (projection) {
-    roomAccess.game = projection
+    roomAccess.advanceGameProjection(projection)
     await nextTick()
     document.getElementById('game-heading')?.focus()
   }
@@ -506,6 +601,19 @@ watch(
   { immediate: true },
 )
 watch(
+  () => pendingChoice.value?.id,
+  () => {
+    selectedChoiceOptions.value = []
+  },
+)
+watch(pendingChoiceFocusKey, async (choiceId) => {
+  if (!choiceId) {
+    return
+  }
+  await nextTick()
+  document.getElementById('pending-choice-option-0')?.focus()
+})
+watch(
   game,
   (current) => {
     if (current) {
@@ -569,7 +677,12 @@ onMounted(async () => {
       </div>
     </section>
 
-    <GameStage v-else-if="game" />
+    <GameStage
+      v-else-if="game"
+      v-model:selected-choice-options="selectedChoiceOptions"
+      :choice-input-disabled="choiceInputDisabled"
+      :is-choice-responsible="isResponsibleForPendingChoice"
+    />
 
     <section
       v-else-if="lobby"
@@ -1146,6 +1259,15 @@ onMounted(async () => {
         {{ gameCommand.status === 'recovering' ? 'Consultando recibo' : 'Aguardando confirmação' }}
       </button>
       <button
+        v-else-if="game && isSelectableChoiceForParticipant"
+        class="primary-button"
+        :disabled="!canResolvePendingChoice"
+        type="button"
+        @click="resolvePendingChoice()"
+      >
+        Confirmar escolha
+      </button>
+      <button
         v-else-if="game && game.legal_actions.includes('complete_dark_arts') && gameSync.commandsFrozen"
         class="primary-button"
         :disabled="true"
@@ -1161,6 +1283,13 @@ onMounted(async () => {
       >
         Concluir Artes das Trevas
       </button>
+      <p
+        v-else-if="game && pendingChoice && !isResponsibleForPendingChoice"
+        class="continuity-note"
+      >
+        <span aria-hidden="true"></span>
+        Aguardando {{ pendingChoiceResponsibleName }} concluir a escolha.
+      </p>
       <p v-else-if="game" class="continuity-note">
         <span aria-hidden="true"></span>
         {{

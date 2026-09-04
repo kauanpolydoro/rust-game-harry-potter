@@ -62,11 +62,21 @@ export interface StartGameRequest {
   ruleset_version: string
 }
 
-export interface ExecuteGameCommandRequest {
+export interface CompleteDarkArtsCommandRequest {
   command_id: string
   expected_state_version: number
   type: "complete_dark_arts"
 }
+
+export interface ResolveChoiceCommandRequest {
+  command_id: string
+  expected_state_version: number
+  type: "resolve_choice"
+  choice_id: string
+  selected_options: Array<string>
+}
+
+export type ExecuteGameCommandRequest = CompleteDarkArtsCommandRequest | ResolveChoiceCommandRequest
 
 export interface RoomSummary {
   code: string
@@ -169,15 +179,35 @@ export interface SnapshotSummary {
   versions: GameVersions
 }
 
-export interface ChoiceSummary {
-  status: "none" | "pending"
-  id?: string
-  responsible_position?: number
-  kind?: "effect" | "target"
-  options?: Array<string>
-  min?: number
-  max?: number
+export interface NoChoiceSummary {
+  status: "none"
 }
+
+export interface PendingEffectChoiceSummary {
+  status: "pending"
+  id: string
+  cause: string
+  responsible_position: number
+  kind: "effect"
+  options: Array<string>
+  min: 1
+  max: 1
+}
+
+export interface PendingTargetChoiceSummary {
+  status: "pending"
+  id: string
+  cause: string
+  responsible_position: number
+  kind: "target"
+  options: Array<string>
+  min: number
+  max: number
+}
+
+export type PendingChoiceSummary = PendingEffectChoiceSummary | PendingTargetChoiceSummary
+
+export type ChoiceSummary = NoChoiceSummary | PendingChoiceSummary
 
 export interface GameResources {
   health: number
@@ -227,13 +257,13 @@ export interface GameProjectionResponse {
   turn: TurnSummary
   participant: GameParticipant
   participants: Array<GameParticipant>
-  legal_actions: Array<string>
+  legal_actions: Array<"complete_dark_arts" | "resolve_choice">
   choice: ChoiceSummary
   effects: EffectResolutionSummary
 }
 
-export interface RealtimeGameEvent {
-  event_version: 1 | 2
+export interface DarkArtsCompletedRealtimeGameEvent {
+  event_version: 1 | 2 | 3
   type: "dark_arts_completed"
   sequence: number
   state_version: number
@@ -241,10 +271,29 @@ export interface RealtimeGameEvent {
   actor_position: number
   effects: Array<EffectOutcomeSummary>
   effect_stop: "stable" | "choice" | "terminal"
-  choice?: ChoiceSummary
+  choice?: PendingChoiceSummary
   prng_counter: number
   command_id?: string
 }
+
+export interface ChoiceResolvedRealtimeGameEvent {
+  event_version: 3
+  type: "choice_resolved"
+  sequence: number
+  state_version: number
+  turn: number
+  actor_position: number
+  choice_id: string
+  choice_cause: string
+  selected_options: Array<string>
+  effects: Array<EffectOutcomeSummary>
+  effect_stop: "stable" | "choice" | "terminal"
+  choice?: PendingChoiceSummary
+  prng_counter: number
+  command_id?: string
+}
+
+export type RealtimeGameEvent = DarkArtsCompletedRealtimeGameEvent | ChoiceResolvedRealtimeGameEvent
 
 export interface RealtimeSnapshotMessage {
   protocol_version: 2
@@ -286,7 +335,7 @@ export interface RealtimeEventBatchMessage {
 
 export interface GameCommandReceipt {
   command_id: string
-  type: "complete_dark_arts"
+  type: "complete_dark_arts" | "resolve_choice"
   status: "accepted"
   expected_state_version: number
   accepted_state_version: number
@@ -373,8 +422,16 @@ export function isStartGameRequest(value: unknown): value is StartGameRequest {
   return isRecord(value) && Object.keys(value).every((key) => ["adventure_id","manifest_digest","ruleset_version"].includes(key)) && typeof value["adventure_id"] === 'string' && [...value["adventure_id"]].length >= 1 && typeof value["manifest_digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["manifest_digest"]) && typeof value["ruleset_version"] === 'string' && [...value["ruleset_version"]].length >= 1
 }
 
-export function isExecuteGameCommandRequest(value: unknown): value is ExecuteGameCommandRequest {
+export function isCompleteDarkArtsCommandRequest(value: unknown): value is CompleteDarkArtsCommandRequest {
   return isRecord(value) && Object.keys(value).every((key) => ["command_id","expected_state_version","type"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "complete_dark_arts")
+}
+
+export function isResolveChoiceCommandRequest(value: unknown): value is ResolveChoiceCommandRequest {
+  return isRecord(value) && Object.keys(value).every((key) => ["command_id","expected_state_version","type","choice_id","selected_options"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "resolve_choice") && typeof value["choice_id"] === 'string' && [...value["choice_id"]].length >= 1 && [...value["choice_id"]].length <= 256 && Array.isArray(value["selected_options"]) && value["selected_options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["selected_options"].length >= 0 && value["selected_options"].length <= 32 && new Set(value["selected_options"].map((entry) => JSON.stringify(entry))).size === value["selected_options"].length
+}
+
+export function isExecuteGameCommandRequest(value: unknown): value is ExecuteGameCommandRequest {
+  return [isCompleteDarkArtsCommandRequest(value),isResolveChoiceCommandRequest(value)].filter(Boolean).length === 1
 }
 
 export function isRoomSummary(value: unknown): value is RoomSummary {
@@ -433,8 +490,24 @@ export function isSnapshotSummary(value: unknown): value is SnapshotSummary {
   return isRecord(value) && Object.keys(value).every((key) => ["snapshot_version","state_version","sequence","cursor","digest","versions"].includes(key)) && typeof value["snapshot_version"] === 'number' && Number.isInteger(value["snapshot_version"]) && value["snapshot_version"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 1 && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 0 && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && typeof value["digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["digest"]) && isGameVersions(value["versions"])
 }
 
+export function isNoChoiceSummary(value: unknown): value is NoChoiceSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["status"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "none")
+}
+
+export function isPendingEffectChoiceSummary(value: unknown): value is PendingEffectChoiceSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["status","id","cause","responsible_position","kind","options","min","max"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "pending") && typeof value["id"] === 'string' && [...value["id"]].length >= 1 && [...value["id"]].length <= 256 && typeof value["cause"] === 'string' && [...value["cause"]].length >= 1 && [...value["cause"]].length <= 256 && typeof value["responsible_position"] === 'number' && Number.isInteger(value["responsible_position"]) && value["responsible_position"] >= 1 && value["responsible_position"] <= 4 && typeof value["kind"] === 'string' && (value["kind"] === "effect") && Array.isArray(value["options"]) && value["options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["options"].length >= 2 && value["options"].length <= 4096 && new Set(value["options"].map((entry) => JSON.stringify(entry))).size === value["options"].length && typeof value["min"] === 'number' && Number.isInteger(value["min"]) && (value["min"] === 1) && typeof value["max"] === 'number' && Number.isInteger(value["max"]) && (value["max"] === 1)
+}
+
+export function isPendingTargetChoiceSummary(value: unknown): value is PendingTargetChoiceSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["status","id","cause","responsible_position","kind","options","min","max"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "pending") && typeof value["id"] === 'string' && [...value["id"]].length >= 1 && [...value["id"]].length <= 256 && typeof value["cause"] === 'string' && [...value["cause"]].length >= 1 && [...value["cause"]].length <= 256 && typeof value["responsible_position"] === 'number' && Number.isInteger(value["responsible_position"]) && value["responsible_position"] >= 1 && value["responsible_position"] <= 4 && typeof value["kind"] === 'string' && (value["kind"] === "target") && Array.isArray(value["options"]) && value["options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["options"].length >= 2 && value["options"].length <= 4096 && new Set(value["options"].map((entry) => JSON.stringify(entry))).size === value["options"].length && typeof value["min"] === 'number' && Number.isInteger(value["min"]) && value["min"] >= 0 && value["min"] <= 32 && typeof value["max"] === 'number' && Number.isInteger(value["max"]) && value["max"] >= 1 && value["max"] <= 32 && value["min"] <= value["max"] && value["max"] < value["options"].length
+}
+
+export function isPendingChoiceSummary(value: unknown): value is PendingChoiceSummary {
+  return [isPendingEffectChoiceSummary(value),isPendingTargetChoiceSummary(value)].filter(Boolean).length === 1
+}
+
 export function isChoiceSummary(value: unknown): value is ChoiceSummary {
-  return isRecord(value) && Object.keys(value).every((key) => ["status","id","responsible_position","kind","options","min","max"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "none" || value["status"] === "pending") && (!Object.hasOwn(value, "id") || (typeof value["id"] === 'string' && [...value["id"]].length >= 1)) && (!Object.hasOwn(value, "responsible_position") || (typeof value["responsible_position"] === 'number' && Number.isInteger(value["responsible_position"]) && value["responsible_position"] >= 1 && value["responsible_position"] <= 4)) && (!Object.hasOwn(value, "kind") || (typeof value["kind"] === 'string' && (value["kind"] === "effect" || value["kind"] === "target"))) && (!Object.hasOwn(value, "options") || (Array.isArray(value["options"]) && value["options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1) && value["options"].length >= 2 && value["options"].length <= 4096)) && (!Object.hasOwn(value, "min") || (typeof value["min"] === 'number' && Number.isInteger(value["min"]) && value["min"] >= 0)) && (!Object.hasOwn(value, "max") || (typeof value["max"] === 'number' && Number.isInteger(value["max"]) && value["max"] >= 0))
+  return [isNoChoiceSummary(value),isPendingChoiceSummary(value)].filter(Boolean).length === 1
 }
 
 export function isGameResources(value: unknown): value is GameResources {
@@ -458,11 +531,19 @@ export function isGameParticipant(value: unknown): value is GameParticipant {
 }
 
 export function isGameProjectionResponse(value: unknown): value is GameProjectionResponse {
-  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions","choice","effects"].includes(key)) && isGameSummary(value["game"]) && isSnapshotSummary(value["snapshot"]) && isTurnSummary(value["turn"]) && isGameParticipant(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isGameParticipant(entry)) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string') && isChoiceSummary(value["choice"]) && isEffectResolutionSummary(value["effects"])
+  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions","choice","effects"].includes(key)) && isGameSummary(value["game"]) && isSnapshotSummary(value["snapshot"]) && isTurnSummary(value["turn"]) && isGameParticipant(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isGameParticipant(entry)) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string' && (entry === "complete_dark_arts" || entry === "resolve_choice")) && new Set(value["legal_actions"].map((entry) => JSON.stringify(entry))).size === value["legal_actions"].length && isChoiceSummary(value["choice"]) && isEffectResolutionSummary(value["effects"])
+}
+
+export function isDarkArtsCompletedRealtimeGameEvent(value: unknown): value is DarkArtsCompletedRealtimeGameEvent {
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1 || value["event_version"] === 2 || value["event_version"] === 3) && typeof value["type"] === 'string' && (value["type"] === "dark_arts_completed") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isPendingChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))) && ((isRecord(value) && value["effect_stop"] === "choice") ? (isRecord(value) && Object.hasOwn(value, "choice")) : (!(isRecord(value) && Object.hasOwn(value, "choice"))))
+}
+
+export function isChoiceResolvedRealtimeGameEvent(value: unknown): value is ChoiceResolvedRealtimeGameEvent {
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","choice_id","choice_cause","selected_options","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 3) && typeof value["type"] === 'string' && (value["type"] === "choice_resolved") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["choice_id"] === 'string' && [...value["choice_id"]].length >= 1 && [...value["choice_id"]].length <= 256 && typeof value["choice_cause"] === 'string' && [...value["choice_cause"]].length >= 1 && [...value["choice_cause"]].length <= 256 && Array.isArray(value["selected_options"]) && value["selected_options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["selected_options"].length >= 0 && value["selected_options"].length <= 32 && new Set(value["selected_options"].map((entry) => JSON.stringify(entry))).size === value["selected_options"].length && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isPendingChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))) && ((isRecord(value) && value["effect_stop"] === "choice") ? (isRecord(value) && Object.hasOwn(value, "choice")) : (!(isRecord(value) && Object.hasOwn(value, "choice"))))
 }
 
 export function isRealtimeGameEvent(value: unknown): value is RealtimeGameEvent {
-  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1 || value["event_version"] === 2) && typeof value["type"] === 'string' && (value["type"] === "dark_arts_completed") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
+  return [isDarkArtsCompletedRealtimeGameEvent(value),isChoiceResolvedRealtimeGameEvent(value)].filter(Boolean).length === 1
 }
 
 export function isRealtimeSnapshotMessage(value: unknown): value is RealtimeSnapshotMessage {
@@ -486,7 +567,7 @@ export function isRealtimeEventBatchMessage(value: unknown): value is RealtimeEv
 }
 
 export function isGameCommandReceipt(value: unknown): value is GameCommandReceipt {
-  return isRecord(value) && Object.keys(value).every((key) => ["command_id","type","status","expected_state_version","accepted_state_version","accepted_sequence","expires_at"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["type"] === 'string' && (value["type"] === "complete_dark_arts") && typeof value["status"] === 'string' && (value["status"] === "accepted") && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["accepted_state_version"] === 'number' && Number.isInteger(value["accepted_state_version"]) && value["accepted_state_version"] >= 2 && typeof value["accepted_sequence"] === 'number' && Number.isInteger(value["accepted_sequence"]) && value["accepted_sequence"] >= 1 && typeof value["expires_at"] === 'string' && isRfc3339DateTime(value["expires_at"])
+  return isRecord(value) && Object.keys(value).every((key) => ["command_id","type","status","expected_state_version","accepted_state_version","accepted_sequence","expires_at"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["type"] === 'string' && (value["type"] === "complete_dark_arts" || value["type"] === "resolve_choice") && typeof value["status"] === 'string' && (value["status"] === "accepted") && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["accepted_state_version"] === 'number' && Number.isInteger(value["accepted_state_version"]) && value["accepted_state_version"] >= 2 && typeof value["accepted_sequence"] === 'number' && Number.isInteger(value["accepted_sequence"]) && value["accepted_sequence"] >= 1 && typeof value["expires_at"] === 'string' && isRfc3339DateTime(value["expires_at"])
 }
 
 export function isExecuteGameCommandResponse(value: unknown): value is ExecuteGameCommandResponse {
