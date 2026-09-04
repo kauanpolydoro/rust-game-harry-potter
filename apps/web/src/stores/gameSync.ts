@@ -3,14 +3,17 @@ import { computed, ref } from 'vue'
 
 import {
   isRealtimeEventBatchMessage,
+  isRealtimePresenceMessage,
   isRealtimeSnapshotMessage,
   isRealtimeSynchronizedMessage,
   type GameProjectionResponse,
+  type ParticipantPresence,
   type RealtimeEventBatchMessage,
+  type RealtimePresenceMessage,
 } from '../contracts/identity-access.generated'
 import { useRoomAccessStore } from './roomAccess'
 
-const realtimeSubprotocol = 'hogwarts.realtime.v1'
+const realtimeSubprotocol = 'hogwarts.realtime.v2'
 const baseReconnectDelayMilliseconds = 500
 const maximumReconnectDelayMilliseconds = 30_000
 const hiddenReconnectFloorMilliseconds = 15_000
@@ -75,6 +78,32 @@ function projectionHasCanonicalCursor(projection: GameProjectionResponse): boole
     projection.snapshot.cursor === projection.snapshot.sequence &&
     projection.snapshot.state_version === projection.snapshot.sequence + 1
   )
+}
+
+function presenceMatchesGame(
+  message: RealtimePresenceMessage,
+  game: GameProjectionResponse,
+): boolean {
+  if (message.game_id !== game.game.id) {
+    return false
+  }
+  const gamePositions = game.participants.map((participant) => participant.position).sort()
+  const presencePositions = message.participants.map((participant) => participant.position).sort()
+  if (
+    new Set(presencePositions).size !== presencePositions.length ||
+    presencePositions.length !== gamePositions.length ||
+    presencePositions.some((position, index) => position !== gamePositions[index])
+  ) {
+    return false
+  }
+  const requiredPosition = message.required_participant_position
+  if (requiredPosition !== undefined && !presencePositions.includes(requiredPosition)) {
+    return false
+  }
+  const requiredPresence = message.participants.find(
+    (participant) => participant.position === requiredPosition,
+  )
+  return message.blocked === (requiredPosition !== undefined && requiredPresence?.status !== 'online')
 }
 
 class GameSyncConnection {
@@ -347,6 +376,9 @@ export const useGameSyncStore = defineStore('gameSync', () => {
   const digest = ref('')
   const snapshotVersion = ref(1)
   const currentGameId = ref<string | null>(null)
+  const participantPresence = ref<Record<number, ParticipantPresence['status']>>({})
+  const requiredParticipantPosition = ref<number | null>(null)
+  const gameBlocked = ref(false)
   const animationCancellations = new Set<() => void>()
   const commandsFrozen = computed(() => status.value !== 'connected')
 
@@ -391,6 +423,9 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       cursor.value = game.snapshot.cursor
       digest.value = game.snapshot.digest
       snapshotVersion.value = game.snapshot.snapshot_version
+      participantPresence.value = {}
+      requiredParticipantPosition.value = null
+      gameBlocked.value = false
     } else {
       cursor.value = Math.max(cursor.value, game.snapshot.cursor)
       if (cursor.value === game.snapshot.cursor) {
@@ -422,6 +457,17 @@ export const useGameSyncStore = defineStore('gameSync', () => {
 
     const current = roomAccess.game
     if (!current || current.game.id !== currentGameId.value) {
+      return
+    }
+    if (isRealtimePresenceMessage(message)) {
+      if (!presenceMatchesGame(message, current)) {
+        return
+      }
+      participantPresence.value = Object.fromEntries(
+        message.participants.map((participant) => [participant.position, participant.status]),
+      )
+      requiredParticipantPosition.value = message.required_participant_position ?? null
+      gameBlocked.value = message.blocked
       return
     }
     if (isRealtimeSnapshotMessage(message)) {
@@ -498,7 +544,14 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     cursor.value = 0
     digest.value = ''
     snapshotVersion.value = 1
+    participantPresence.value = {}
+    requiredParticipantPosition.value = null
+    gameBlocked.value = false
     discardAnimations()
+  }
+
+  function presenceFor(position: number): ParticipantPresence['status'] | null {
+    return participantPresence.value[position] ?? null
   }
 
   function registerAnimationCancellation(cancel: () => void): () => void {
@@ -511,8 +564,12 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     connect,
     cursor,
     disconnect,
+    gameBlocked,
+    participantPresence,
+    presenceFor,
     registerAnimationCancellation,
     receive,
+    requiredParticipantPosition,
     resynchronize,
     snapshotVersion,
     status,

@@ -2172,8 +2172,34 @@ impl RawWebSocket {
         loop {
             let (opcode, payload) = self.read_frame().await;
             match opcode {
-                1 => return String::from_utf8(payload).expect("text frames must contain UTF-8"),
+                1 => {
+                    let serialized =
+                        String::from_utf8(payload).expect("text frames must contain UTF-8");
+                    let is_presence = serde_json::from_str::<Value>(&serialized)
+                        .is_ok_and(|message| message["type"] == "presence");
+                    if !is_presence {
+                        return serialized;
+                    }
+                }
                 8 => panic!("the WebSocket closed before a text message arrived"),
+                9 | 10 => {}
+                other => panic!("unexpected WebSocket opcode {other}"),
+            }
+        }
+    }
+
+    async fn read_presence(&mut self) -> Value {
+        loop {
+            let (opcode, payload) = self.read_frame().await;
+            match opcode {
+                1 => {
+                    let message: Value = serde_json::from_slice(&payload)
+                        .expect("realtime text messages must contain JSON");
+                    if message["type"] == "presence" {
+                        return message;
+                    }
+                }
+                8 => panic!("the WebSocket closed before presence arrived"),
                 9 | 10 => {}
                 other => panic!("unexpected WebSocket opcode {other}"),
             }
@@ -2191,7 +2217,7 @@ impl RawWebSocket {
                     );
                     return u16::from_be_bytes([payload[0], payload[1]]);
                 }
-                9 | 10 => {}
+                1 | 9 | 10 => {}
                 other => panic!("expected a close frame, received opcode {other}"),
             }
         }
@@ -2306,6 +2332,99 @@ async fn websocket_handshake(
     (status, headers, RawWebSocket { stream, buffered })
 }
 
+async fn additional_session_for_participant(room: &ReadyRoom, participant_role: &str) -> String {
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let guest_session_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r"
+        INSERT INTO guest_sessions (id, guest_identity_id, token_digest)
+        SELECT
+            $1,
+            participants.guest_identity_id,
+            'sha256:' || encode(sha256(convert_to($2, 'UTF8')), 'hex')
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE rooms.code = $3
+          AND participants.role = $4
+        ",
+    )
+    .bind(guest_session_id)
+    .bind(&token)
+    .bind(&room.room_code)
+    .bind(participant_role)
+    .execute(&room.database)
+    .await
+    .expect("the additional guest session must be inserted");
+    sqlx::query(
+        r"
+        INSERT INTO device_sessions (id, guest_session_id, participant_id)
+        SELECT $1, $2, participants.id
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE rooms.code = $3
+          AND participants.role = $4
+        ",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(guest_session_id)
+    .bind(&room.room_code)
+    .bind(participant_role)
+    .execute(&room.database)
+    .await
+    .expect("the additional device session must be inserted");
+
+    format!("__Host-session={token}")
+}
+
+fn participant_presence(message: &Value, position: usize) -> &str {
+    message["participants"]
+        .as_array()
+        .and_then(|participants| {
+            participants
+                .iter()
+                .find(|participant| participant["position"] == position)
+        })
+        .and_then(|participant| participant["status"].as_str())
+        .expect("the participant presence must be present")
+}
+
+async fn current_official_state(room: &ReadyRoom) -> (i64, i64, String, i64) {
+    sqlx::query_as::<_, (i64, i64, String, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            games.expires_at::text,
+            (SELECT count(*) FROM game_events WHERE game_events.game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the official state must be queryable")
+}
+
+async fn connect_current_game(address: std::net::SocketAddr, cookie: &str) -> RawWebSocket {
+    let (status, _, mut socket) = websocket_handshake(
+        address,
+        "/api/games/current/events",
+        Some(cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v2"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let _ = socket.read_text().await;
+    socket
+}
+
 #[tokio::test]
 async fn websocket_handshake_requires_the_session_exact_origin_and_current_protocol() {
     let room = ready_room().await;
@@ -2356,6 +2475,21 @@ async fn websocket_handshake_requires_the_session_exact_origin_and_current_proto
         headers
             .to_ascii_lowercase()
             .contains("sec-websocket-protocol: hogwarts.realtime.v1")
+    );
+
+    let (status, headers, _) = websocket_handshake(
+        address,
+        &path,
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v2"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("sec-websocket-protocol: hogwarts.realtime.v2")
     );
     server.abort();
 }
@@ -2423,13 +2557,16 @@ async fn an_idle_websocket_receives_the_configured_heartbeat() {
         "/api/games/current/events?snapshot_version=1",
         Some(&room.host_cookie),
         Some("http://127.0.0.1:5173"),
-        Some("hogwarts.realtime.v1"),
+        Some("hogwarts.realtime.v2"),
     )
     .await;
     assert_eq!(status, 101);
     tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_text())
         .await
         .expect("the initial snapshot must arrive");
+    tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_presence())
+        .await
+        .expect("the initial presence must arrive");
 
     let (opcode, payload) =
         tokio::time::timeout(std::time::Duration::from_secs(22), socket.read_frame())
@@ -2493,6 +2630,110 @@ async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participan
         assert!(!serialized.contains("prng_seed"));
         assert!(!serialized.contains("__Host-session"));
     }
+    server.abort();
+}
+
+#[tokio::test]
+async fn heartbeat_presence_blocks_only_the_required_offline_participant_without_mutating_game() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-presence").await;
+    let initial_state = current_official_state(&room).await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+
+    let mut host_socket = connect_current_game(address, &room.host_cookie).await;
+    let host_presence = host_socket.read_presence().await;
+    assert_eq!(participant_presence(&host_presence, 1), "online");
+    assert_eq!(participant_presence(&host_presence, 2), "offline");
+    assert_eq!(host_presence["required_participant_position"], 1);
+    assert_eq!(host_presence["blocked"], false);
+
+    let mut guest_socket = connect_current_game(address, &room.guest_cookie).await;
+    let guest_presence = guest_socket.read_presence().await;
+    assert_eq!(participant_presence(&guest_presence, 1), "online");
+    assert_eq!(participant_presence(&guest_presence, 2), "online");
+    assert_eq!(guest_presence["blocked"], false);
+
+    drop(host_socket);
+    let reconnecting = tokio::time::timeout(Duration::from_secs(2), guest_socket.read_presence())
+        .await
+        .expect("disconnect must publish reconnecting presence");
+    assert_eq!(participant_presence(&reconnecting, 1), "reconnecting");
+    assert_eq!(reconnecting["required_participant_position"], 1);
+    assert_eq!(reconnecting["blocked"], true);
+
+    sqlx::query(
+        r"
+        UPDATE game_realtime_connections AS connections
+        SET connected_at = clock_timestamp() - INTERVAL '62 seconds',
+            last_heartbeat_at = clock_timestamp() - INTERVAL '61 seconds'
+        FROM participants, rooms
+        WHERE connections.participant_id = participants.id
+          AND participants.room_id = rooms.id
+          AND rooms.code = $1
+          AND participants.position = 1
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&room.database)
+    .await
+    .expect("the test heartbeat must be ageable");
+    let offline = tokio::time::timeout(Duration::from_secs(7), guest_socket.read_presence())
+        .await
+        .expect("the presence reconciliation must derive offline from the heartbeat");
+    assert_eq!(participant_presence(&offline, 1), "offline");
+    assert_eq!(offline["blocked"], true);
+
+    let after_presence = current_official_state(&room).await;
+    assert_eq!(after_presence, initial_state);
+
+    let command = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("presence must not deny an otherwise authorized command");
+    assert_eq!(command.status(), StatusCode::OK);
+    let event: Value = serde_json::from_str(
+        &tokio::time::timeout(Duration::from_secs(2), guest_socket.read_text())
+            .await
+            .expect("the official event must still be published"),
+    )
+    .expect("the official event batch must be JSON");
+    assert_eq!(event["type"], "events");
+    let automatic = tokio::time::timeout(Duration::from_secs(2), guest_socket.read_presence())
+        .await
+        .expect("the resolved decision must publish unblocked presence");
+    assert!(automatic.get("required_participant_position").is_none());
+    assert_eq!(participant_presence(&automatic, 1), "offline");
+    assert_eq!(automatic["blocked"], false);
+    server.abort();
+}
+
+#[tokio::test]
+async fn either_of_two_valid_sessions_keeps_the_participant_online() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-two-sessions").await;
+    let second_host_cookie = additional_session_for_participant(&room, "host").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+
+    let mut first_host_socket = connect_current_game(address, &room.host_cookie).await;
+    let _ = first_host_socket.read_presence().await;
+    let mut second_host_socket = connect_current_game(address, &second_host_cookie).await;
+    let _ = second_host_socket.read_presence().await;
+
+    drop(first_host_socket);
+    let mut guest_socket = connect_current_game(address, &room.guest_cookie).await;
+    let one_session_online = guest_socket.read_presence().await;
+    assert_eq!(participant_presence(&one_session_online, 1), "online");
+    assert_eq!(one_session_online["blocked"], false);
+
+    drop(second_host_socket);
+    let no_session_online =
+        tokio::time::timeout(Duration::from_secs(2), guest_socket.read_presence())
+            .await
+            .expect("losing the final session must publish reconnecting presence");
+    assert_eq!(participant_presence(&no_session_online, 1), "reconnecting");
+    assert_eq!(no_session_online["blocked"], true);
     server.abort();
 }
 
