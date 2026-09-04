@@ -152,14 +152,19 @@ pub(super) async fn persist_game(
             sampling_algorithm
         )
         VALUES (
-            $1, $2, $3, 'in_progress', $4, $5, $6, $7, $8, $9,
-            $10, $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20
         )
         ",
     )
     .bind(game.id)
     .bind(game.actor.room_id)
     .bind(game.actor.participant_id)
+    .bind(match game.state.status() {
+        game_domain::GameStatus::InProgress => "in_progress",
+        game_domain::GameStatus::Lost => "lost",
+        game_domain::GameStatus::Won => "won",
+    })
     .bind(&game.content.adventure_id)
     .bind(&game.content.adventure_name)
     .bind(&game.content.manifest_digest)

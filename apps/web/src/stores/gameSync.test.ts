@@ -49,6 +49,7 @@ class FakeWebSocket {
 }
 
 function projection(cursor = 0): GameProjectionResponse {
+  const activePosition = (cursor % 2) + 1
   return {
     choice: { status: 'none' },
     effects: { outcomes: [], status: 'idle' },
@@ -58,7 +59,9 @@ function projection(cursor = 0): GameProjectionResponse {
       id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
       status: 'in_progress',
     },
-    legal_actions: cursor === 0 ? ['complete_dark_arts'] : [],
+    legal_actions: activePosition === 1 ? ['end_hero_actions'] : [],
+    queued_effect_count: 0,
+    queued_phases: ['end_turn'],
     participant: {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
@@ -99,9 +102,9 @@ function projection(cursor = 0): GameProjectionResponse {
       },
     },
     turn: {
-      active_position: 1,
-      number: 1,
-      phase: cursor === 0 ? 'dark_arts' : 'hero_action',
+      active_position: activePosition,
+      number: cursor + 1,
+      phase: 'hero_actions',
     },
   }
 }
@@ -109,18 +112,38 @@ function projection(cursor = 0): GameProjectionResponse {
 function eventBatch(fromCursor: number, cursor: number) {
   return {
     cursor,
-    events: Array.from({ length: cursor - fromCursor }, (_, index) => ({
-      actor_position: 1,
-      command_id: '8cbef381-3a98-4731-b16f-8b55db5e8f63',
-      effect_stop: 'stable',
-      effects: [],
-      event_version: 1,
-      prng_counter: 0,
-      sequence: fromCursor + index + 1,
-      state_version: fromCursor + index + 2,
-      turn: 1,
-      type: 'dark_arts_completed',
-    })),
+    events: Array.from({ length: cursor - fromCursor }, (_, index) => {
+      const sequence = fromCursor + index + 1
+      const activePosition = (sequence % 2) + 1
+      return {
+        actor_position: activePosition === 1 ? 2 : 1,
+        command_id: '8cbef381-3a98-4731-b16f-8b55db5e8f63',
+        control: {
+          active_position: activePosition,
+          decision_point: { responsible_position: activePosition, type: 'player_intent' },
+          phase: 'hero_actions',
+          queued_effect_count: 0,
+          queued_phases: ['end_turn'],
+          status: 'in_progress',
+          turn: sequence + 1,
+        },
+        end_turn: [
+          { before: 0, resource: 'attack', type: 'resource_reset' },
+          { before: 0, resource: 'influence', type: 'resource_reset' },
+        ],
+        event_version: 4,
+        prng_counter: 0,
+        sequence,
+        state_version: sequence + 1,
+        steps: [
+          { effects: [], phase: 'end_turn' },
+          { effects: [], phase: 'dark_arts' },
+          { effects: [], phase: 'villains' },
+        ],
+        turn: sequence,
+        type: 'turn_completed',
+      }
+    }),
     from_cursor: fromCursor,
     projection: projection(cursor),
     protocol_version: 2,
@@ -261,7 +284,7 @@ describe('official game synchronization', () => {
 
     socket?.receive(eventBatch(0, 1))
     expect(roomAccess.game?.snapshot.cursor).toBe(1)
-    expect(roomAccess.game?.turn.phase).toBe('hero_action')
+    expect(roomAccess.game?.turn.phase).toBe('hero_actions')
 
     const duplicate = eventBatch(0, 1)
     duplicate.projection.game.expires_at = '2099-01-01T00:00:00Z'

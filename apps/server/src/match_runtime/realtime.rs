@@ -12,10 +12,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
 use uuid::Uuid;
 
+use game_domain::DecisionPoint;
+
 use super::codec::{command_domain_state, decode_persisted_event, decode_persisted_snapshot};
 use super::{
-    GameProjectionResponse, PersistedEffectOutcome, PersistedEventChoice, StoredGameEvent,
-    postgres, projection_for_participant,
+    GameProjectionResponse, PersistedDecisionPoint, PersistedEffectOutcome,
+    PersistedEndTurnOutcome, PersistedEngineControl, PersistedEventChoice, PersistedTurnStep,
+    StoredGameEvent, postgres, projection_for_participant,
 };
 use crate::{
     AppState,
@@ -142,7 +145,25 @@ struct RealtimeParticipantPresence {
 }
 
 #[derive(Serialize)]
-struct RealtimeGameEvent {
+#[serde(untagged)]
+enum RealtimeGameEvent {
+    Legacy(RealtimeLegacyGameEvent),
+    TurnCompleted(RealtimeTurnCompletedGameEvent),
+    ChoiceResolved(RealtimeChoiceResolvedGameEvent),
+}
+
+impl RealtimeGameEvent {
+    const fn sequence(&self) -> i64 {
+        match self {
+            Self::Legacy(event) => event.sequence,
+            Self::TurnCompleted(event) => event.sequence,
+            Self::ChoiceResolved(event) => event.sequence,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct RealtimeLegacyGameEvent {
     event_version: i16,
     #[serde(rename = "type")]
     event_type: &'static str,
@@ -175,6 +196,62 @@ struct RealtimeChoiceSummary {
     options: Vec<String>,
     min: u16,
     max: u16,
+}
+
+#[derive(Serialize)]
+struct RealtimeTurnCompletedGameEvent {
+    event_version: i16,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    sequence: i64,
+    state_version: i64,
+    turn: u32,
+    actor_position: i16,
+    end_turn: Vec<PersistedEndTurnOutcome>,
+    steps: Vec<PersistedTurnStep>,
+    control: RealtimeEngineControl,
+    prng_counter: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct RealtimeChoiceResolvedGameEvent {
+    event_version: i16,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    sequence: i64,
+    state_version: i64,
+    turn: u32,
+    actor_position: i16,
+    choice_id: String,
+    choice_cause: String,
+    selected_options: Vec<String>,
+    steps: Vec<PersistedTurnStep>,
+    control: RealtimeEngineControl,
+    prng_counter: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct RealtimeEngineControl {
+    status: String,
+    turn: u32,
+    phase: String,
+    active_position: u8,
+    queued_phases: Vec<String>,
+    queued_effect_count: usize,
+    decision_point: RealtimeDecisionPoint,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RealtimeDecisionPoint {
+    None,
+    Automatic,
+    PlayerIntent { responsible_position: u8 },
+    EffectChoice { choice: RealtimeChoiceSummary },
 }
 
 struct RealtimePosition {
@@ -817,14 +894,8 @@ async fn realtime_presence(
         .map_err(|_| RealtimeFailure::InvalidData("decode presence decision state"))?;
     let domain_state = command_domain_state(&persisted)
         .map_err(|_| RealtimeFailure::InvalidData("restore presence decision state"))?;
-    let effect_rules = state
-        .content
-        .effect_rules(&persisted.versions.manifest_digest)
-        .ok_or(RealtimeFailure::InvalidData(
-            "manifest effect rules are unavailable",
-        ))?;
     let required_participant_position =
-        game_domain::required_participant_for_decision(&domain_state, &effect_rules).map(i16::from);
+        required_participant_position(domain_state.decision_point());
     let participants = stored_participants
         .into_iter()
         .map(|(position, status)| {
@@ -864,6 +935,16 @@ async fn realtime_presence(
         required_participant_position,
         blocked,
     })
+}
+
+fn required_participant_position(decision_point: Option<&DecisionPoint>) -> Option<i16> {
+    match decision_point {
+        Some(DecisionPoint::PlayerIntent {
+            responsible_position,
+        }) => Some(i16::from(*responsible_position)),
+        Some(DecisionPoint::EffectChoice(choice)) => Some(i16::from(choice.responsible_position)),
+        None | Some(DecisionPoint::Automatic) => None,
+    }
 }
 
 async fn synchronize_socket(
@@ -1091,9 +1172,27 @@ fn realtime_event(
     if !metadata_matches {
         return Err(ApiError::internal());
     }
-    let event_type = match (payload.event_version, stored.event_type.as_str()) {
-        (1..=3, "dark_arts_completed") => "dark_arts_completed",
-        (3, "choice_resolved") => "choice_resolved",
+    let command_id =
+        (stored.actor_participant_id == participant_id).then(|| stored.command_id.to_string());
+
+    match (payload.event_version, payload.event_type.as_str()) {
+        (1..=3, "dark_arts_completed") | (3, "choice_resolved") => {
+            realtime_legacy_event(stored, payload, command_id)
+        }
+        (4, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
+        (4, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn realtime_legacy_event(
+    stored: &StoredGameEvent,
+    payload: super::PersistedGameEvent,
+    command_id: Option<String>,
+) -> Result<RealtimeGameEvent, ApiError> {
+    let event_type = match payload.event_type.as_str() {
+        "dark_arts_completed" => "dark_arts_completed",
+        "choice_resolved" => "choice_resolved",
         _ => return Err(ApiError::internal()),
     };
     let choice = payload
@@ -1101,15 +1200,7 @@ fn realtime_event(
         .as_ref()
         .map(realtime_choice_summary)
         .transpose()?;
-    if !matches!(
-        payload.effect_stop.as_str(),
-        "stable" | "choice" | "terminal"
-    ) || (payload.effect_stop == "choice") != choice.is_some()
-    {
-        return Err(ApiError::internal());
-    }
-
-    Ok(RealtimeGameEvent {
+    Ok(RealtimeGameEvent::Legacy(RealtimeLegacyGameEvent {
         event_version: stored.event_version,
         event_type,
         sequence: stored.sequence,
@@ -1123,9 +1214,92 @@ fn realtime_event(
         effect_stop: payload.effect_stop,
         choice,
         prng_counter: payload.prng_counter,
-        command_id: (stored.actor_participant_id == participant_id)
-            .then(|| stored.command_id.to_string()),
-    })
+        command_id,
+    }))
+}
+
+fn realtime_turn_completed_event(
+    stored: &StoredGameEvent,
+    payload: super::PersistedGameEvent,
+    command_id: Option<String>,
+) -> Result<RealtimeGameEvent, ApiError> {
+    let (Some(end_turn), Some(steps), Some(control)) =
+        (payload.end_turn, payload.steps, payload.control)
+    else {
+        return Err(ApiError::internal());
+    };
+    Ok(RealtimeGameEvent::TurnCompleted(
+        RealtimeTurnCompletedGameEvent {
+            event_version: stored.event_version,
+            event_type: "turn_completed",
+            sequence: stored.sequence,
+            state_version: stored.state_version,
+            turn: payload.turn,
+            actor_position: stored.actor_position,
+            end_turn,
+            steps,
+            control: realtime_engine_control(control),
+            prng_counter: payload.prng_counter,
+            command_id,
+        },
+    ))
+}
+
+fn realtime_choice_resolved_event(
+    stored: &StoredGameEvent,
+    payload: super::PersistedGameEvent,
+    command_id: Option<String>,
+) -> Result<RealtimeGameEvent, ApiError> {
+    let (Some(choice_id), Some(choice_cause), Some(selected_options), Some(steps), Some(control)) = (
+        payload.choice_id,
+        payload.choice_cause,
+        payload.selected_options,
+        payload.steps,
+        payload.control,
+    ) else {
+        return Err(ApiError::internal());
+    };
+    Ok(RealtimeGameEvent::ChoiceResolved(
+        RealtimeChoiceResolvedGameEvent {
+            event_version: stored.event_version,
+            event_type: "choice_resolved",
+            sequence: stored.sequence,
+            state_version: stored.state_version,
+            turn: payload.turn,
+            actor_position: stored.actor_position,
+            choice_id,
+            choice_cause,
+            selected_options,
+            steps,
+            control: realtime_engine_control(control),
+            prng_counter: payload.prng_counter,
+            command_id,
+        },
+    ))
+}
+
+fn realtime_engine_control(control: PersistedEngineControl) -> RealtimeEngineControl {
+    let decision_point = match control.decision_point {
+        PersistedDecisionPoint::None => RealtimeDecisionPoint::None,
+        PersistedDecisionPoint::Automatic => RealtimeDecisionPoint::Automatic,
+        PersistedDecisionPoint::PlayerIntent {
+            responsible_position,
+        } => RealtimeDecisionPoint::PlayerIntent {
+            responsible_position,
+        },
+        PersistedDecisionPoint::EffectChoice { choice } => RealtimeDecisionPoint::EffectChoice {
+            choice: realtime_current_choice_summary(&choice),
+        },
+    };
+    RealtimeEngineControl {
+        status: control.status,
+        turn: control.turn,
+        phase: control.phase,
+        active_position: control.active_position,
+        queued_phases: control.queued_phases,
+        queued_effect_count: control.queued_effects.len(),
+        decision_point,
+    }
 }
 
 fn realtime_choice_summary(
@@ -1163,6 +1337,19 @@ fn realtime_choice_summary(
     })
 }
 
+fn realtime_current_choice_summary(choice: &super::PersistedEffectChoice) -> RealtimeChoiceSummary {
+    RealtimeChoiceSummary {
+        status: "pending",
+        id: choice.id.clone(),
+        cause: choice.cause.clone(),
+        responsible_position: choice.responsible_position,
+        kind: choice.kind.clone(),
+        options: choice.options.clone(),
+        min: choice.min,
+        max: choice.max,
+    }
+}
+
 fn legacy_choice_cause(id: &str, kind: &str) -> Result<String, ApiError> {
     let marker = match kind {
         "effect" => ":effect:",
@@ -1191,7 +1378,7 @@ fn events_are_contiguous(
         && events
             .iter()
             .zip((from_cursor + 1)..=current_cursor)
-            .all(|(event, expected)| event.sequence == expected)
+            .all(|(event, expected)| event.sequence() == expected)
 }
 
 async fn send_realtime_message(
@@ -1211,7 +1398,54 @@ async fn send_realtime_message(
 
 #[cfg(test)]
 mod tests {
-    use super::replay_gap_requires_snapshot;
+    use game_domain::{
+        DecisionPoint, EffectContinuation, EffectCursor, PendingEffectChoice,
+        PendingEffectChoiceKind,
+    };
+    use serde_json::{Value, json};
+    use uuid::Uuid;
+
+    use super::{
+        StoredGameEvent, realtime_event, replay_gap_requires_snapshot,
+        required_participant_position,
+    };
+
+    fn stored_event(payload: &Value, actor_participant_id: Uuid) -> StoredGameEvent {
+        let event_version = payload["event_version"]
+            .as_i64()
+            .and_then(|value| i16::try_from(value).ok())
+            .expect("fixture event version must fit");
+        let event_type = payload["type"]
+            .as_str()
+            .expect("fixture event type must be text")
+            .to_owned();
+        let sequence = payload["sequence"]
+            .as_i64()
+            .expect("fixture sequence must fit");
+        let state_version = payload["state_version"]
+            .as_i64()
+            .expect("fixture state version must fit");
+        let actor_position = payload["actor_position"]
+            .as_i64()
+            .and_then(|value| i16::try_from(value).ok())
+            .expect("fixture actor position must fit");
+        StoredGameEvent {
+            event_version,
+            event_type,
+            command_id: Uuid::new_v4(),
+            actor_participant_id,
+            actor_position,
+            sequence,
+            state_version,
+            payload_json: payload.to_string(),
+        }
+    }
+
+    fn serialized_realtime_event(stored: &StoredGameEvent, viewer: Uuid) -> Value {
+        let event = realtime_event(stored, viewer)
+            .unwrap_or_else(|_| panic!("valid persisted event must become realtime output"));
+        serde_json::to_value(event).expect("realtime event must serialize")
+    }
 
     #[test]
     fn replay_gap_is_bounded_to_the_incremental_recovery_window() {
@@ -1219,5 +1453,287 @@ mod tests {
         assert!(replay_gap_requires_snapshot(Some(0), 101));
         assert!(replay_gap_requires_snapshot(Some(2), 1));
         assert!(replay_gap_requires_snapshot(None, 1));
+    }
+
+    #[test]
+    fn only_human_decisions_require_a_participant() {
+        assert_eq!(required_participant_position(None), None);
+        assert_eq!(
+            required_participant_position(Some(&DecisionPoint::Automatic)),
+            None
+        );
+        assert_eq!(
+            required_participant_position(Some(&DecisionPoint::PlayerIntent {
+                responsible_position: 2,
+            })),
+            Some(2)
+        );
+        let choice = PendingEffectChoice {
+            id: "choice:dark".to_owned(),
+            cause: "rule:dark".to_owned(),
+            responsible_position: 3,
+            kind: PendingEffectChoiceKind::Target,
+            options: vec!["hero:one".to_owned(), "hero:two".to_owned()],
+            min: 1,
+            max: 1,
+            continuation: EffectContinuation {
+                choice_cursor: EffectCursor {
+                    rule_id: "rule:dark".to_owned(),
+                    path: Vec::new(),
+                },
+                queue: Vec::new(),
+                steps_completed: 1,
+            },
+        };
+        assert_eq!(
+            required_participant_position(Some(&DecisionPoint::EffectChoice(choice))),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn legacy_realtime_events_expose_only_effect_resolution_fields() {
+        let actor = Uuid::new_v4();
+        let payloads = [
+            json!({
+                "event_version": 1,
+                "type": "dark_arts_completed",
+                "sequence": 1,
+                "state_version": 2,
+                "turn": 1,
+                "actor_position": 1
+            }),
+            json!({
+                "event_version": 2,
+                "type": "dark_arts_completed",
+                "sequence": 2,
+                "state_version": 3,
+                "turn": 1,
+                "actor_position": 1,
+                "effects": [],
+                "effect_stop": "stable",
+                "choice": null,
+                "prng_counter": 0
+            }),
+        ];
+
+        for payload in payloads {
+            let stored = stored_event(&payload, actor);
+            let event = serialized_realtime_event(&stored, actor);
+            assert_eq!(event["type"], "dark_arts_completed");
+            assert_eq!(event["effects"], json!([]));
+            assert_eq!(event["effect_stop"], "stable");
+            assert!(event.get("choice").is_none());
+            assert!(event.get("end_turn").is_none());
+            assert!(event.get("steps").is_none());
+            assert!(event.get("control").is_none());
+            assert_eq!(event["command_id"], stored.command_id.to_string());
+        }
+    }
+
+    #[test]
+    fn choice_resolved_v3_remains_public_without_its_private_continuation() {
+        let actor = Uuid::new_v4();
+        let stored = stored_event(
+            &json!({
+                "event_version": 3,
+                "type": "choice_resolved",
+                "sequence": 2,
+                "state_version": 3,
+                "turn": 1,
+                "actor_position": 2,
+                "choice_id": "choice:effect:0",
+                "choice_cause": "rule:previous",
+                "selected_options": ["option:1"],
+                "effects": [],
+                "effect_stop": "choice",
+                "choice": {
+                    "id": "choice:target:1",
+                    "cause": "rule:next",
+                    "responsible_position": 3,
+                    "kind": "target",
+                    "options": ["hero:1", "hero:2"],
+                    "min": 1,
+                    "max": 1,
+                    "continuation": {
+                        "choice_cursor": { "rule_id": "rule:next", "path": [] },
+                        "queue": [],
+                        "steps_completed": 1
+                    }
+                },
+                "prng_counter": 0
+            }),
+            actor,
+        );
+
+        let event = serialized_realtime_event(&stored, actor);
+        assert_eq!(event["type"], "choice_resolved");
+        assert_eq!(event["choice"]["responsible_position"], 3);
+        assert!(event["choice"].get("continuation").is_none());
+        assert_eq!(event["choice_id"], "choice:effect:0");
+        assert_eq!(event["command_id"], stored.command_id.to_string());
+    }
+
+    #[test]
+    fn turn_completed_realtime_event_exposes_only_v4_fields_and_redacts_private_state() {
+        let actor = Uuid::new_v4();
+        let stored = stored_event(
+            &json!({
+                "event_version": 4,
+                "type": "turn_completed",
+                "sequence": 1,
+                "state_version": 2,
+                "turn": 1,
+                "actor_position": 1,
+                "end_turn": [
+                    { "type": "resource_reset", "resource": "attack", "before": 0 },
+                    { "type": "resource_reset", "resource": "influence", "before": 0 }
+                ],
+                "steps": [
+                    { "phase": "end_turn", "effects": [] },
+                    { "phase": "dark_arts", "effects": [] },
+                    { "phase": "villains", "effects": [] }
+                ],
+                "control": {
+                    "status": "in_progress",
+                    "turn": 2,
+                    "phase": "hero_actions",
+                    "active_position": 2,
+                    "queued_phases": ["end_turn"],
+                    "queued_effects": [],
+                    "decision_point": {
+                        "type": "player_intent",
+                        "responsible_position": 2
+                    }
+                },
+                "prng_counter": 0
+            }),
+            actor,
+        );
+
+        let actor_event = serialized_realtime_event(&stored, actor);
+        assert_eq!(actor_event["type"], "turn_completed");
+        assert_eq!(
+            actor_event["end_turn"],
+            json!([
+                { "type": "resource_reset", "resource": "attack", "before": 0 },
+                { "type": "resource_reset", "resource": "influence", "before": 0 }
+            ])
+        );
+        assert_eq!(actor_event["steps"].as_array().map(Vec::len), Some(3));
+        assert_eq!(actor_event["control"]["phase"], "hero_actions");
+        assert_eq!(actor_event["control"]["queued_effect_count"], 0);
+        assert!(actor_event["control"].get("queued_effects").is_none());
+        assert!(actor_event.get("effects").is_none());
+        assert!(actor_event.get("effect_stop").is_none());
+        assert!(actor_event.get("choice").is_none());
+        assert_eq!(actor_event["command_id"], stored.command_id.to_string());
+
+        let observer_event = serialized_realtime_event(&stored, Uuid::new_v4());
+        assert!(observer_event.get("command_id").is_none());
+    }
+
+    #[test]
+    fn choice_resolved_v4_preserves_responsibility_without_exposing_continuation() {
+        let actor = Uuid::new_v4();
+        let stored = stored_event(
+            &json!({
+                "event_version": 4,
+                "type": "choice_resolved",
+                "sequence": 2,
+                "state_version": 3,
+                "turn": 1,
+                "actor_position": 2,
+                "choice_id": "choice:effect:0",
+                "choice_cause": "rule:previous",
+                "selected_options": ["option:1"],
+                "steps": [{ "phase": "dark_arts", "effects": [] }],
+                "control": {
+                    "status": "in_progress",
+                    "turn": 1,
+                    "phase": "dark_arts",
+                    "active_position": 1,
+                    "queued_phases": ["villains", "hero_actions", "end_turn"],
+                    "queued_effects": [],
+                    "decision_point": {
+                        "type": "effect_choice",
+                        "choice": {
+                            "id": "choice:target:1",
+                            "cause": "rule:next",
+                            "responsible_position": 3,
+                            "kind": "target",
+                            "options": ["hero:1", "hero:2"],
+                            "min": 1,
+                            "max": 1,
+                            "continuation": {
+                                "choice_cursor": {
+                                    "rule_id": "rule:next",
+                                    "path": []
+                                },
+                                "queue": [],
+                                "steps_completed": 1
+                            }
+                        }
+                    }
+                },
+                "prng_counter": 0
+            }),
+            actor,
+        );
+
+        let event = serialized_realtime_event(&stored, actor);
+        assert_eq!(event["type"], "choice_resolved");
+        assert_eq!(event["control"]["active_position"], 1);
+        assert_eq!(
+            event["control"]["decision_point"]["choice"]["responsible_position"],
+            3
+        );
+        assert_eq!(event["control"]["queued_effect_count"], 0);
+        assert!(event["control"].get("queued_effects").is_none());
+        assert!(
+            event["control"]["decision_point"]["choice"]
+                .get("continuation")
+                .is_none()
+        );
+        assert_eq!(event["command_id"], stored.command_id.to_string());
+    }
+
+    #[test]
+    fn realtime_event_rejects_metadata_mismatch_and_cross_version_fields() {
+        let actor = Uuid::new_v4();
+        let mut mismatched = stored_event(
+            &json!({
+                "event_version": 1,
+                "type": "dark_arts_completed",
+                "sequence": 1,
+                "state_version": 2,
+                "turn": 1,
+                "actor_position": 1
+            }),
+            actor,
+        );
+        mismatched.event_type = "turn_completed".to_owned();
+        assert!(realtime_event(&mismatched, actor).is_err());
+
+        let invalid_shape = stored_event(
+            &json!({
+                "event_version": 4,
+                "type": "turn_completed",
+                "sequence": 1,
+                "state_version": 2,
+                "turn": 1,
+                "actor_position": 1,
+                "effects": [],
+                "end_turn": [
+                    { "type": "resource_reset", "resource": "attack", "before": 0 },
+                    { "type": "resource_reset", "resource": "influence", "before": 0 }
+                ],
+                "steps": [],
+                "control": {},
+                "prng_counter": 0
+            }),
+            actor,
+        );
+        assert!(realtime_event(&invalid_shape, actor).is_err());
     }
 }

@@ -35,14 +35,47 @@ const requiredParticipant = computed(() =>
 const commandIsBusy = computed(() =>
   ['submitting', 'recovering', 'resyncing'].includes(gameCommand.status),
 )
-const phaseLabel = computed(() => {
-  switch (game.value?.turn.phase) {
+
+function phaseName(phase?: string): string {
+  switch (phase) {
     case 'dark_arts':
       return 'Artes das Trevas'
-    case 'hero_action':
-      return 'Ação do Herói'
+    case 'villains':
+      return 'Vilões'
+    case 'hero_actions':
+      return 'Ações do Herói'
+    case 'end_turn':
+      return 'Fim do turno'
     default:
-      return game.value?.turn.phase ?? ''
+      return phase ?? ''
+  }
+}
+
+const phaseLabel = computed(() => phaseName(game.value?.turn.phase))
+const phaseGuidance = computed(() => {
+  const currentGame = game.value
+  const choice = currentGame?.choice
+  if (currentGame && choice?.status === 'pending') {
+    const owner = currentGame.participants.find(
+      (participant) => participant.position === choice.responsible_position,
+    )
+    return props.isChoiceResponsible
+      ? 'A resolução está pausada nesta fase. Conclua a escolha oficial para a fila continuar.'
+      : `A resolução está pausada nesta fase. Aguardando ${owner?.display_name ?? 'o participante responsável'} concluir a escolha oficial.`
+  }
+  switch (currentGame?.turn.phase) {
+    case 'dark_arts':
+      return 'O servidor está resolvendo os efeitos de Artes das Trevas na ordem oficial. Nenhuma ação manual é necessária.'
+    case 'villains':
+      return 'O servidor está resolvendo os efeitos dos Vilões na ordem oficial. Nenhuma ação manual é necessária.'
+    case 'hero_actions':
+      return currentParticipantPosition.value === currentGame.turn.active_position
+        ? 'Realize suas ações. Ao encerrar, sua mão e as cartas jogadas serão descartadas, você comprará até completar 5 cartas e o turno passará ao próximo participante.'
+        : `${activeParticipant.value?.display_name ?? 'O participante ativo'} realiza as ações deste turno. Sua vez chegará depois da resolução automática seguinte.`
+    case 'end_turn':
+      return 'O servidor está descartando as cartas, repondo a mão e passando o turno automaticamente.'
+    default:
+      return ''
   }
 })
 const commandError = computed(() => {
@@ -425,6 +458,31 @@ function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
           <dd>{{ formatExpiration(game.game.expires_at) }}</dd>
         </div>
       </dl>
+      <p id="turn-phase-guidance" class="phase-guidance" role="status" aria-live="polite">
+        {{ phaseGuidance }}
+      </p>
+
+      <section class="resolution-queue" aria-labelledby="resolution-queue-heading">
+        <div class="resolution-queue-heading">
+          <h3 id="resolution-queue-heading">Fila de resolução</h3>
+          <p>
+            {{
+              game.queued_effect_count === 1
+                ? '1 efeito aguardando'
+                : `${game.queued_effect_count} efeitos aguardando`
+            }}
+          </p>
+        </div>
+        <ol v-if="game.queued_phases.length > 0">
+          <li v-for="(phase, index) in game.queued_phases" :key="`${phase}:${index}`">
+            <span>{{ index === 0 ? 'Próxima' : 'Depois' }}</span>
+            <strong>{{ phaseName(phase) }}</strong>
+          </li>
+        </ol>
+        <p v-if="game.queued_phases.length === 0" class="resolution-queue-empty">
+          Nenhuma fase permanece na fila oficial.
+        </p>
+      </section>
 
       <section
         v-if="game.choice.status === 'pending'"

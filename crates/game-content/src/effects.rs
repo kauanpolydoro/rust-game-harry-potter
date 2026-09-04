@@ -8,6 +8,7 @@ pub struct EffectRule {
     pub id: RuleId,
     #[serde(default)]
     pub trigger: EffectTrigger,
+    pub order: u16,
     #[serde(default)]
     pub cost: Vec<ResourceCost>,
     pub effect: Effect,
@@ -16,9 +17,25 @@ pub struct EffectRule {
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectTrigger {
-    DarkArtsCompleted,
+    #[serde(alias = "dark_arts_completed")]
+    DarkArts,
+    Villains,
     #[default]
     Manual,
+}
+
+impl EffectTrigger {
+    pub(crate) const fn phase_order(self) -> u8 {
+        match self {
+            Self::DarkArts => 0,
+            Self::Villains => 1,
+            Self::Manual => 2,
+        }
+    }
+
+    pub(crate) const fn is_automatic(self) -> bool {
+        matches!(self, Self::DarkArts | Self::Villains)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

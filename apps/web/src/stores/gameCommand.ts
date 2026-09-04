@@ -45,7 +45,7 @@ function loadPendingIntent(): PendingGameIntent | null {
       !isRecord(intent) ||
       typeof intent.commandId !== 'string' ||
       !uuidPattern.test(intent.commandId) ||
-      (intent.commandType !== 'complete_dark_arts' && intent.commandType !== 'resolve_choice') ||
+      (intent.commandType !== 'end_hero_actions' && intent.commandType !== 'resolve_choice') ||
       typeof intent.createdAt !== 'string' ||
       Number.isNaN(Date.parse(intent.createdAt)) ||
       typeof intent.gameId !== 'string' ||
@@ -98,11 +98,11 @@ export const useGameCommandStore = defineStore('gameCommand', {
     }
   },
   actions: {
-    async completeDarkArts(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
+    async endHeroActions(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
       return this.submit(game, {
         command_id: crypto.randomUUID(),
         expected_state_version: game.snapshot.state_version,
-        type: 'complete_dark_arts',
+        type: 'end_hero_actions',
       })
     },
     async resolveChoice(

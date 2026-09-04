@@ -1,19 +1,34 @@
 use game_domain::{
-    EffectChangeCause, EffectContinuation, EffectCursor, EffectDie, EffectEntity,
+    DecisionPoint, EffectChangeCause, EffectContinuation, EffectCursor, EffectDie, EffectEntity,
     EffectGameOutcome, EffectNoOpReason, EffectOutcome, EffectPathSegment, EffectResource,
-    EffectStop, EffectWorld, EffectZone, GameEvent, GamePhase, GameStateRestoreInput, GameStatus,
-    InitialGameState, InitialPlayer, PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect,
-    SNAPSHOT_VERSION, restore_game_state,
+    EffectStop, EffectWorld, EffectZone, EndTurnOutcome, EngineControl, GameEvent, GamePhase,
+    GameStateRestoreInput, GameStatus, InitialGameState, InitialPlayer, MAX_EFFECT_BRANCH_INDEX,
+    MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, MAX_TURN_STEPS, PendingEffectChoice,
+    PendingEffectChoiceKind, QueuedEffect, SNAPSHOT_VERSION, TurnStep, restore_game_state,
 };
+use serde::Deserialize;
 
 use super::{
-    GAME_EVENT_VERSION, PersistedEffectChoice, PersistedEffectContinuation, PersistedEffectCursor,
-    PersistedEffectEntity, PersistedEffectOutcome, PersistedEffectPathSegment, PersistedEffects,
-    PersistedGameEvent, PersistedPlayer, PersistedPrng, PersistedQueuedEffect, PersistedSnapshot,
-    PersistedTurn, PersistedVersions, StoredCommandGame, StoredGame, StoredRoomParticipant,
-    hero_id,
+    GAME_EVENT_VERSION, PersistedDecisionPoint, PersistedEffectChoice, PersistedEffectContinuation,
+    PersistedEffectCursor, PersistedEffectEntity, PersistedEffectOutcome,
+    PersistedEffectPathSegment, PersistedEffects, PersistedEndTurnOutcome, PersistedEngineControl,
+    PersistedEventChoice, PersistedGameEvent, PersistedLegacyEffectChoice, PersistedPlayer,
+    PersistedPrng, PersistedQueuedEffect, PersistedSnapshot, PersistedTurn, PersistedTurnStep,
+    PersistedVersions, StoredCommandGame, StoredGame, StoredRoomParticipant, hero_id,
 };
 use crate::http_support::ApiError;
+
+const CLOSED_EFFECT_EVENT_VERSION: u16 = 2;
+const CHOICE_EVENT_VERSION: u16 = 3;
+const MAX_PERSISTED_JSON_BYTES: usize = 4 * 1_024 * 1_024;
+const MAX_PERSISTED_JSON_TRANSPORT_BYTES: usize = 2 * MAX_PERSISTED_JSON_BYTES;
+const MAX_EFFECT_ENTITIES: usize = 4_096;
+const MAX_EFFECT_OUTCOMES: usize = 4_096;
+const MAX_EFFECT_QUEUE: usize = 4_096;
+const MAX_CHOICE_OPTIONS: usize = 4_096;
+const MAX_END_TURN_OUTCOMES: usize = MAX_EFFECT_ENTITIES + 6;
+const MAX_PILE_CARDS: usize = 4_096;
+const MAX_IDENTIFIER_BYTES: usize = 256;
 
 pub(super) struct StoredSnapshotMetadata<'a> {
     state_digest: &'a str,
@@ -99,17 +114,9 @@ pub(super) fn verify_persisted_snapshot(
 pub(super) fn command_domain_state(
     persisted: &PersistedSnapshot,
 ) -> Result<InitialGameState, ApiError> {
-    let status = match persisted.status.as_str() {
-        "in_progress" => GameStatus::InProgress,
-        "lost" => GameStatus::Lost,
-        "won" => GameStatus::Won,
-        _ => return Err(ApiError::internal()),
-    };
-    let phase = match persisted.turn.phase.as_str() {
-        "dark_arts" => GamePhase::DarkArts,
-        "hero_action" => GamePhase::HeroAction,
-        _ => return Err(ApiError::internal()),
-    };
+    validate_persisted_snapshot(persisted)?;
+    let status = domain_game_status(&persisted.status)?;
+    let phase = domain_game_phase(&persisted.turn.phase)?;
     let players = persisted
         .participants
         .iter()
@@ -133,6 +140,13 @@ pub(super) fn command_domain_state(
         .as_ref()
         .map(domain_effect_choice)
         .transpose()?;
+    let control = domain_snapshot_control(
+        persisted,
+        status,
+        phase,
+        pending_choice.as_ref(),
+        &last_effects,
+    )?;
 
     restore_game_state(GameStateRestoreInput {
         snapshot_version: persisted.snapshot_version,
@@ -155,122 +169,1087 @@ pub(super) fn command_domain_state(
         effect_world,
         last_effects,
         pending_choice,
+        queued_phases: control.queued_phases,
+        queued_effects: control.queued_effects,
+        decision_point: control.decision_point,
+        last_turn_steps: control.last_turn_steps,
     })
     .map_err(|error| ApiError::internal_with("match application operation", error))
 }
 
 pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSnapshot, ApiError> {
+    validate_persisted_json_size(serialized)?;
     let snapshot: PersistedSnapshot = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    if !matches!(snapshot.snapshot_version, 1 | SNAPSHOT_VERSION)
+    if !matches!(snapshot.snapshot_version, 1 | 2 | SNAPSHOT_VERSION)
         || (snapshot.snapshot_version == 1 && snapshot.effects.choice.is_some())
     {
         return Err(ApiError::internal());
     }
+    validate_persisted_snapshot(&snapshot)?;
     Ok(snapshot)
 }
 
 pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
-    let event: PersistedGameEvent = serde_json::from_str(serialized)
+    validate_persisted_json_size(serialized)?;
+    let header: PersistedEventHeader = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let stop_and_choice_are_valid = match event.effect_stop.as_str() {
-        "choice" => event.choice.as_ref().is_some_and(|choice| {
-            event.event_version != GAME_EVENT_VERSION || valid_v3_effect_choice(choice)
-        }),
-        "stable" | "terminal" => event.choice.is_none(),
-        _ => false,
+    let event = match (header.event_version, header.event_type.as_str()) {
+        (1, "dark_arts_completed") => decode_v1_event(serialized)?,
+        (CLOSED_EFFECT_EVENT_VERSION, "dark_arts_completed") => decode_v2_event(serialized)?,
+        (CHOICE_EVENT_VERSION, "dark_arts_completed") => decode_v3_dark_arts_event(serialized)?,
+        (CHOICE_EVENT_VERSION, "choice_resolved") => decode_v3_choice_event(serialized)?,
+        (GAME_EVENT_VERSION, "turn_completed") => decode_v4_turn_event(serialized)?,
+        (GAME_EVENT_VERSION, "choice_resolved") => decode_v4_choice_event(serialized)?,
+        _ => return Err(ApiError::internal()),
     };
-    let version_and_type_are_supported = match event.event_version {
-        1 | 2 => {
-            event.event_type == "dark_arts_completed"
-                && event.choice_id.is_none()
-                && event.choice_cause.is_none()
-                && event.selected_options.is_none()
-        }
-        GAME_EVENT_VERSION => match event.event_type.as_str() {
-            "dark_arts_completed" => {
-                event.choice_id.is_none()
-                    && event.choice_cause.is_none()
-                    && event.selected_options.is_none()
-            }
-            "choice_resolved" => {
-                event.choice_id.as_deref().is_some_and(valid_choice_value)
-                    && event
-                        .choice_cause
-                        .as_deref()
-                        .is_some_and(valid_choice_value)
-                    && event.selected_options.as_deref().is_some_and(|selected| {
-                        selected.len() <= 32
-                            && selected.iter().all(|value| valid_choice_value(value))
-                            && selected
-                                .iter()
-                                .collect::<std::collections::BTreeSet<_>>()
-                                .len()
-                                == selected.len()
-                    })
-            }
-            _ => false,
-        },
-        _ => false,
-    };
-    if !version_and_type_are_supported || !stop_and_choice_are_valid {
-        return Err(ApiError::internal());
-    }
+    validate_persisted_event(&event)?;
     Ok(event)
 }
 
-fn valid_choice_value(value: &str) -> bool {
-    (1..=256).contains(&value.chars().count())
+pub(super) fn validate_persisted_json_size(serialized: &str) -> Result<(), ApiError> {
+    if serialized.len() > MAX_PERSISTED_JSON_TRANSPORT_BYTES
+        || compact_json_size(serialized) > MAX_PERSISTED_JSON_BYTES
+    {
+        return Err(ApiError::internal());
+    }
+    Ok(())
 }
 
-fn valid_v3_effect_choice(choice: &super::PersistedEventChoice) -> bool {
-    let super::PersistedEventChoice::Current(choice) = choice else {
-        return false;
+fn compact_json_size(serialized: &str) -> usize {
+    let mut escaped = false;
+    let mut in_string = false;
+    serialized.bytes().fold(0_usize, |size, byte| {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            size.saturating_add(1)
+        } else if byte.is_ascii_whitespace() {
+            size
+        } else {
+            if byte == b'"' {
+                in_string = true;
+            }
+            size.saturating_add(1)
+        }
+    })
+}
+
+#[derive(Deserialize)]
+struct PersistedEventHeader {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedV1GameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedV2GameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+    effects: Vec<PersistedEffectOutcome>,
+    effect_stop: String,
+    choice: Option<PersistedLegacyEffectChoice>,
+    prng_counter: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedV3DarkArtsGameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+    effects: Vec<PersistedEffectOutcome>,
+    effect_stop: String,
+    choice: Option<PersistedEffectChoice>,
+    prng_counter: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedV3ChoiceGameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+    choice_id: String,
+    choice_cause: String,
+    selected_options: Vec<String>,
+    effects: Vec<PersistedEffectOutcome>,
+    effect_stop: String,
+    choice: Option<PersistedEffectChoice>,
+    prng_counter: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedV4TurnGameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+    end_turn: Vec<PersistedEndTurnOutcome>,
+    steps: Vec<PersistedTurnStep>,
+    control: PersistedEngineControl,
+    prng_counter: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedV4ChoiceGameEvent {
+    event_version: u16,
+    #[serde(rename = "type")]
+    event_type: String,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+    choice_id: String,
+    choice_cause: String,
+    selected_options: Vec<String>,
+    steps: Vec<PersistedTurnStep>,
+    control: PersistedEngineControl,
+    prng_counter: u64,
+}
+
+fn decode_v1_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    let event: PersistedV1GameEvent = serde_json::from_str(serialized)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(PersistedGameEvent {
+        event_version: event.event_version,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        state_version: event.state_version,
+        turn: event.turn,
+        actor_position: event.actor_position,
+        effects: Vec::new(),
+        effect_stop: "stable".to_owned(),
+        choice: None,
+        choice_id: None,
+        choice_cause: None,
+        selected_options: None,
+        end_turn: None,
+        steps: None,
+        control: None,
+        prng_counter: 0,
+    })
+}
+
+fn decode_v2_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    let event: PersistedV2GameEvent = serde_json::from_str(serialized)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(PersistedGameEvent {
+        event_version: event.event_version,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        state_version: event.state_version,
+        turn: event.turn,
+        actor_position: event.actor_position,
+        effects: event.effects,
+        effect_stop: event.effect_stop,
+        choice: event.choice.map(PersistedEventChoice::Legacy),
+        choice_id: None,
+        choice_cause: None,
+        selected_options: None,
+        end_turn: None,
+        steps: None,
+        control: None,
+        prng_counter: event.prng_counter,
+    })
+}
+
+fn decode_v3_dark_arts_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    let event: PersistedV3DarkArtsGameEvent = serde_json::from_str(serialized)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(PersistedGameEvent {
+        event_version: event.event_version,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        state_version: event.state_version,
+        turn: event.turn,
+        actor_position: event.actor_position,
+        effects: event.effects,
+        effect_stop: event.effect_stop,
+        choice: event.choice.map(PersistedEventChoice::Current),
+        choice_id: None,
+        choice_cause: None,
+        selected_options: None,
+        end_turn: None,
+        steps: None,
+        control: None,
+        prng_counter: event.prng_counter,
+    })
+}
+
+fn decode_v3_choice_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    let event: PersistedV3ChoiceGameEvent = serde_json::from_str(serialized)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(PersistedGameEvent {
+        event_version: event.event_version,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        state_version: event.state_version,
+        turn: event.turn,
+        actor_position: event.actor_position,
+        effects: event.effects,
+        effect_stop: event.effect_stop,
+        choice: event.choice.map(PersistedEventChoice::Current),
+        choice_id: Some(event.choice_id),
+        choice_cause: Some(event.choice_cause),
+        selected_options: Some(event.selected_options),
+        end_turn: None,
+        steps: None,
+        control: None,
+        prng_counter: event.prng_counter,
+    })
+}
+
+fn decode_v4_turn_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    let event: PersistedV4TurnGameEvent = serde_json::from_str(serialized)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(PersistedGameEvent {
+        event_version: event.event_version,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        state_version: event.state_version,
+        turn: event.turn,
+        actor_position: event.actor_position,
+        effects: Vec::new(),
+        effect_stop: "stable".to_owned(),
+        choice: None,
+        choice_id: None,
+        choice_cause: None,
+        selected_options: None,
+        end_turn: Some(event.end_turn),
+        steps: Some(event.steps),
+        control: Some(event.control),
+        prng_counter: event.prng_counter,
+    })
+}
+
+fn decode_v4_choice_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    let event: PersistedV4ChoiceGameEvent = serde_json::from_str(serialized)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(PersistedGameEvent {
+        event_version: event.event_version,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        state_version: event.state_version,
+        turn: event.turn,
+        actor_position: event.actor_position,
+        effects: Vec::new(),
+        effect_stop: "stable".to_owned(),
+        choice: None,
+        choice_id: Some(event.choice_id),
+        choice_cause: Some(event.choice_cause),
+        selected_options: Some(event.selected_options),
+        end_turn: None,
+        steps: Some(event.steps),
+        control: Some(event.control),
+        prng_counter: event.prng_counter,
+    })
+}
+
+fn validate_persisted_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiError> {
+    let control_field_count = [
+        snapshot.queued_phases.is_some(),
+        snapshot.queued_effects.is_some(),
+        snapshot.decision_point.is_some(),
+        snapshot.last_turn_steps.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    let has_structured_control = match control_field_count {
+        0 => false,
+        4 => true,
+        _ => return Err(ApiError::internal()),
     };
-    valid_choice_value(&choice.id)
-        && valid_choice_value(&choice.cause)
-        && (1..=4).contains(&choice.responsible_position)
+    let version_shape_is_valid = match snapshot.snapshot_version {
+        1 => !has_structured_control && snapshot.effects.choice.is_none(),
+        2 => !has_structured_control,
+        SNAPSHOT_VERSION => has_structured_control,
+        _ => false,
+    };
+    if !version_shape_is_valid {
+        return Err(ApiError::internal());
+    }
+    let bounded_identifiers = snapshot.snapshot_version == SNAPSHOT_VERSION;
+    let valid_snapshot_identifier = |value: &str| {
+        if bounded_identifiers {
+            valid_identifier(value)
+        } else {
+            valid_legacy_identifier(value)
+        }
+    };
+    let base_is_valid = snapshot.state_version > 0
+        && snapshot.sequence.checked_add(1) == Some(snapshot.state_version)
+        && snapshot.turn.number > 0
+        && valid_position(snapshot.turn.active_position)
+        && domain_game_status(&snapshot.status).is_ok()
+        && domain_game_phase(&snapshot.turn.phase).is_ok()
+        && valid_snapshot_identifier(&snapshot.adventure_id)
+        && valid_snapshot_identifier(&snapshot.versions.content)
+        && valid_snapshot_identifier(&snapshot.versions.ruleset)
+        && snapshot.versions.manifest > 0
+        && snapshot.versions.manifest_digest.len() <= MAX_IDENTIFIER_BYTES
+        && valid_snapshot_identifier(&snapshot.versions.prng)
+        && valid_snapshot_identifier(&snapshot.versions.shuffle)
+        && valid_snapshot_identifier(&snapshot.versions.sampling)
+        && snapshot.prng.algorithm == snapshot.versions.prng
+        && snapshot.participants.len() <= 4
+        && snapshot.participants.iter().all(|player| {
+            valid_snapshot_identifier(&player.participant_id)
+                && valid_position(player.position)
+                && valid_snapshot_identifier(&player.hero_id)
+        })
+        && validate_persisted_effects(&snapshot.effects, bounded_identifiers);
+    if !base_is_valid {
+        return Err(ApiError::internal());
+    }
+    if has_structured_control {
+        validate_structured_snapshot(snapshot)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_structured_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiError> {
+    let (Some(queued_phases), Some(queued_effects), Some(decision_point), Some(last_turn_steps)) = (
+        &snapshot.queued_phases,
+        &snapshot.queued_effects,
+        &snapshot.decision_point,
+        &snapshot.last_turn_steps,
+    ) else {
+        return Err(ApiError::internal());
+    };
+    let flattened_effects = last_turn_steps
+        .iter()
+        .flat_map(|step| step.effects.iter().cloned())
+        .collect::<Vec<_>>();
+    let control = PersistedEngineControl {
+        status: snapshot.status.clone(),
+        turn: snapshot.turn.number,
+        phase: snapshot.turn.phase.clone(),
+        active_position: snapshot.turn.active_position,
+        queued_phases: queued_phases.clone(),
+        queued_effects: queued_effects.clone(),
+        decision_point: decision_point.clone(),
+    };
+    let participant_positions = snapshot
+        .participants
+        .iter()
+        .map(|participant| participant.position)
+        .collect::<std::collections::BTreeSet<_>>();
+    let queue_belongs_to_game = queued_effects.iter().all(|queued| match queued {
+        PersistedQueuedEffect::Definition { actor_position, .. } => {
+            participant_positions.contains(actor_position)
+        }
+        PersistedQueuedEffect::EffectChoice {
+            responsible_position,
+            ..
+        } => participant_positions.contains(responsible_position),
+    });
+    let choice_state_is_coherent = match (decision_point, &snapshot.effects.choice) {
+        (
+            PersistedDecisionPoint::EffectChoice {
+                choice: decision_choice,
+            },
+            Some(effect_choice),
+        ) => {
+            decision_choice == effect_choice
+                && decision_choice.continuation.queue.as_slice() == queued_effects.as_slice()
+                && participant_positions.contains(&decision_choice.responsible_position)
+        }
+        (PersistedDecisionPoint::EffectChoice { .. }, None) | (_, Some(_)) => false,
+        (_, None) => true,
+    };
+    if !valid_engine_control(&control)
+        || !queue_belongs_to_game
+        || !choice_state_is_coherent
+        || flattened_effects != snapshot.effects.outcomes
+        || last_turn_steps.len() > MAX_TURN_STEPS
+        || last_turn_steps.iter().any(|step| {
+            !canonical_game_phase(&step.phase)
+                || step.effects.len() > MAX_EFFECT_OUTCOMES
+                || step
+                    .effects
+                    .iter()
+                    .any(|outcome| !valid_effect_outcome(outcome, true))
+        })
+    {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
+fn validate_persisted_effects(effects: &PersistedEffects, require_address: bool) -> bool {
+    effects.entities.len() <= MAX_EFFECT_ENTITIES
+        && effects.outcomes.len() <= MAX_EFFECT_OUTCOMES
+        && effects
+            .entities
+            .iter()
+            .all(|entity| valid_effect_entity(entity, require_address))
+        && effects
+            .outcomes
+            .iter()
+            .all(|outcome| valid_effect_outcome(outcome, require_address))
+        && effects.choice.as_ref().is_none_or(|choice| {
+            valid_effect_choice(
+                choice,
+                require_address,
+                if require_address {
+                    MAX_EFFECT_PATH_DEPTH
+                } else {
+                    MAX_EFFECT_QUEUE
+                },
+            )
+        })
+}
+
+fn valid_effect_entity(entity: &PersistedEffectEntity, bounded_identifiers: bool) -> bool {
+    valid_identifier_for_version(&entity.id, bounded_identifiers)
+        && entity.owner_position.is_none_or(valid_position)
+        && domain_effect_zone(&entity.zone).is_ok()
+        && entity
+            .resources
+            .keys()
+            .all(|resource| domain_effect_resource(resource).is_ok())
+}
+
+fn valid_effect_choice(
+    choice: &PersistedEffectChoice,
+    bounded_identifiers: bool,
+    max_path: usize,
+) -> bool {
+    let distinct_options = choice
+        .options
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    valid_identifier_for_version(&choice.id, bounded_identifiers)
+        && valid_identifier_for_version(&choice.cause, bounded_identifiers)
+        && valid_position(choice.responsible_position)
         && match choice.kind.as_str() {
             "effect" => choice.min == 1 && choice.max == 1,
             "target" => choice.max > 0 && usize::from(choice.max) < choice.options.len(),
             _ => false,
         }
-        && (2..=4096).contains(&choice.options.len())
+        && (2..=MAX_CHOICE_OPTIONS).contains(&choice.options.len())
+        && distinct_options.len() == choice.options.len()
         && choice
             .options
             .iter()
-            .all(|option| valid_choice_value(option))
-        && choice
-            .options
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            == choice.options.len()
+            .all(|option| valid_identifier_for_version(option, bounded_identifiers))
         && choice.min <= choice.max
         && choice.max <= 32
         && usize::from(choice.max) <= choice.options.len()
         && choice.cause == choice.continuation.choice_cursor.rule_id
-        && valid_v3_effect_continuation(&choice.continuation)
+        && valid_effect_continuation(&choice.continuation, bounded_identifiers, max_path)
 }
 
-fn valid_v3_effect_continuation(continuation: &PersistedEffectContinuation) -> bool {
-    valid_v3_effect_cursor(&continuation.choice_cursor)
-        && continuation.queue.len() <= 4096
-        && (1..=4096).contains(&continuation.steps_completed)
-        && continuation.queue.iter().all(|queued| match queued {
-            PersistedQueuedEffect::Definition {
-                cursor,
-                actor_position,
-            } => (1..=4).contains(actor_position) && valid_v3_effect_cursor(cursor),
-            PersistedQueuedEffect::EffectChoice {
-                cursor,
-                responsible_position,
-            } => (1..=4).contains(responsible_position) && valid_v3_effect_cursor(cursor),
+fn valid_legacy_effect_choice(choice: &PersistedLegacyEffectChoice) -> bool {
+    let distinct_options = choice
+        .options
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    valid_legacy_identifier(&choice.id)
+        && valid_position(choice.responsible_position)
+        && matches!(choice.kind.as_str(), "effect" | "target")
+        && (2..=MAX_CHOICE_OPTIONS).contains(&choice.options.len())
+        && distinct_options.len() == choice.options.len()
+        && choice.options.iter().all(|option| !option.is_empty())
+        && choice.min <= choice.max
+        && usize::from(choice.max) <= choice.options.len()
+        && legacy_choice_rule_id(choice).is_ok()
+}
+
+fn valid_effect_continuation(
+    continuation: &PersistedEffectContinuation,
+    bounded_identifiers: bool,
+    max_path: usize,
+) -> bool {
+    valid_effect_cursor(&continuation.choice_cursor, bounded_identifiers, max_path)
+        && continuation.queue.len() <= MAX_EFFECT_QUEUE
+        && (1..=MAX_EFFECT_QUEUE).contains(&continuation.steps_completed)
+        && continuation
+            .queue
+            .iter()
+            .all(|queued| valid_queued_effect(queued, bounded_identifiers, max_path))
+}
+
+fn valid_queued_effect(
+    queued: &PersistedQueuedEffect,
+    bounded_identifiers: bool,
+    max_path: usize,
+) -> bool {
+    match queued {
+        PersistedQueuedEffect::Definition {
+            cursor,
+            actor_position,
+        } => {
+            valid_position(*actor_position)
+                && valid_effect_cursor(cursor, bounded_identifiers, max_path)
+        }
+        PersistedQueuedEffect::EffectChoice {
+            cursor,
+            responsible_position,
+        } => {
+            valid_position(*responsible_position)
+                && valid_effect_cursor(cursor, bounded_identifiers, max_path)
+        }
+    }
+}
+
+fn valid_effect_cursor(
+    cursor: &PersistedEffectCursor,
+    bounded_identifiers: bool,
+    max_path: usize,
+) -> bool {
+    valid_identifier_for_version(&cursor.rule_id, bounded_identifiers)
+        && cursor.path.len() <= max_path
+        && (max_path != MAX_EFFECT_PATH_DEPTH
+            || cursor.path.iter().all(|segment| match segment {
+                PersistedEffectPathSegment::ChoiceOption { index }
+                | PersistedEffectPathSegment::SequenceEffect { index } => {
+                    *index <= MAX_EFFECT_BRANCH_INDEX
+                }
+                PersistedEffectPathSegment::RollOutcome { index } => {
+                    *index <= MAX_EFFECT_ROLL_INDEX
+                }
+                PersistedEffectPathSegment::ConditionThen
+                | PersistedEffectPathSegment::ConditionOtherwise
+                | PersistedEffectPathSegment::RepeatEffect => true,
+            }))
+}
+
+fn valid_decision_point(decision: &PersistedDecisionPoint, require_address: bool) -> bool {
+    match decision {
+        PersistedDecisionPoint::None | PersistedDecisionPoint::Automatic => true,
+        PersistedDecisionPoint::PlayerIntent {
+            responsible_position,
+        } => valid_position(*responsible_position),
+        PersistedDecisionPoint::EffectChoice { choice } => {
+            valid_effect_choice(choice, require_address, MAX_EFFECT_PATH_DEPTH)
+        }
+    }
+}
+
+fn valid_effect_outcome(outcome: &PersistedEffectOutcome, bounded_identifiers: bool) -> bool {
+    match outcome {
+        PersistedEffectOutcome::DieRolled {
+            rule_id,
+            die,
+            result,
+        } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && domain_effect_die(die)
+                    .is_ok_and(|effect_die| (1..=effect_die.sides()).contains(result))
+        }
+        PersistedEffectOutcome::Moved {
+            rule_id,
+            target_id,
+            target_position,
+            from,
+            to,
+        } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && valid_identifier_for_version(target_id, bounded_identifiers)
+                && target_position.is_none_or(valid_position)
+                && from != to
+                && card_zone(from)
+                && card_zone(to)
+        }
+        PersistedEffectOutcome::NoOp { rule_id, reason } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && matches!(
+                    reason.as_str(),
+                    "explicit" | "no_eligible_target" | "zero_cardinality"
+                )
+        }
+        PersistedEffectOutcome::ResourceChanged {
+            rule_id,
+            target_id,
+            target_position,
+            resource,
+            cause,
+            ..
+        } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && valid_identifier_for_version(target_id, bounded_identifiers)
+                && target_position.is_none_or(valid_position)
+                && domain_effect_resource(resource).is_ok()
+                && matches!(cause.as_str(), "cost" | "effect")
+        }
+        PersistedEffectOutcome::Terminal { rule_id, outcome } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && matches!(outcome.as_str(), "lost" | "won")
+        }
+    }
+}
+
+fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> {
+    if event.sequence == 0
+        || event.state_version == 0
+        || event.turn == 0
+        || !valid_position(event.actor_position)
+        || event.prng_counter > i64::MAX.cast_unsigned()
+    {
+        return Err(ApiError::internal());
+    }
+    let valid = match event.event_version {
+        1 => {
+            event.event_type == "dark_arts_completed"
+                && event.effects.is_empty()
+                && event.effect_stop == "stable"
+                && event.choice.is_none()
+                && event.choice_id.is_none()
+                && event.choice_cause.is_none()
+                && event.selected_options.is_none()
+                && event.end_turn.is_none()
+                && event.steps.is_none()
+                && event.control.is_none()
+                && event.prng_counter == 0
+        }
+        CLOSED_EFFECT_EVENT_VERSION => valid_closed_effect_event(event, false),
+        CHOICE_EVENT_VERSION => valid_closed_effect_event(event, true),
+        GAME_EVENT_VERSION => valid_v4_event(event),
+        _ => false,
+    };
+    if !valid {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
+fn valid_closed_effect_event(event: &PersistedGameEvent, current_choice: bool) -> bool {
+    let event_metadata_is_valid = match event.event_type.as_str() {
+        "dark_arts_completed" => {
+            event.choice_id.is_none()
+                && event.choice_cause.is_none()
+                && event.selected_options.is_none()
+        }
+        "choice_resolved" if current_choice => {
+            event.choice_id.as_deref().is_some_and(valid_choice_value)
+                && event
+                    .choice_cause
+                    .as_deref()
+                    .is_some_and(valid_choice_value)
+                && event
+                    .selected_options
+                    .as_deref()
+                    .is_some_and(valid_choice_selection)
+        }
+        _ => false,
+    };
+    if !event_metadata_is_valid
+        || event.effects.len() > MAX_EFFECT_OUTCOMES
+        || event
+            .effects
+            .iter()
+            .any(|outcome| !valid_effect_outcome(outcome, current_choice))
+        || event.end_turn.is_some()
+        || event.steps.is_some()
+        || event.control.is_some()
+    {
+        return false;
+    }
+    let terminal_count = event
+        .effects
+        .iter()
+        .filter(|outcome| matches!(outcome, PersistedEffectOutcome::Terminal { .. }))
+        .count();
+    match event.effect_stop.as_str() {
+        "stable" => event.choice.is_none() && terminal_count == 0,
+        "choice" => {
+            terminal_count == 0
+                && event.choice.as_ref().is_some_and(|choice| match choice {
+                    PersistedEventChoice::Current(choice) if current_choice => {
+                        valid_effect_choice(choice, true, MAX_EFFECT_QUEUE)
+                    }
+                    PersistedEventChoice::Legacy(choice) if !current_choice => {
+                        valid_legacy_effect_choice(choice)
+                    }
+                    PersistedEventChoice::Current(_) | PersistedEventChoice::Legacy(_) => false,
+                })
+        }
+        "terminal" => {
+            event.choice.is_none()
+                && terminal_count == 1
+                && matches!(
+                    event.effects.last(),
+                    Some(PersistedEffectOutcome::Terminal { .. })
+                )
+        }
+        _ => false,
+    }
+}
+
+fn valid_v4_event(event: &PersistedGameEvent) -> bool {
+    if !event.effects.is_empty() || event.effect_stop != "stable" || event.choice.is_some() {
+        return false;
+    }
+    match event.event_type.as_str() {
+        "turn_completed" => {
+            if event.choice_id.is_some()
+                || event.choice_cause.is_some()
+                || event.selected_options.is_some()
+            {
+                return false;
+            }
+            let (Some(end_turn), Some(steps), Some(control)) =
+                (&event.end_turn, &event.steps, &event.control)
+            else {
+                return false;
+            };
+            valid_end_turn_sequence(end_turn, event.actor_position)
+                && valid_turn_steps(steps)
+                && valid_engine_control(control)
+                && control.turn == event.turn.checked_add(1).unwrap_or(0)
+                && event_control_matches_steps(steps, control)
+                && terminal_effects_match_control(steps, control)
+        }
+        "choice_resolved" => {
+            if event.end_turn.is_some()
+                || !event.choice_id.as_deref().is_some_and(valid_choice_value)
+                || !event
+                    .choice_cause
+                    .as_deref()
+                    .is_some_and(valid_choice_value)
+                || !event
+                    .selected_options
+                    .as_deref()
+                    .is_some_and(valid_choice_selection)
+            {
+                return false;
+            }
+            let (Some(steps), Some(control)) = (&event.steps, &event.control) else {
+                return false;
+            };
+            valid_choice_steps(steps)
+                && valid_engine_control(control)
+                && control.turn == event.turn
+                && event_control_matches_steps(steps, control)
+                && terminal_effects_match_control(steps, control)
+        }
+        _ => false,
+    }
+}
+
+fn valid_choice_selection(selected: &[String]) -> bool {
+    selected.len() <= 32
+        && selected.iter().all(|value| valid_choice_value(value))
+        && selected
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == selected.len()
+}
+
+fn valid_end_turn_sequence(outcomes: &[PersistedEndTurnOutcome], actor_position: u8) -> bool {
+    if !(2..=MAX_END_TURN_OUTCOMES).contains(&outcomes.len())
+        || outcomes
+            .iter()
+            .any(|outcome| !valid_end_turn_outcome(outcome, actor_position))
+    {
+        return false;
+    }
+
+    let mut remaining = outcomes;
+    for source in ["hero_play_area", "hero_hand"] {
+        while let Some(PersistedEndTurnOutcome::CardMoved { from, to, .. }) = remaining.first() {
+            if from != source || to != "hero_discard_pile" {
+                break;
+            }
+            remaining = &remaining[1..];
+        }
+    }
+    let [
+        PersistedEndTurnOutcome::ResourceReset {
+            resource: attack, ..
+        },
+        PersistedEndTurnOutcome::ResourceReset {
+            resource: influence,
+            ..
+        },
+        refill @ ..,
+    ] = remaining
+    else {
+        return false;
+    };
+    if attack != "attack" || influence != "influence" {
+        return false;
+    }
+
+    let mut shuffled = false;
+    refill.iter().all(|outcome| match outcome {
+        PersistedEndTurnOutcome::CardMoved { from, to, .. } => {
+            from == "hero_draw_pile" && to == "hero_hand"
+        }
+        PersistedEndTurnOutcome::PileShuffled { .. } if !shuffled => {
+            shuffled = true;
+            true
+        }
+        PersistedEndTurnOutcome::PileShuffled { .. }
+        | PersistedEndTurnOutcome::ResourceReset { .. } => false,
+    })
+}
+
+fn terminal_effects_match_control(
+    steps: &[PersistedTurnStep],
+    control: &PersistedEngineControl,
+) -> bool {
+    let terminal_count = steps
+        .iter()
+        .flat_map(|step| &step.effects)
+        .filter(|outcome| matches!(outcome, PersistedEffectOutcome::Terminal { .. }))
+        .count();
+    match control.status.as_str() {
+        "in_progress" => terminal_count == 0,
+        expected @ ("lost" | "won") => {
+            terminal_count == 1
+                && matches!(
+                    steps.last().and_then(|step| step.effects.last()),
+                    Some(PersistedEffectOutcome::Terminal { outcome, .. })
+                        if outcome == expected
+                )
+        }
+        _ => false,
+    }
+}
+
+fn event_control_matches_steps(
+    steps: &[PersistedTurnStep],
+    control: &PersistedEngineControl,
+) -> bool {
+    let last_phase = steps.last().map(|step| step.phase.as_str());
+    match (control.status.as_str(), &control.decision_point) {
+        ("in_progress", PersistedDecisionPoint::PlayerIntent { .. }) => {
+            last_phase == Some("villains") && control.phase == "hero_actions"
+        }
+        ("in_progress", PersistedDecisionPoint::EffectChoice { .. })
+        | ("lost" | "won", PersistedDecisionPoint::None) => {
+            last_phase == Some(control.phase.as_str())
+        }
+        _ => false,
+    }
+}
+
+fn valid_turn_steps(steps: &[PersistedTurnStep]) -> bool {
+    let phases = steps
+        .iter()
+        .map(|step| step.phase.as_str())
+        .collect::<Vec<_>>();
+    matches!(
+        phases.as_slice(),
+        ["end_turn", "dark_arts"] | ["end_turn", "dark_arts", "villains"]
+    ) && steps.first().is_some_and(|step| step.effects.is_empty())
+        && steps.len() <= MAX_TURN_STEPS
+        && total_step_effects_are_bounded(steps)
+        && steps.iter().all(|step| {
+            step.effects.len() <= MAX_EFFECT_OUTCOMES
+                && step
+                    .effects
+                    .iter()
+                    .all(|outcome| valid_effect_outcome(outcome, true))
         })
 }
 
-fn valid_v3_effect_cursor(cursor: &PersistedEffectCursor) -> bool {
-    !cursor.rule_id.is_empty() && cursor.path.len() <= 4096
+fn valid_choice_steps(steps: &[PersistedTurnStep]) -> bool {
+    let phases = steps
+        .iter()
+        .map(|step| step.phase.as_str())
+        .collect::<Vec<_>>();
+    matches!(
+        phases.as_slice(),
+        ["dark_arts" | "villains"] | ["dark_arts", "villains"]
+    ) && total_step_effects_are_bounded(steps)
+        && steps.iter().all(|step| {
+            step.effects.len() <= MAX_EFFECT_OUTCOMES
+                && step
+                    .effects
+                    .iter()
+                    .all(|outcome| valid_effect_outcome(outcome, true))
+        })
+}
+
+fn total_step_effects_are_bounded(steps: &[PersistedTurnStep]) -> bool {
+    steps
+        .iter()
+        .try_fold(0_usize, |total, step| total.checked_add(step.effects.len()))
+        .is_some_and(|total| total <= MAX_EFFECT_OUTCOMES)
+}
+
+fn valid_engine_control(control: &PersistedEngineControl) -> bool {
+    if control.turn == 0
+        || !valid_position(control.active_position)
+        || domain_game_status(&control.status).is_err()
+        || !canonical_game_phase(&control.phase)
+        || control.queued_phases.len() > 3
+        || control
+            .queued_phases
+            .iter()
+            .any(|phase| !canonical_game_phase(phase))
+        || control.queued_effects.len() > MAX_EFFECT_QUEUE
+        || control
+            .queued_effects
+            .iter()
+            .any(|queued| !valid_queued_effect(queued, true, MAX_EFFECT_PATH_DEPTH))
+        || !valid_decision_point(&control.decision_point, true)
+    {
+        return false;
+    }
+    match (control.status.as_str(), control.phase.as_str()) {
+        ("lost" | "won", _) => {
+            control.queued_phases.is_empty()
+                && control.queued_effects.is_empty()
+                && matches!(control.decision_point, PersistedDecisionPoint::None)
+        }
+        ("in_progress", "dark_arts") => {
+            control.queued_phases == ["villains", "hero_actions", "end_turn"]
+                && valid_automatic_control(control)
+        }
+        ("in_progress", "villains") => {
+            control.queued_phases == ["hero_actions", "end_turn"]
+                && valid_automatic_control(control)
+        }
+        ("in_progress", "hero_actions") => {
+            control.queued_phases == ["end_turn"]
+                && control.queued_effects.is_empty()
+                && matches!(
+                    control.decision_point,
+                    PersistedDecisionPoint::PlayerIntent {
+                        responsible_position
+                    } if responsible_position == control.active_position
+                )
+        }
+        ("in_progress", "end_turn") => {
+            control.queued_phases.is_empty()
+                && control.queued_effects.is_empty()
+                && matches!(control.decision_point, PersistedDecisionPoint::Automatic)
+        }
+        _ => false,
+    }
+}
+
+fn valid_automatic_control(control: &PersistedEngineControl) -> bool {
+    match &control.decision_point {
+        PersistedDecisionPoint::Automatic => control.queued_effects.is_empty(),
+        PersistedDecisionPoint::EffectChoice { choice } => {
+            choice.continuation.queue == control.queued_effects
+        }
+        PersistedDecisionPoint::None | PersistedDecisionPoint::PlayerIntent { .. } => false,
+    }
+}
+
+fn valid_end_turn_outcome(outcome: &PersistedEndTurnOutcome, actor_position: u8) -> bool {
+    match outcome {
+        PersistedEndTurnOutcome::CardMoved { card_id, from, to } => {
+            valid_identifier(card_id)
+                && matches!(
+                    (from.as_str(), to.as_str()),
+                    ("hero_play_area" | "hero_hand", "hero_discard_pile")
+                        | ("hero_draw_pile", "hero_hand")
+                )
+        }
+        PersistedEndTurnOutcome::PileShuffled {
+            owner_position,
+            zone,
+            bottom_to_top,
+        } => {
+            let unique_cards = bottom_to_top
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            *owner_position == actor_position
+                && zone == "hero_draw_pile"
+                && (1..=MAX_PILE_CARDS).contains(&bottom_to_top.len())
+                && unique_cards.len() == bottom_to_top.len()
+                && bottom_to_top
+                    .iter()
+                    .all(|card_id| valid_identifier(card_id))
+        }
+        PersistedEndTurnOutcome::ResourceReset { resource, .. } => {
+            matches!(resource.as_str(), "attack" | "influence")
+        }
+    }
+}
+
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_IDENTIFIER_BYTES
+}
+
+fn valid_legacy_identifier(value: &str) -> bool {
+    !value.is_empty()
+}
+
+fn valid_identifier_for_version(value: &str, bounded: bool) -> bool {
+    if bounded {
+        valid_identifier(value)
+    } else {
+        valid_legacy_identifier(value)
+    }
+}
+
+const fn valid_position(position: u8) -> bool {
+    matches!(position, 1..=4)
+}
+
+fn canonical_game_phase(phase: &str) -> bool {
+    matches!(
+        phase,
+        "dark_arts" | "villains" | "hero_actions" | "end_turn"
+    )
+}
+
+fn card_zone(zone: &str) -> bool {
+    matches!(
+        zone,
+        "active_villains"
+            | "dark_arts_deck"
+            | "dark_arts_discard"
+            | "hero_discard_pile"
+            | "hero_draw_pile"
+            | "hero_hand"
+            | "hero_play_area"
+            | "hogwarts_deck"
+            | "market"
+            | "villain_deck"
+    )
+}
+
+fn valid_choice_value(value: &str) -> bool {
+    (1..=256).contains(&value.len())
 }
 
 pub(super) fn persisted_after_decision(
@@ -278,12 +1257,7 @@ pub(super) fn persisted_after_decision(
     state: &InitialGameState,
 ) -> PersistedSnapshot {
     let mut next = current.clone();
-    next.snapshot_version =
-        if current.snapshot_version == SNAPSHOT_VERSION || state.pending_choice().is_some() {
-            SNAPSHOT_VERSION
-        } else {
-            1
-        };
+    next.snapshot_version = SNAPSHOT_VERSION;
     next.state_version = state.state_version();
     next.sequence = state.sequence();
     next.status = match state.status() {
@@ -292,18 +1266,37 @@ pub(super) fn persisted_after_decision(
         GameStatus::Won => "won".to_owned(),
     };
     next.turn.number = state.turn();
-    next.turn.phase = match state.phase() {
-        GamePhase::DarkArts => "dark_arts".to_owned(),
-        GamePhase::HeroAction => "hero_action".to_owned(),
-    };
+    game_phase_name(state.phase()).clone_into(&mut next.turn.phase);
     next.turn.active_position = state.active_position();
+    next.queued_phases = Some(
+        state
+            .queued_phases()
+            .iter()
+            .map(|phase| game_phase_name(*phase).to_owned())
+            .collect(),
+    );
+    next.queued_effects = Some(
+        state
+            .queued_effects()
+            .iter()
+            .map(persisted_queued_effect)
+            .collect(),
+    );
+    next.decision_point = Some(persisted_decision_point(state.decision_point()));
+    next.last_turn_steps = Some(
+        state
+            .last_turn_steps()
+            .iter()
+            .map(persisted_turn_step)
+            .collect(),
+    );
     next.prng.counter = state.prng_counter();
     next.effects = persisted_effects(state);
     next
 }
 
 pub(super) fn persisted_event(event: GameEvent) -> Result<(u16, &'static str, String), ApiError> {
-    match event {
+    let persisted = match event {
         GameEvent::DarkArtsCompleted {
             sequence,
             state_version,
@@ -314,24 +1307,24 @@ pub(super) fn persisted_event(event: GameEvent) -> Result<(u16, &'static str, St
             prng_counter,
         } => {
             let event_version = if matches!(&stop, EffectStop::Choice(_)) {
-                GAME_EVENT_VERSION
+                CHOICE_EVENT_VERSION
             } else {
-                2
+                CLOSED_EFFECT_EVENT_VERSION
             };
             serde_json::to_string(&serde_json::json!({
-            "event_version": event_version,
-            "type": "dark_arts_completed",
-            "sequence": sequence,
-            "state_version": state_version,
-            "turn": turn,
-            "actor_position": actor_position,
-            "effects": effects.iter().map(persisted_effect_outcome).collect::<Vec<_>>(),
-            "effect_stop": effect_stop_name(&stop),
-            "choice": match &stop {
-                EffectStop::Choice(choice) => Some(persisted_effect_choice(choice)),
-                EffectStop::Stable | EffectStop::Terminal(_) => None,
-            },
-            "prng_counter": prng_counter,
+                "event_version": event_version,
+                "type": "dark_arts_completed",
+                "sequence": sequence,
+                "state_version": state_version,
+                "turn": turn,
+                "actor_position": actor_position,
+                "effects": effects.iter().map(persisted_effect_outcome).collect::<Vec<_>>(),
+                "effect_stop": effect_stop_name(&stop),
+                "choice": match &stop {
+                    EffectStop::Choice(choice) => Some(persisted_effect_choice(choice)),
+                    EffectStop::Stable | EffectStop::Terminal(_) => None,
+                },
+                "prng_counter": prng_counter,
             }))
             .map(|event| (event_version, "dark_arts_completed", event))
             .map_err(|error| ApiError::internal_with("match application operation", error))
@@ -344,8 +1337,8 @@ pub(super) fn persisted_event(event: GameEvent) -> Result<(u16, &'static str, St
             choice_id,
             choice_cause,
             selected_options,
-            effects,
-            stop,
+            steps,
+            control,
             prng_counter,
         } => serde_json::to_string(&serde_json::json!({
             "event_version": GAME_EVENT_VERSION,
@@ -357,17 +1350,38 @@ pub(super) fn persisted_event(event: GameEvent) -> Result<(u16, &'static str, St
             "choice_id": choice_id,
             "choice_cause": choice_cause,
             "selected_options": selected_options,
-            "effects": effects.iter().map(persisted_effect_outcome).collect::<Vec<_>>(),
-            "effect_stop": effect_stop_name(&stop),
-            "choice": match &stop {
-                EffectStop::Choice(choice) => Some(persisted_effect_choice(choice)),
-                EffectStop::Stable | EffectStop::Terminal(_) => None,
-            },
+            "steps": steps.iter().map(persisted_turn_step).collect::<Vec<_>>(),
+            "control": persisted_engine_control(&control),
             "prng_counter": prng_counter,
         }))
         .map(|event| (GAME_EVENT_VERSION, "choice_resolved", event))
         .map_err(|error| ApiError::internal_with("match application operation", error)),
-    }
+        GameEvent::TurnCompleted {
+            sequence,
+            state_version,
+            turn,
+            actor_position,
+            end_turn,
+            steps,
+            control,
+            prng_counter,
+        } => serde_json::to_string(&serde_json::json!({
+            "event_version": GAME_EVENT_VERSION,
+            "type": "turn_completed",
+            "sequence": sequence,
+            "state_version": state_version,
+            "turn": turn,
+            "actor_position": actor_position,
+            "end_turn": end_turn.iter().map(persisted_end_turn_outcome).collect::<Vec<_>>(),
+            "steps": steps.iter().map(persisted_turn_step).collect::<Vec<_>>(),
+            "control": persisted_engine_control(&control),
+            "prng_counter": prng_counter,
+        }))
+        .map(|event| (GAME_EVENT_VERSION, "turn_completed", event))
+        .map_err(|error| ApiError::internal_with("match application operation", error)),
+    }?;
+    decode_persisted_event(&persisted.2)?;
+    Ok(persisted)
 }
 
 pub(super) fn persisted_snapshot(
@@ -375,11 +1389,7 @@ pub(super) fn persisted_snapshot(
     participants: &[StoredRoomParticipant],
 ) -> PersistedSnapshot {
     PersistedSnapshot {
-        snapshot_version: if state.pending_choice().is_some() {
-            SNAPSHOT_VERSION
-        } else {
-            1
-        },
+        snapshot_version: SNAPSHOT_VERSION,
         state_version: state.state_version(),
         sequence: state.sequence(),
         status: match state.status() {
@@ -399,12 +1409,31 @@ pub(super) fn persisted_snapshot(
         },
         turn: PersistedTurn {
             number: state.turn(),
-            phase: match state.phase() {
-                GamePhase::DarkArts => "dark_arts".to_owned(),
-                GamePhase::HeroAction => "hero_action".to_owned(),
-            },
+            phase: game_phase_name(state.phase()).to_owned(),
             active_position: state.active_position(),
         },
+        queued_phases: Some(
+            state
+                .queued_phases()
+                .iter()
+                .map(|phase| game_phase_name(*phase).to_owned())
+                .collect(),
+        ),
+        queued_effects: Some(
+            state
+                .queued_effects()
+                .iter()
+                .map(persisted_queued_effect)
+                .collect(),
+        ),
+        decision_point: Some(persisted_decision_point(state.decision_point())),
+        last_turn_steps: Some(
+            state
+                .last_turn_steps()
+                .iter()
+                .map(persisted_turn_step)
+                .collect(),
+        ),
         participants: participants
             .iter()
             .filter_map(|participant| {
@@ -421,6 +1450,245 @@ pub(super) fn persisted_snapshot(
             counter: state.prng_counter(),
         },
         effects: persisted_effects(state),
+    }
+}
+
+struct DomainSnapshotControl {
+    queued_phases: Vec<GamePhase>,
+    queued_effects: Vec<QueuedEffect>,
+    decision_point: Option<DecisionPoint>,
+    last_turn_steps: Vec<TurnStep>,
+}
+
+fn domain_snapshot_control(
+    persisted: &PersistedSnapshot,
+    status: GameStatus,
+    phase: GamePhase,
+    pending_choice: Option<&PendingEffectChoice>,
+    last_effects: &[EffectOutcome],
+) -> Result<DomainSnapshotControl, ApiError> {
+    match (
+        &persisted.queued_phases,
+        &persisted.queued_effects,
+        &persisted.decision_point,
+        &persisted.last_turn_steps,
+    ) {
+        (
+            Some(queued_phases),
+            Some(queued_effects),
+            Some(decision_point),
+            Some(last_turn_steps),
+        ) => Ok(DomainSnapshotControl {
+            queued_phases: queued_phases
+                .iter()
+                .map(|phase| domain_game_phase(phase))
+                .collect::<Result<_, _>>()?,
+            queued_effects: queued_effects.iter().map(domain_queued_effect).collect(),
+            decision_point: domain_decision_point(decision_point)?,
+            last_turn_steps: last_turn_steps
+                .iter()
+                .map(domain_turn_step)
+                .collect::<Result<_, _>>()?,
+        }),
+        (None, None, None, None) => legacy_snapshot_control(
+            status,
+            phase,
+            persisted.turn.active_position,
+            pending_choice,
+            last_effects,
+        ),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn legacy_snapshot_control(
+    status: GameStatus,
+    phase: GamePhase,
+    active_position: u8,
+    pending_choice: Option<&PendingEffectChoice>,
+    last_effects: &[EffectOutcome],
+) -> Result<DomainSnapshotControl, ApiError> {
+    if status != GameStatus::InProgress {
+        return Ok(DomainSnapshotControl {
+            queued_phases: Vec::new(),
+            queued_effects: Vec::new(),
+            decision_point: None,
+            last_turn_steps: (!last_effects.is_empty())
+                .then(|| TurnStep::new(phase, last_effects.to_vec()))
+                .into_iter()
+                .collect(),
+        });
+    }
+    let (queued_phases, queued_effects, decision_point, last_turn_steps) = match phase {
+        GamePhase::DarkArts => (
+            vec![
+                GamePhase::Villains,
+                GamePhase::HeroActions,
+                GamePhase::EndTurn,
+            ],
+            pending_choice
+                .map(|choice| choice.continuation.queue.clone())
+                .unwrap_or_default(),
+            Some(match pending_choice {
+                Some(choice) => DecisionPoint::EffectChoice(choice.clone()),
+                None => DecisionPoint::Automatic,
+            }),
+            vec![TurnStep::new(GamePhase::DarkArts, last_effects.to_vec())],
+        ),
+        GamePhase::HeroActions if pending_choice.is_none() => (
+            vec![GamePhase::EndTurn],
+            Vec::new(),
+            Some(DecisionPoint::PlayerIntent {
+                responsible_position: active_position,
+            }),
+            vec![
+                TurnStep::new(GamePhase::DarkArts, last_effects.to_vec()),
+                TurnStep::new(GamePhase::Villains, Vec::new()),
+            ],
+        ),
+        GamePhase::Villains | GamePhase::EndTurn | GamePhase::HeroActions => {
+            return Err(ApiError::internal());
+        }
+    };
+    Ok(DomainSnapshotControl {
+        queued_phases,
+        queued_effects,
+        decision_point,
+        last_turn_steps,
+    })
+}
+
+fn domain_game_status(status: &str) -> Result<GameStatus, ApiError> {
+    match status {
+        "in_progress" => Ok(GameStatus::InProgress),
+        "lost" => Ok(GameStatus::Lost),
+        "won" => Ok(GameStatus::Won),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn domain_game_phase(phase: &str) -> Result<GamePhase, ApiError> {
+    match phase {
+        "dark_arts" => Ok(GamePhase::DarkArts),
+        "villains" => Ok(GamePhase::Villains),
+        "hero_action" | "hero_actions" => Ok(GamePhase::HeroActions),
+        "end_turn" => Ok(GamePhase::EndTurn),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+pub(super) const fn game_phase_name(phase: GamePhase) -> &'static str {
+    match phase {
+        GamePhase::DarkArts => "dark_arts",
+        GamePhase::Villains => "villains",
+        GamePhase::HeroActions => "hero_actions",
+        GamePhase::EndTurn => "end_turn",
+    }
+}
+
+fn domain_decision_point(
+    decision: &PersistedDecisionPoint,
+) -> Result<Option<DecisionPoint>, ApiError> {
+    Ok(match decision {
+        PersistedDecisionPoint::None => None,
+        PersistedDecisionPoint::Automatic => Some(DecisionPoint::Automatic),
+        PersistedDecisionPoint::PlayerIntent {
+            responsible_position,
+        } => Some(DecisionPoint::PlayerIntent {
+            responsible_position: *responsible_position,
+        }),
+        PersistedDecisionPoint::EffectChoice { choice } => {
+            Some(DecisionPoint::EffectChoice(domain_effect_choice(choice)?))
+        }
+    })
+}
+
+fn persisted_decision_point(decision: Option<&DecisionPoint>) -> PersistedDecisionPoint {
+    match decision {
+        None => PersistedDecisionPoint::None,
+        Some(DecisionPoint::Automatic) => PersistedDecisionPoint::Automatic,
+        Some(DecisionPoint::PlayerIntent {
+            responsible_position,
+        }) => PersistedDecisionPoint::PlayerIntent {
+            responsible_position: *responsible_position,
+        },
+        Some(DecisionPoint::EffectChoice(choice)) => PersistedDecisionPoint::EffectChoice {
+            choice: persisted_effect_choice(choice),
+        },
+    }
+}
+
+fn domain_turn_step(step: &PersistedTurnStep) -> Result<TurnStep, ApiError> {
+    Ok(TurnStep::new(
+        domain_game_phase(&step.phase)?,
+        step.effects
+            .iter()
+            .map(domain_effect_outcome)
+            .collect::<Result<_, _>>()?,
+    ))
+}
+
+fn persisted_turn_step(step: &TurnStep) -> PersistedTurnStep {
+    PersistedTurnStep {
+        phase: game_phase_name(step.phase()).to_owned(),
+        effects: step
+            .effects()
+            .iter()
+            .map(persisted_effect_outcome)
+            .collect(),
+    }
+}
+
+fn persisted_end_turn_outcome(outcome: &EndTurnOutcome) -> PersistedEndTurnOutcome {
+    match outcome {
+        EndTurnOutcome::CardMoved { card_id, from, to } => PersistedEndTurnOutcome::CardMoved {
+            card_id: card_id.clone(),
+            from: effect_zone_name(*from).to_owned(),
+            to: effect_zone_name(*to).to_owned(),
+        },
+        EndTurnOutcome::PileShuffled {
+            owner_position,
+            zone,
+            bottom_to_top,
+        } => PersistedEndTurnOutcome::PileShuffled {
+            owner_position: *owner_position,
+            zone: effect_zone_name(*zone).to_owned(),
+            bottom_to_top: bottom_to_top.clone(),
+        },
+        EndTurnOutcome::ResourceReset { resource, before } => {
+            PersistedEndTurnOutcome::ResourceReset {
+                resource: effect_resource_name(*resource).to_owned(),
+                before: *before,
+            }
+        }
+    }
+}
+
+fn persisted_engine_control(control: &EngineControl) -> PersistedEngineControl {
+    PersistedEngineControl {
+        status: game_status_name(control.status).to_owned(),
+        turn: control.turn,
+        phase: game_phase_name(control.phase).to_owned(),
+        active_position: control.active_position,
+        queued_phases: control
+            .queued_phases
+            .iter()
+            .map(|phase| game_phase_name(*phase).to_owned())
+            .collect(),
+        queued_effects: control
+            .queued_effects
+            .iter()
+            .map(persisted_queued_effect)
+            .collect(),
+        decision_point: persisted_decision_point(control.decision_point.as_ref()),
+    }
+}
+
+const fn game_status_name(status: GameStatus) -> &'static str {
+    match status {
+        GameStatus::InProgress => "in_progress",
+        GameStatus::Lost => "lost",
+        GameStatus::Won => "won",
     }
 }
 
@@ -446,6 +1714,9 @@ fn domain_effect_world(
                 entity.owner_position,
                 domain_effect_zone(&entity.zone)?,
             );
+            if let Some(zone_index) = entity.zone_index {
+                domain = domain.with_zone_index(zone_index);
+            }
             for (resource, amount) in &entity.resources {
                 domain = domain.with_resource(domain_effect_resource(resource)?, *amount);
             }
@@ -604,6 +1875,7 @@ fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
                 id: entity.id().to_owned(),
                 owner_position: entity.owner_position(),
                 zone: effect_zone_name(entity.zone()).to_owned(),
+                zone_index: entity.zone_index(),
                 resources: entity
                     .resources()
                     .iter()
@@ -759,6 +2031,22 @@ fn persisted_queued_effect(queued: &QueuedEffect) -> PersistedQueuedEffect {
     }
 }
 
+fn legacy_choice_rule_id(choice: &PersistedLegacyEffectChoice) -> Result<String, ApiError> {
+    let marker = match choice.kind.as_str() {
+        "effect" => ":effect:",
+        "target" => ":target:",
+        _ => return Err(ApiError::internal()),
+    };
+    let (rule_id, step) = choice
+        .id
+        .rsplit_once(marker)
+        .ok_or_else(ApiError::internal)?;
+    if !valid_legacy_identifier(rule_id) || step.parse::<u64>().is_err() {
+        return Err(ApiError::internal());
+    }
+    Ok(rule_id.to_owned())
+}
+
 fn effect_stop_name(stop: &EffectStop) -> &'static str {
     match stop {
         EffectStop::Choice(_) => "choice",
@@ -840,9 +2128,13 @@ fn effect_die_name(die: EffectDie) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use game_domain::GamePhase;
     use serde_json::{Value, json};
 
-    use super::decode_persisted_event;
+    use super::{
+        MAX_PERSISTED_JSON_BYTES, command_domain_state, compact_json_size, decode_persisted_event,
+        decode_persisted_snapshot, validate_persisted_json_size,
+    };
 
     fn current_choice() -> Value {
         json!({
@@ -933,5 +2225,249 @@ mod tests {
             "prng_counter": 0
         });
         assert!(decode_persisted_event(&legacy_v2.to_string()).is_ok());
+    }
+
+    #[test]
+    fn persisted_json_size_ignores_formatting_but_counts_string_whitespace() {
+        assert_eq!(compact_json_size(r#"{ "value": "a, b: c" }"#), 19);
+        assert!(
+            validate_persisted_json_size(&format!(
+                "[{}{}]",
+                " ".repeat(MAX_PERSISTED_JSON_BYTES),
+                "0"
+            ))
+            .is_ok()
+        );
+        assert!(
+            validate_persisted_json_size(&format!("\"{}\"", " ".repeat(MAX_PERSISTED_JSON_BYTES)))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn v2_hero_action_snapshot_upcasts_with_structural_phase_history() {
+        let snapshot = json!({
+            "snapshot_version": 2,
+            "state_version": 3,
+            "sequence": 2,
+            "status": "in_progress",
+            "adventure_id": "adventure:test",
+            "versions": {
+                "content": "1.0.0",
+                "ruleset": "1.0.0",
+                "manifest": 1,
+                "manifest_digest": format!("blake3:{}", "0".repeat(64)),
+                "prng": "chacha20-v1",
+                "shuffle": "fisher-yates-v1",
+                "sampling": "rejection-sampling-v1"
+            },
+            "turn": {
+                "number": 1,
+                "phase": "hero_action",
+                "active_position": 1
+            },
+            "participants": [
+                {
+                    "participant_id": "00000000-0000-0000-0000-000000000001",
+                    "position": 1,
+                    "hero_id": "harry"
+                },
+                {
+                    "participant_id": "00000000-0000-0000-0000-000000000002",
+                    "position": 2,
+                    "hero_id": "hermione"
+                }
+            ],
+            "prng": { "algorithm": "chacha20-v1", "counter": 0 },
+            "effects": {
+                "outcomes": [{
+                    "type": "no_op",
+                    "rule_id": "rule:legacy",
+                    "reason": "explicit"
+                }]
+            }
+        });
+
+        let persisted = decode_persisted_snapshot(&snapshot.to_string())
+            .unwrap_or_else(|_| panic!("the v2 snapshot should decode"));
+        let state = command_domain_state(&persisted)
+            .unwrap_or_else(|_| panic!("the v2 snapshot should restore"));
+
+        assert_eq!(state.phase(), GamePhase::HeroActions);
+        assert_eq!(state.queued_phases(), [GamePhase::EndTurn]);
+        assert_eq!(state.last_turn_steps().len(), 2);
+        assert_eq!(state.last_turn_steps()[0].phase(), GamePhase::DarkArts);
+        assert_eq!(state.last_turn_steps()[1].phase(), GamePhase::Villains);
+    }
+
+    #[test]
+    fn v2_pending_choice_upcasts_its_continuation_for_a_non_active_responsible_player() {
+        let snapshot = json!({
+            "snapshot_version": 2,
+            "state_version": 2,
+            "sequence": 1,
+            "status": "in_progress",
+            "adventure_id": "adventure:test",
+            "versions": {
+                "content": "1.0.0",
+                "ruleset": "1.0.0",
+                "manifest": 1,
+                "manifest_digest": format!("blake3:{}", "0".repeat(64)),
+                "prng": "chacha20-v1",
+                "shuffle": "fisher-yates-v1",
+                "sampling": "rejection-sampling-v1"
+            },
+            "turn": {
+                "number": 1,
+                "phase": "dark_arts",
+                "active_position": 1
+            },
+            "participants": [
+                {
+                    "participant_id": "00000000-0000-0000-0000-000000000001",
+                    "position": 1,
+                    "hero_id": "harry"
+                },
+                {
+                    "participant_id": "00000000-0000-0000-0000-000000000002",
+                    "position": 2,
+                    "hero_id": "hermione"
+                }
+            ],
+            "prng": { "algorithm": "chacha20-v1", "counter": 0 },
+            "effects": {
+                "outcomes": [{
+                    "type": "no_op",
+                    "rule_id": "rule:legacy",
+                    "reason": "explicit"
+                }],
+                "choice": {
+                    "id": "choice:effect:0",
+                    "cause": "rule:legacy",
+                    "responsible_position": 2,
+                    "kind": "effect",
+                    "options": ["option:1", "option:2"],
+                    "min": 1,
+                    "max": 1,
+                    "continuation": {
+                        "choice_cursor": { "rule_id": "rule:legacy", "path": [] },
+                        "queue": [{
+                            "type": "definition",
+                            "cursor": { "rule_id": "rule:after", "path": [] },
+                            "actor_position": 1
+                        }],
+                        "steps_completed": 1
+                    }
+                }
+            }
+        });
+
+        let persisted = decode_persisted_snapshot(&snapshot.to_string())
+            .unwrap_or_else(|_| panic!("the v2 snapshot should decode"));
+        let state = command_domain_state(&persisted)
+            .unwrap_or_else(|_| panic!("the v2 choice should restore"));
+
+        assert_eq!(state.active_position(), 1);
+        assert_eq!(
+            state
+                .pending_choice()
+                .expect("the choice should remain pending")
+                .responsible_position,
+            2
+        );
+        assert_eq!(state.queued_effects().len(), 1);
+        assert_eq!(state.last_turn_steps().len(), 1);
+    }
+
+    #[test]
+    fn v3_structured_choice_accepts_a_queued_definition_for_the_responsible_player() {
+        let choice = json!({
+            "id": "choice:nested:effect:0",
+            "cause": "rule:nested",
+            "responsible_position": 2,
+            "kind": "effect",
+            "options": ["option:1", "option:2"],
+            "min": 1,
+            "max": 1,
+            "continuation": {
+                "choice_cursor": {
+                    "rule_id": "rule:nested",
+                    "path": [
+                        { "type": "choice_option", "index": 0 },
+                        { "type": "sequence_effect", "index": 0 }
+                    ]
+                },
+                "queue": [{
+                    "type": "definition",
+                    "cursor": {
+                        "rule_id": "rule:nested",
+                        "path": [
+                            { "type": "choice_option", "index": 0 },
+                            { "type": "sequence_effect", "index": 1 }
+                        ]
+                    },
+                    "actor_position": 2
+                }],
+                "steps_completed": 1
+            }
+        });
+        let snapshot = json!({
+            "snapshot_version": 3,
+            "state_version": 2,
+            "sequence": 1,
+            "status": "in_progress",
+            "adventure_id": "adventure:test",
+            "versions": {
+                "content": "1.0.0",
+                "ruleset": "1.0.0",
+                "manifest": 1,
+                "manifest_digest": format!("blake3:{}", "0".repeat(64)),
+                "prng": "chacha20-v1",
+                "shuffle": "fisher-yates-v1",
+                "sampling": "rejection-sampling-v1"
+            },
+            "turn": {
+                "number": 1,
+                "phase": "dark_arts",
+                "active_position": 1
+            },
+            "queued_phases": ["villains", "hero_actions", "end_turn"],
+            "queued_effects": choice["continuation"]["queue"].clone(),
+            "decision_point": {
+                "type": "effect_choice",
+                "choice": choice.clone()
+            },
+            "last_turn_steps": [{ "phase": "dark_arts", "effects": [] }],
+            "participants": [
+                {
+                    "participant_id": "00000000-0000-0000-0000-000000000001",
+                    "position": 1,
+                    "hero_id": "harry"
+                },
+                {
+                    "participant_id": "00000000-0000-0000-0000-000000000002",
+                    "position": 2,
+                    "hero_id": "hermione"
+                }
+            ],
+            "prng": { "algorithm": "chacha20-v1", "counter": 0 },
+            "effects": { "choice": choice }
+        });
+
+        let persisted = decode_persisted_snapshot(&snapshot.to_string())
+            .unwrap_or_else(|_| panic!("the v3 structured snapshot should decode"));
+        let state = command_domain_state(&persisted)
+            .unwrap_or_else(|_| panic!("the nested non-active choice should restore"));
+
+        assert_eq!(state.active_position(), 1);
+        assert_eq!(
+            state
+                .pending_choice()
+                .expect("the choice should remain pending")
+                .responsible_position,
+            2
+        );
+        assert_eq!(state.queued_effects().len(), 1);
+        assert_eq!(state.queued_effects()[0].actor_position(), 2);
     }
 }

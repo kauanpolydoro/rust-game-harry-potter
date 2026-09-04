@@ -12,6 +12,7 @@ use crate::{
 
 const BASE_RECORD_COUNT: usize = 171;
 const BASE_CARD_COUNT: u32 = 252;
+const BUNDLE_SCHEMA_VERSION: u16 = 2;
 const MANIFEST_VERSION: u16 = 2;
 const REQUIRED_BASE_ENTRY_KINDS: [EntryKind; 12] = [
     EntryKind::Adventure,
@@ -68,19 +69,24 @@ pub fn import_base_bundle_with_runtime_rules(
     trusted_sources: &[ProvenanceSource],
     executable_rules: &BTreeSet<RuleId>,
 ) -> Result<ContentManifest, ImportFailure> {
-    let mut bundle: CandidateBundle =
+    let header: CandidateBundleHeader =
         serde_json::from_slice(bytes).map_err(|error| ImportFailure {
-            message: format!("bundle is not valid schema v1 JSON: {error}"),
+            message: format!("bundle is not valid JSON: {error}"),
         })?;
 
-    if bundle.schema_version != 1 {
+    if header.schema_version != BUNDLE_SCHEMA_VERSION {
         return Err(ImportFailure {
             message: format!(
                 "unsupported bundle schema version: {}",
-                bundle.schema_version
+                header.schema_version
             ),
         });
     }
+
+    let mut bundle: CandidateBundle =
+        serde_json::from_slice(bytes).map_err(|error| ImportFailure {
+            message: format!("bundle is not valid schema v{BUNDLE_SCHEMA_VERSION} JSON: {error}"),
+        })?;
 
     bundle.canonicalize();
     validation::validate(&bundle)?;
@@ -168,6 +174,11 @@ struct ManifestDigestInput<'a> {
     executable_rules: &'a BTreeSet<RuleId>,
 }
 
+#[derive(Deserialize)]
+struct CandidateBundleHeader {
+    schema_version: u16,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CandidateBundle {
@@ -184,7 +195,13 @@ impl CandidateBundle {
     fn canonicalize(&mut self) {
         self.sources.sort_by(|left, right| left.id.cmp(&right.id));
         self.entries.sort_by(|left, right| left.id.cmp(&right.id));
-        self.rules.sort_by(|left, right| left.id.cmp(&right.id));
+        self.rules.sort_by(|left, right| {
+            left.trigger
+                .phase_order()
+                .cmp(&right.trigger.phase_order())
+                .then(left.order.cmp(&right.order))
+                .then(left.id.cmp(&right.id))
+        });
         for entry in &mut self.entries {
             for source_ids in entry.provenance.values_mut() {
                 source_ids.sort();
