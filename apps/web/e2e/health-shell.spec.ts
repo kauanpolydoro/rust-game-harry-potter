@@ -152,6 +152,60 @@ test('a guest joins with an available hero and keeps the same position after rel
   }
 })
 
+test('a participant uses an individual link once to recover the same position on a second device', async ({
+  browser,
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByLabel('Seu nome').fill('Minerva')
+  await page.getByLabel('Senha de recuperação').fill('a long uncommon passphrase')
+  await page.getByRole('button', { name: 'Criar sala privada' }).click()
+  const recoveryLink = await page.getByLabel('Link de recuperação').inputValue()
+  expect(recoveryLink).toMatch(/#recovery=[0-9a-f]{64}$/)
+
+  const secondDevice = await browser.newContext()
+  const recoveredPage = await secondDevice.newPage()
+  try {
+    await recoveredPage.goto(recoveryLink)
+    await expect(recoveredPage).toHaveURL((url) => url.hash === '')
+    await expect(
+      recoveredPage.getByRole('heading', { level: 2, name: 'Recupere sua participação' }),
+    ).toBeVisible()
+    await recoveredPage
+      .getByLabel('Senha de recuperação da sala')
+      .fill('a long uncommon passphrase')
+    await recoveredPage.getByRole('button', { name: 'Recuperar minha posição' }).click()
+
+    await expect(recoveredPage.getByRole('heading', { level: 2, name: 'Sala pronta' })).toBeVisible()
+    await expect(
+      recoveredPage.locator('.room-details').getByText('Posição 1', { exact: true }),
+    ).toBeVisible()
+    const recoveredSession = (await secondDevice.cookies()).find(
+      (cookie) => cookie.name === '__Host-session',
+    )
+    expect(recoveredSession).toMatchObject({ httpOnly: true, sameSite: 'Strict', secure: true })
+  } finally {
+    await secondDevice.close()
+  }
+
+  const replayDevice = await browser.newContext()
+  const replayPage = await replayDevice.newPage()
+  try {
+    await replayPage.goto(recoveryLink)
+    await replayPage
+      .getByLabel('Senha de recuperação da sala')
+      .fill('a long uncommon passphrase')
+    await replayPage.getByRole('button', { name: 'Recuperar minha posição' }).click()
+    await expect(
+      replayPage.getByText(
+        'Não foi possível recuperar a participação. Confira o link e a senha da sala.',
+      ),
+    ).toBeVisible()
+  } finally {
+    await replayDevice.close()
+  }
+})
+
 test('a player replays a missed event and falls back to Snapshot within recovery SLOs', async ({
   browser,
   page: hostPage,

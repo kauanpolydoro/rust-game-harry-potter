@@ -218,6 +218,7 @@ function hostRoomResponse() {
     heroes: availableHeroes,
     participant,
     participants: [participant],
+    recovery_token: 'a'.repeat(64),
     room: { code: '9HKGW4RT', status: 'open' },
   }
 }
@@ -245,6 +246,10 @@ function guestLobbyResponse() {
   }
 }
 
+function guestJoinResponse() {
+  return { ...guestLobbyResponse(), recovery_token: 'b'.repeat(64) }
+}
+
 describe('application shell', () => {
   beforeEach(() => {
     SynchronizedWebSocket.instances = []
@@ -253,6 +258,7 @@ describe('application shell', () => {
 
   afterEach(() => {
     cleanup()
+    delete window.__HOGWARTS_RECOVERY_TOKEN__
     localStorage.clear()
     sessionStorage.clear()
     vi.unstubAllGlobals()
@@ -364,6 +370,9 @@ describe('application shell', () => {
     await waitFor(() => expect(successHeading).toHaveFocus())
     expect(screen.getByText('9HKGW4RT')).toBeVisible()
     expect(screen.getAllByText('Minerva')[0]).toBeVisible()
+    const recoveryLink = screen.getByLabelText('Link de recuperação')
+    const expectedRecoveryLink = `${window.location.origin}${window.location.pathname}#recovery=${'a'.repeat(64)}`
+    expect(recoveryLink).toHaveValue(expectedRecoveryLink)
     expect(request).toHaveBeenNthCalledWith(
       2,
       '/api/rooms',
@@ -380,9 +389,250 @@ describe('application shell', () => {
       (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers,
     ).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }))
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Copiar link' }))
+    await screen.findByText('Link individual copiado.')
+    expect(clipboard.writeText).toHaveBeenNthCalledWith(1, expectedRecoveryLink)
+    await fireEvent.click(screen.getByRole('button', { name: 'Já guardei o link' }))
+    expect(screen.queryByLabelText('Link de recuperação')).not.toBeInTheDocument()
+
     await fireEvent.click(screen.getByRole('button', { name: 'Copiar código da sala' }))
     await screen.findByText('Código copiado.')
-    expect(clipboard.writeText).toHaveBeenCalledWith('9HKGW4RT')
+    expect(clipboard.writeText).toHaveBeenNthCalledWith(2, '9HKGW4RT')
+  })
+
+  it('recovers the linked position with the room password and no room identifier', async () => {
+    const token = 'c'.repeat(64)
+    window.__HOGWARTS_RECOVERY_TOKEN__ = token
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(guestLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' }),
+    ).toBeVisible()
+    expect(window.__HOGWARTS_RECOVERY_TOKEN__).toBeUndefined()
+    expect(screen.queryByLabelText('Código da sala')).not.toBeInTheDocument()
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(screen.getAllByText('Posição 2')[0]).toBeVisible()
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      '/api/session/recover',
+      expect.objectContaining({
+        credentials: 'same-origin',
+        method: 'POST',
+      }),
+    )
+    expect(
+      JSON.parse(String((request.mock.calls[1]?.[1] as RequestInit | undefined)?.body)),
+    ).toEqual({
+      recovery_password: 'a long uncommon passphrase',
+      recovery_token: token,
+      recovery_attempt_id: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      ),
+    })
+    expect(localStorage.getItem('hogwarts.session.expected')).toBe('true')
+    expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBeNull()
+  })
+
+  it('gives a recovery link precedence over an older pending room join', async () => {
+    const token = 'f'.repeat(64)
+    window.__HOGWARTS_RECOVERY_TOKEN__ = token
+    sessionStorage.setItem(
+      'hogwarts.room-join.pending-intent',
+      JSON.stringify({
+        commandType: 'join_room',
+        createdAt: new Date().toISOString(),
+        idempotencyKey: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+        input: { display_name: 'Luna', hero_id: 'hermione' },
+        roomCode: '9HKGW4RT',
+      }),
+    )
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(guestLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' }),
+    ).toBeVisible()
+    expect(request).toHaveBeenCalledTimes(1)
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      '/api/session/recover',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(sessionStorage.getItem('hogwarts.room-join.pending-intent')).toBeNull()
+  })
+
+  it('reuses the browser-bound recovery attempt after a lost response', async () => {
+    const token = '1'.repeat(64)
+    window.__HOGWARTS_RECOVERY_TOKEN__ = token
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockRejectedValueOnce(new TypeError('response lost after commit'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(errorResponse('SESSION_INVALID')), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 401,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(guestLobbyResponse()), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' })
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+    await screen.findByText(
+      'A confirmação não chegou. Tente novamente nesta tela ou reabra o link nesta mesma aba.',
+    )
+
+    const firstAttempt = JSON.parse(
+      String((request.mock.calls[1]?.[1] as RequestInit | undefined)?.body),
+    ) as { recovery_attempt_id: string }
+    expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBe(
+      firstAttempt.recovery_attempt_id,
+    )
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    const retriedAttempt = JSON.parse(
+      String((request.mock.calls[3]?.[1] as RequestInit | undefined)?.body),
+    ) as { recovery_attempt_id: string }
+    expect(retriedAttempt.recovery_attempt_id).toBe(firstAttempt.recovery_attempt_id)
+    expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBeNull()
+  })
+
+  it('uses one safe error for an invalid recovery link or room password', async () => {
+    window.__HOGWARTS_RECOVERY_TOKEN__ = 'd'.repeat(64)
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(errorResponse('RECOVERY_FAILED')), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 401,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' })
+    await fireEvent.update(screen.getByLabelText('Senha de recuperação da sala'), 'wrong value')
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+
+    expect(
+      await screen.findByText(
+        'Não foi possível recuperar a participação. Confira o link e a senha da sala.',
+      ),
+    ).toHaveAttribute('role', 'alert')
+    expect(screen.getByLabelText('Senha de recuperação da sala')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    )
+    expect(screen.queryByText(/Minerva|Luna/)).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Voltar ao início' }))
+    const createHeading = await screen.findByRole('heading', {
+      level: 2,
+      name: 'Abra uma sala para o seu grupo',
+    })
+    expect(createHeading).toBeVisible()
+    await waitFor(() => expect(screen.getByLabelText('Seu nome')).toHaveFocus())
+  })
+
+  it('distinguishes a service failure from invalid recovery credentials', async () => {
+    window.__HOGWARTS_RECOVERY_TOKEN__ = 'e'.repeat(64)
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(errorResponse('INTERNAL_ERROR')), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 500,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' })
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+
+    expect(
+      await screen.findByText(
+        'O serviço não conseguiu confirmar a recuperação. Tente novamente com o mesmo link.',
+      ),
+    ).toHaveAttribute('role', 'alert')
+    expect(screen.queryByRole('button', { name: 'Voltar ao início' })).not.toBeInTheDocument()
   })
 
   it('reuses the same idempotency key after an uncertain server failure', async () => {
@@ -759,6 +1009,7 @@ describe('application shell', () => {
                 role: 'guest',
               },
             ],
+            recovery_token: 'b'.repeat(64),
             room: { code: '9HKGW4RT', status: 'open' },
           }),
           { headers: { 'Content-Type': 'application/json' }, status: 201 },
@@ -825,9 +1076,9 @@ describe('application shell', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(guestJoinResponse()), {
           headers: { 'Content-Type': 'application/json' },
-          status: 200,
+          status: 201,
         }),
       )
     vi.stubGlobal('fetch', request)

@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { isUncertainTransportFailure } from './api/http'
 import GameStage from './components/GameStage.vue'
 import type { HeroId, StartGameRequest } from './contracts/identity-access.generated'
+import { takeRecoveryToken } from './recoveryCredential'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
 import { useGameSyncStore } from './stores/gameSync'
@@ -15,16 +16,20 @@ const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
-const entryMode = ref<'create' | 'join'>('create')
+const recoveryToken = ref(takeRecoveryToken())
+const entryMode = ref<'create' | 'join' | 'recover'>(
+  recoveryToken.value ? 'recover' : 'create',
+)
 const displayName = ref('')
 const recoveryPassword = ref('')
 const roomCode = ref('')
 const selectedHero = ref<HeroId | ''>('')
 const passwordVisible = ref(false)
 const copyResult = ref<'idle' | 'copied' | 'failed'>('idle')
+const recoveryCopyResult = ref<'idle' | 'copied' | 'failed'>('idle')
 const selectedContentKey = ref('')
 
-if (roomAccess.pendingJoinIntent) {
+if (!recoveryToken.value && roomAccess.pendingJoinIntent) {
   entryMode.value = 'join'
   displayName.value = roomAccess.pendingJoinIntent.input.display_name
   roomCode.value = roomAccess.pendingJoinIntent.roomCode
@@ -49,6 +54,11 @@ const statusPresentation = {
 const currentStatus = computed(() => statusPresentation[health.availability])
 const lobby = computed(() => roomAccess.lobby)
 const game = computed(() => roomAccess.game)
+const issuedRecoveryLink = computed(() =>
+  roomAccess.issuedRecoveryToken
+    ? `${window.location.origin}${window.location.pathname}#recovery=${roomAccess.issuedRecoveryToken}`
+    : null,
+)
 const isHost = computed(() => lobby.value?.participant.role === 'host')
 const isRestoringSession = computed(
   () => roomAccess.status === 'restoring' && !lobby.value && !game.value,
@@ -119,6 +129,17 @@ const passwordError = computed(() =>
     ? 'Escolha uma senha mais longa e menos previsível.'
     : null,
 )
+const participationRecoveryError = computed(() => {
+  if (isUncertainTransportFailure(roomAccess.errorCode)) {
+    return 'A confirmação não chegou. Tente novamente nesta tela ou reabra o link nesta mesma aba.'
+  }
+  if (roomAccess.errorCode === 'RECOVERY_FAILED') {
+    return 'Não foi possível recuperar a participação. Confira o link e a senha da sala.'
+  }
+  return roomAccess.errorCode
+    ? 'O serviço não conseguiu confirmar a recuperação. Tente novamente com o mesmo link.'
+    : null
+})
 const createFormError = computed(() => {
   if (isUncertainTransportFailure(roomCreation.errorCode)) {
     return 'A confirmação não chegou. Tente novamente para consultar a mesma criação.'
@@ -233,12 +254,45 @@ async function createRoom(): Promise<void> {
     recovery_password: recoveryPassword.value,
   })
 
-  if (roomCreation.roomCreation) {
-    roomAccess.adoptCreatedRoom(roomCreation.roomCreation)
+  const createdRoom = roomCreation.takeRoomCreation()
+  if (createdRoom) {
+    roomAccess.adoptCreatedRoom(createdRoom)
     recoveryPassword.value = ''
     passwordVisible.value = false
   }
   await focusAfterAction(roomCreation.errorCode)
+}
+
+async function recoverParticipation(): Promise<void> {
+  const token = recoveryToken.value
+  if (!token) {
+    return
+  }
+  const recovered = await roomAccess.recoverParticipation({
+    recovery_password: recoveryPassword.value,
+    recovery_token: token,
+  })
+  if (recovered) {
+    recoveryToken.value = null
+    recoveryPassword.value = ''
+    passwordVisible.value = false
+  }
+  await nextTick()
+  document
+    .getElementById(
+      recovered ? (game.value ? 'game-heading' : 'room-success-heading') : 'recovery-room-password',
+    )
+    ?.focus()
+}
+
+async function leaveParticipationRecovery(): Promise<void> {
+  roomAccess.dismissParticipationRecovery()
+  recoveryToken.value = null
+  recoveryPassword.value = ''
+  passwordVisible.value = false
+  entryMode.value = 'create'
+  await nextTick()
+  document.getElementById('display-name')?.focus()
 }
 
 async function findRoom(): Promise<void> {
@@ -424,6 +478,23 @@ async function copyRoomCode(): Promise<void> {
   }
 }
 
+async function copyRecoveryLink(): Promise<void> {
+  if (!issuedRecoveryLink.value) {
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(issuedRecoveryLink.value)
+    recoveryCopyResult.value = 'copied'
+  } catch {
+    recoveryCopyResult.value = 'failed'
+  }
+}
+
+function dismissRecoveryLink(): void {
+  roomAccess.dismissRecoveryCredential()
+  recoveryCopyResult.value = 'idle'
+}
+
 watch([displayName, recoveryPassword], () => roomCreation.resetPendingRequest())
 watch(
   adventureChoices,
@@ -449,8 +520,11 @@ watch(
 onBeforeUnmount(() => gameSync.disconnect())
 
 onMounted(async () => {
-  await Promise.all([health.check(), roomAccess.restoreSession()])
-  if (!lobby.value && !game.value && roomAccess.pendingJoinIntent) {
+  await Promise.all([
+    health.check(),
+    recoveryToken.value ? Promise.resolve() : roomAccess.restoreSession(),
+  ])
+  if (!recoveryToken.value && !lobby.value && !game.value && roomAccess.pendingJoinIntent) {
     await roomAccess.recoverPendingJoin()
   }
   if (game.value && gameCommand.pendingIntent) {
@@ -526,6 +600,44 @@ onMounted(async () => {
           <span id="room-code-label">Código da sala</span>
           <output aria-labelledby="room-code-label">{{ lobby.room.code }}</output>
         </div>
+
+        <section
+          v-if="issuedRecoveryLink"
+          class="recovery-credential"
+          aria-labelledby="recovery-credential-heading"
+        >
+          <h3 id="recovery-credential-heading">Guarde seu link individual</h3>
+          <p id="recovery-credential-guidance">
+            Ele recupera somente sua posição e exige também a senha da sala. Este link não será
+            exibido novamente depois que você sair desta tela.
+          </p>
+          <label for="issued-recovery-link">Link de recuperação</label>
+          <textarea
+            id="issued-recovery-link"
+            aria-describedby="recovery-credential-guidance"
+            readonly
+            rows="3"
+            :value="issuedRecoveryLink"
+          ></textarea>
+          <div class="recovery-credential-actions">
+            <button class="text-button" type="button" @click="copyRecoveryLink()">
+              {{ recoveryCopyResult === 'copied' ? 'Copiar link novamente' : 'Copiar link' }}
+            </button>
+            <button class="text-button" type="button" @click="dismissRecoveryLink()">
+              Já guardei o link
+            </button>
+          </div>
+          <p v-if="recoveryCopyResult === 'copied'" class="copy-feedback" role="status">
+            Link individual copiado.
+          </p>
+          <p
+            v-else-if="recoveryCopyResult === 'failed'"
+            class="copy-feedback copy-feedback--error"
+            role="alert"
+          >
+            Não foi possível copiar. Selecione o link e copie manualmente.
+          </p>
+        </section>
 
         <dl class="room-details">
           <div>
@@ -651,6 +763,77 @@ onMounted(async () => {
           Não foi possível copiar. Selecione o código e copie manualmente.
         </p>
         <p v-if="lobbyError" class="form-error lobby-error" role="alert">{{ lobbyError }}</p>
+      </div>
+    </section>
+
+    <section
+      v-else-if="entryMode === 'recover'"
+      class="room-setup"
+      aria-labelledby="participation-recovery-heading"
+    >
+      <div class="cue-rail" aria-hidden="true">
+        <span class="cue-number">2</span>
+        <span class="cue-line"></span>
+        <span class="cue-label">Retomar posição</span>
+      </div>
+
+      <div class="room-stage">
+        <p class="service-confirmation" role="status">
+          <span class="state-signal" aria-hidden="true"></span>
+          Link protegido
+        </p>
+        <h2 id="participation-recovery-heading">Recupere sua participação</h2>
+        <p class="stage-description">
+          O link identifica uma posição sem revelá-la. Confirme a senha da sala para criar a sessão
+          deste dispositivo.
+        </p>
+
+        <form
+          id="recover-participation"
+          class="room-form"
+          :aria-busy="roomAccess.status === 'recovering_participation'"
+          @submit.prevent="recoverParticipation()"
+        >
+          <div class="field">
+            <label for="recovery-room-password">Senha de recuperação da sala</label>
+            <div class="password-control">
+              <input
+                id="recovery-room-password"
+                v-model="recoveryPassword"
+                :aria-invalid="roomAccess.errorCode === 'RECOVERY_FAILED'"
+                :type="passwordVisible ? 'text' : 'password'"
+                aria-describedby="participation-recovery-guidance participation-recovery-error"
+                autocomplete="current-password"
+                maxlength="128"
+                name="recovery-room-password"
+                required
+              />
+              <button
+                class="password-toggle"
+                type="button"
+                aria-controls="recovery-room-password"
+                @click="togglePassword()"
+              >
+                {{ passwordVisible ? 'Ocultar senha' : 'Mostrar senha' }}
+              </button>
+            </div>
+          </div>
+          <p id="participation-recovery-guidance" class="field-guidance">
+            O link isolado e a senha isolada não recuperam nem identificam uma participação.
+          </p>
+          <p
+            v-if="participationRecoveryError"
+            id="participation-recovery-error"
+            class="form-error"
+            role="alert"
+          >
+            {{ participationRecoveryError }}
+          </p>
+          <p v-if="roomAccess.errorCode === 'RECOVERY_FAILED'" class="alternate-path">
+            Não consegue usar este link?
+            <button type="button" @click="leaveParticipationRecovery()">Voltar ao início</button>
+          </p>
+        </form>
       </div>
     </section>
 
@@ -1010,6 +1193,19 @@ onMounted(async () => {
         <span aria-hidden="true"></span>
         Escolha um Herói antes de confirmar sua prontidão.
       </p>
+      <button
+        v-else-if="entryMode === 'recover'"
+        class="primary-button"
+        :disabled="roomAccess.status === 'recovering_participation' || !recoveryPassword"
+        form="recover-participation"
+        type="submit"
+      >
+        {{
+          roomAccess.status === 'recovering_participation'
+            ? 'Recuperando participação'
+            : 'Recuperar minha posição'
+        }}
+      </button>
       <button
         v-else-if="entryMode === 'create'"
         class="primary-button"

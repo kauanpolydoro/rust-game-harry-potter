@@ -649,6 +649,58 @@ input {
   padding-inline: 0;
 }
 
+.recovery-credential {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-block: 1.25rem;
+  border-block: 1px solid var(--brass-quiet);
+}
+
+.recovery-credential h3,
+.recovery-credential p {
+  margin: 0;
+}
+
+.recovery-credential h3,
+.recovery-credential label {
+  color: var(--chalk);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.recovery-credential p {
+  max-width: 34rem;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.recovery-credential textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+  border: 1px solid var(--brass-quiet);
+  border-radius: 0.75rem;
+  background: var(--ink-raised);
+  color: var(--chalk);
+  font: inherit;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 0.8rem 1rem;
+}
+
+.recovery-credential-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.recovery-credential-actions .text-button {
+  padding-inline: 0;
+}
+
 .text-button:disabled {
   color: var(--chalk-muted);
   cursor: wait;

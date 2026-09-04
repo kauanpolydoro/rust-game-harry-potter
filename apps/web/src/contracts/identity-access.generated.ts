@@ -26,6 +26,12 @@ export interface SetReadinessRequest {
   ready: boolean
 }
 
+export interface RecoverParticipationRequest {
+  recovery_token: string
+  recovery_password: string
+  recovery_attempt_id: string
+}
+
 export interface StartGameRequest {
   adventure_id: string
   manifest_digest: string
@@ -83,6 +89,16 @@ export interface CreateRoomResponse {
   participants: Array<ParticipantSummary>
   heroes: Array<HeroAvailability>
   content_options: Array<ContentManifestOption>
+  recovery_token: string
+}
+
+export interface JoinRoomResponse {
+  room: RoomSummary
+  participant: ParticipantSummary
+  participants: Array<ParticipantSummary>
+  heroes: Array<HeroAvailability>
+  content_options: Array<ContentManifestOption>
+  recovery_token: string
 }
 
 export interface FindRoomResponse {
@@ -269,6 +285,10 @@ export function isSetReadinessRequest(value: unknown): value is SetReadinessRequ
   return isRecord(value) && Object.keys(value).every((key) => ["ready"].includes(key)) && typeof value["ready"] === 'boolean'
 }
 
+export function isRecoverParticipationRequest(value: unknown): value is RecoverParticipationRequest {
+  return isRecord(value) && Object.keys(value).every((key) => ["recovery_token","recovery_password","recovery_attempt_id"].includes(key)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["recovery_password"] === 'string' && [...value["recovery_password"]].length >= 1 && [...value["recovery_password"]].length <= 128 && typeof value["recovery_attempt_id"] === 'string' && isUuid(value["recovery_attempt_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["recovery_attempt_id"])
+}
+
 export function isStartGameRequest(value: unknown): value is StartGameRequest {
   return isRecord(value) && Object.keys(value).every((key) => ["adventure_id","manifest_digest","ruleset_version"].includes(key)) && typeof value["adventure_id"] === 'string' && [...value["adventure_id"]].length >= 1 && typeof value["manifest_digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["manifest_digest"]) && typeof value["ruleset_version"] === 'string' && [...value["ruleset_version"]].length >= 1
 }
@@ -302,7 +322,11 @@ export function isContentManifestOption(value: unknown): value is ContentManifes
 }
 
 export function isCreateRoomResponse(value: unknown): value is CreateRoomResponse {
-  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes","content_options"].includes(key)) && isRoomSummary(value["room"]) && isParticipantSummary(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isParticipantSummary(entry)) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isHeroAvailability(entry)) && Array.isArray(value["content_options"]) && value["content_options"].every((entry) => isContentManifestOption(entry))
+  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes","content_options","recovery_token"].includes(key)) && isRoomSummary(value["room"]) && isParticipantSummary(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isParticipantSummary(entry)) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isHeroAvailability(entry)) && Array.isArray(value["content_options"]) && value["content_options"].every((entry) => isContentManifestOption(entry)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"])
+}
+
+export function isJoinRoomResponse(value: unknown): value is JoinRoomResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["room","participant","participants","heroes","content_options","recovery_token"].includes(key)) && isRoomSummary(value["room"]) && isParticipantSummary(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isParticipantSummary(entry)) && Array.isArray(value["heroes"]) && value["heroes"].every((entry) => isHeroAvailability(entry)) && Array.isArray(value["content_options"]) && value["content_options"].every((entry) => isContentManifestOption(entry)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"])
 }
 
 export function isFindRoomResponse(value: unknown): value is FindRoomResponse {

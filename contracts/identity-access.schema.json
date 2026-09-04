@@ -41,6 +41,20 @@
         "ready": { "type": "boolean" }
       }
     },
+    "RecoverParticipationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recovery_token", "recovery_password", "recovery_attempt_id"],
+      "properties": {
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "recovery_password": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "recovery_attempt_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    },
     "StartGameRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -146,7 +160,14 @@
     "CreateRoomResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["room", "participant", "participants", "heroes", "content_options"],
+      "required": [
+        "room",
+        "participant",
+        "participants",
+        "heroes",
+        "content_options",
+        "recovery_token"
+      ],
       "properties": {
         "room": { "$ref": "#/$defs/RoomSummary" },
         "participant": { "$ref": "#/$defs/ParticipantSummary" },
@@ -161,7 +182,37 @@
         "content_options": {
           "type": "array",
           "items": { "$ref": "#/$defs/ContentManifestOption" }
-        }
+        },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "JoinRoomResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "room",
+        "participant",
+        "participants",
+        "heroes",
+        "content_options",
+        "recovery_token"
+      ],
+      "properties": {
+        "room": { "$ref": "#/$defs/RoomSummary" },
+        "participant": { "$ref": "#/$defs/ParticipantSummary" },
+        "participants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ParticipantSummary" }
+        },
+        "heroes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/HeroAvailability" }
+        },
+        "content_options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentManifestOption" }
+        },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
     "FindRoomResponse": {

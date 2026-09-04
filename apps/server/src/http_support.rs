@@ -59,6 +59,8 @@ enum ErrorCode {
     HeroUnavailable,
     #[serde(rename = "SESSION_INVALID")]
     SessionInvalid,
+    #[serde(rename = "RECOVERY_FAILED")]
+    RecoveryFailed,
     #[serde(rename = "NOT_ROOM_HOST")]
     NotRoomHost,
     #[serde(rename = "ROOM_PARTICIPANT_COUNT_INVALID")]
@@ -134,6 +136,8 @@ enum MessageKey {
     HeroUnavailable,
     #[serde(rename = "session.invalid")]
     SessionInvalid,
+    #[serde(rename = "participant.recovery.failed")]
+    RecoveryFailed,
     #[serde(rename = "room.host.required")]
     NotRoomHost,
     #[serde(rename = "room.participant_count.invalid")]
@@ -298,6 +302,26 @@ impl ApiError {
             ErrorCategory::Authentication,
             RetryPolicy::AfterCorrection,
             MessageKey::SessionInvalid,
+        )
+    }
+
+    pub(crate) const fn recovery_failed() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::RecoveryFailed,
+            ErrorCategory::Authentication,
+            RetryPolicy::AfterCorrection,
+            MessageKey::RecoveryFailed,
+        )
+    }
+
+    pub(crate) const fn recovery_unavailable() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::Internal,
+            ErrorCategory::Internal,
+            RetryPolicy::SafeToRetry,
+            MessageKey::Internal,
         )
     }
 

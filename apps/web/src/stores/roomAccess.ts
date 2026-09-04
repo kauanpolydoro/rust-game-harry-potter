@@ -9,6 +9,7 @@ import {
 import {
   isFindRoomResponse,
   isGameProjectionResponse,
+  isJoinRoomResponse,
   isLobbyResponse,
   type CreateRoomResponse,
   type FindRoomResponse,
@@ -16,6 +17,7 @@ import {
   type HeroId,
   type JoinRoomRequest,
   type LobbyResponse,
+  type RecoverParticipationRequest,
   type StartGameRequest,
 } from '../contracts/identity-access.generated'
 
@@ -23,6 +25,7 @@ type RoomAccessStatus =
   | 'idle'
   | 'looking_up'
   | 'joining'
+  | 'recovering_participation'
   | 'restoring'
   | 'selecting_hero'
   | 'setting_readiness'
@@ -35,12 +38,14 @@ function lobbyActionIsPending(status: RoomAccessStatus): boolean {
     status === 'selecting_hero' ||
     status === 'setting_readiness' ||
     status === 'starting_game' ||
+    status === 'recovering_participation' ||
     status === 'restoring'
   )
 }
 
 const sessionExpectedStorage = 'hogwarts.session.expected'
 const pendingJoinStorage = 'hogwarts.room-join.pending-intent'
+const recoveryAttemptStorage = 'hogwarts.participant-recovery.attempt-id'
 const roomCodePattern = /^[23456789A-HJ-NP-Z]{8}$/
 const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const heroIds = new Set<HeroId>(['harry', 'hermione', 'neville', 'ron'])
@@ -52,6 +57,8 @@ interface PendingJoinIntent {
   input: JoinRoomRequest
   roomCode: string
 }
+
+type ParticipationRecoveryInput = Omit<RecoverParticipationRequest, 'recovery_attempt_id'>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -120,6 +127,35 @@ function removePendingJoinIntent(): void {
   }
 }
 
+function loadRecoveryAttemptId(): string | null {
+  try {
+    const attemptId = sessionStorage.getItem(recoveryAttemptStorage)
+    if (attemptId && uuidV4Pattern.test(attemptId)) {
+      return attemptId
+    }
+    sessionStorage.removeItem(recoveryAttemptStorage)
+  } catch {
+    // In-memory idempotency remains available when session storage is unavailable.
+  }
+  return null
+}
+
+function persistRecoveryAttemptId(attemptId: string): void {
+  try {
+    sessionStorage.setItem(recoveryAttemptStorage, attemptId)
+  } catch {
+    // The active page can still repeat the same recovery attempt from memory.
+  }
+}
+
+function removeRecoveryAttemptId(): void {
+  try {
+    sessionStorage.removeItem(recoveryAttemptStorage)
+  } catch {
+    // Storage availability must not prevent a confirmed recovery from completing.
+  }
+}
+
 function apiErrorCode(value: unknown): string {
   return apiError(value)?.code ?? 'UNEXPECTED_RESPONSE'
 }
@@ -157,6 +193,8 @@ export const useRoomAccessStore = defineStore('roomAccess', {
     startIdempotencyKey: string | null
     pendingStartInput: StartGameRequest | null
     sessionExpected: boolean
+    issuedRecoveryToken: string | null
+    recoveryAttemptId: string | null
   } => {
     const pendingJoinIntent = loadPendingJoinIntent()
     return {
@@ -171,6 +209,8 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       startIdempotencyKey: null,
       pendingStartInput: null,
       sessionExpected: sessionIsExpected(),
+      issuedRecoveryToken: null,
+      recoveryAttemptId: loadRecoveryAttemptId(),
     }
   },
   actions: {
@@ -190,12 +230,28 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.errorCode = null
     },
     adoptCreatedRoom(room: CreateRoomResponse): void {
-      this.lobby = room
+      const { recovery_token: recoveryToken, ...lobby } = room
+      this.lobby = lobby
       this.game = null
       this.status = 'ready'
       this.errorCode = null
       this.sessionExpected = true
+      this.issuedRecoveryToken = recoveryToken
       markSessionExpected(true)
+    },
+    dismissRecoveryCredential(): void {
+      this.issuedRecoveryToken = null
+    },
+    dismissParticipationRecovery(): void {
+      if (this.status === 'recovering_participation') {
+        return
+      }
+      this.errorCode = null
+      this.status = 'idle'
+    },
+    confirmParticipationRecovery(): void {
+      this.recoveryAttemptId = null
+      removeRecoveryAttemptId()
     },
     clearLookup(): void {
       if (this.status === 'joining') {
@@ -282,12 +338,14 @@ export const useRoomAccessStore = defineStore('roomAccess', {
             method: 'POST',
           },
         )
-        if (response.ok && isLobbyResponse(result)) {
-          this.lobby = result
+        if (response.ok && isJoinRoomResponse(result)) {
+          const { recovery_token: recoveryToken, ...lobby } = result
+          this.lobby = lobby
           this.roomLookup = null
           this.status = 'ready'
           this.clearPendingJoinIntent()
           this.sessionExpected = true
+          this.issuedRecoveryToken = recoveryToken
           markSessionExpected(true)
           return
         }
@@ -309,6 +367,71 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       } catch (error) {
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
+      }
+    },
+    async recoverParticipation(input: ParticipationRecoveryInput): Promise<boolean> {
+      if (this.status === 'recovering_participation') {
+        return false
+      }
+
+      this.status = 'recovering_participation'
+      this.errorCode = null
+      const recoveryAttemptId = this.recoveryAttemptId ?? crypto.randomUUID()
+      this.recoveryAttemptId = recoveryAttemptId
+      persistRecoveryAttemptId(recoveryAttemptId)
+      try {
+        const { body: result, response } = await requestJson('/api/session/recover', {
+          body: JSON.stringify({
+            ...input,
+            recovery_attempt_id: recoveryAttemptId,
+          } satisfies RecoverParticipationRequest),
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          method: 'POST',
+        })
+        if (response.ok && isLobbyResponse(result)) {
+          this.lobby = result
+          this.game = null
+          this.status = 'ready'
+          this.clearPendingJoinIntent()
+          this.confirmParticipationRecovery()
+          this.sessionExpected = true
+          markSessionExpected(true)
+          return true
+        }
+        if (response.ok && isGameProjectionResponse(result)) {
+          this.game = result
+          this.lobby = null
+          this.status = 'ready'
+          this.clearPendingJoinIntent()
+          this.confirmParticipationRecovery()
+          this.sessionExpected = true
+          markSessionExpected(true)
+          return true
+        }
+
+        this.errorCode = apiErrorCode(result)
+        this.status = 'failed'
+        return false
+      } catch (error) {
+        const recoveryError = transportErrorCode(error)
+        this.sessionExpected = true
+        markSessionExpected(true)
+        this.status = 'idle'
+        await this.restoreSession()
+        if (this.lobby || this.game) {
+          this.confirmParticipationRecovery()
+          return true
+        }
+        this.errorCode = recoveryError
+        this.status = 'failed'
+        this.sessionExpected = false
+        markSessionExpected(false)
+        return false
       }
     },
     async restoreSession(): Promise<void> {
