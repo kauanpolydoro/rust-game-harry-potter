@@ -393,11 +393,16 @@ function showCreate(): void {
   roomAccess.clearLookup()
 }
 
-function discardPendingJoin(): void {
+async function discardPendingJoin(): Promise<void> {
+  if (roomAccess.status === 'joining') {
+    return
+  }
   roomAccess.clearLookup()
   displayName.value = ''
   roomCode.value = ''
   selectedHero.value = ''
+  await nextTick()
+  document.getElementById('room-code')?.focus()
 }
 
 function heroIsSelectable(heroId: HeroId, available: boolean): boolean {
@@ -882,6 +887,7 @@ onMounted(async () => {
           </p>
           <button
             class="text-button"
+            :disabled="roomAccess.status === 'joining'"
             type="button"
             @click="roomAccess.pendingJoinIntent ? discardPendingJoin() : roomAccess.clearLookup()"
           >

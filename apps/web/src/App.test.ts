@@ -744,6 +744,10 @@ describe('application shell', () => {
   })
 
   it('replays a pending join after a lost response and reload', async () => {
+    let rejectPendingJoin!: (reason?: unknown) => void
+    const pendingJoin = new Promise<Response>((_resolve, reject) => {
+      rejectPendingJoin = reject
+    })
     const readyResponse = (): Response =>
       new Response(JSON.stringify({ status: 'ready' }), {
         headers: { 'Content-Type': 'application/json' },
@@ -761,7 +765,7 @@ describe('application shell', () => {
           { headers: { 'Content-Type': 'application/json' }, status: 200 },
         ),
       )
-      .mockRejectedValueOnce(new TypeError('response lost after commit'))
+      .mockReturnValueOnce(pendingJoin)
       .mockResolvedValueOnce(readyResponse())
       .mockResolvedValueOnce(
         new Response(JSON.stringify(errorResponse('SESSION_INVALID')), {
@@ -786,6 +790,13 @@ describe('application shell', () => {
     await fireEvent.update(screen.getByLabelText('Seu nome'), 'Luna')
     await fireEvent.click(screen.getByRole('radio', { name: 'Hermione' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Entrar na sala' }))
+    const pendingDiscard = screen.getByRole('button', {
+      name: 'Descartar entrada e usar outro código',
+    })
+    expect(pendingDiscard).toBeDisabled()
+    await fireEvent.click(pendingDiscard)
+    expect(screen.getByLabelText('Seu nome')).toHaveValue('Luna')
+    rejectPendingJoin(new TypeError('response lost after commit'))
     await screen.findByText('A confirmação não chegou. Tente entrar novamente com os mesmos dados.')
     expect(screen.queryByRole('button', { name: 'Usar outro código' })).not.toBeInTheDocument()
     expect(
@@ -803,6 +814,14 @@ describe('application shell', () => {
       input: { display_name: 'Luna', hero_id: 'hermione' },
       roomCode: '9HKGW4RT',
     })
+
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Descartar entrada e usar outro código' }),
+    )
+    expect(sessionStorage.getItem('hogwarts.room-join.pending-intent')).toBeNull()
+    expect(screen.getByLabelText('Código da sala')).toHaveFocus()
+
+    sessionStorage.setItem('hogwarts.room-join.pending-intent', JSON.stringify(persistedIntent))
 
     cleanup()
     render(App, { global: { plugins: [createPinia()] } })
