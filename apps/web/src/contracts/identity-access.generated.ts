@@ -8,6 +8,26 @@ export type OpenRoomStatus = (typeof openRoomStatuses)[number]
 export type ParticipantRole = (typeof participantRoles)[number]
 export type HeroId = (typeof heroIds)[number]
 
+export interface PendingStunChoiceSummary {
+  status: "pending"
+  id: string
+  cause: string
+  responsible_position: number
+  kind: "stun_discard"
+  options: Array<string>
+  min: number
+  max: number
+}
+
+export interface LocationSummary {
+  instance_id: string
+  catalog_id: string
+  name: string
+  control: number
+  control_limit: number
+  dark_arts_count: number
+}
+
 export interface CreateRoomRequest {
   display_name: string
   recovery_password: string
@@ -331,6 +351,7 @@ export interface PendingTargetChoiceSummary {
 export type PendingChoiceSummary =
   | PendingEffectChoiceSummary
   | PendingTargetChoiceSummary
+  | PendingStunChoiceSummary
 
 export type ChoiceSummary =
   | NoChoiceSummary
@@ -408,6 +429,10 @@ export interface TableSummary {
   hogwarts_deck_count: number
   active_villains: Array<VillainSummary>
   villain_deck_count: number
+  current_location: LocationSummary | null
+  location_deck_count: number
+  location_discard_count: number
+  villain_discard_count: number
 }
 
 export type EffectOutcomeSummary =
@@ -512,6 +537,21 @@ export type EndTurnOutcomeSummary =
     resource: "attack" | "influence"
     before: number
   }
+  | {
+    type: "location_advanced"
+    location_id: string
+    next_location_id?: string
+  }
+  | {
+    type: "villain_revealed"
+    villain_id: string
+  }
+  | {
+    type: "hero_recovered"
+    position: number
+    before: 0
+    after: 10
+  }
 
 export interface TurnStepSummary {
   phase: "dark_arts" | "villains" | "hero_actions" | "end_turn"
@@ -531,6 +571,7 @@ export interface GameParticipant {
   hero: HeroSummary
   resources: GameResources
   hand_count: number
+  stunned: boolean
 }
 
 export interface GameProjectionResponse {
@@ -672,7 +713,7 @@ export interface LegacyChoiceResolvedRealtimeGameEvent {
 }
 
 export interface TurnCompletedRealtimeGameEvent {
-  event_version: 4
+  event_version: 4 | 5
   type: "turn_completed"
   sequence: number
   state_version: number
@@ -686,7 +727,7 @@ export interface TurnCompletedRealtimeGameEvent {
 }
 
 export interface ChoiceResolvedRealtimeGameEvent {
-  event_version: 4
+  event_version: 4 | 5
   type: "choice_resolved"
   sequence: number
   state_version: number
@@ -707,7 +748,7 @@ export type RealtimeGameEvent =
   | LegacyChoiceResolvedRealtimeGameEvent
   | TurnCompletedRealtimeGameEvent
   | {
-    event_version: 4
+    event_version: 4 | 5
     type: "card_played"
     sequence: number
     state_version: number
@@ -734,7 +775,7 @@ export type RealtimeGameEvent =
     command_id?: string
   }
   | {
-    event_version: 4
+    event_version: 4 | 5
     type: "card_acquired"
     sequence: number
     state_version: number
@@ -745,6 +786,21 @@ export type RealtimeGameEvent =
     refill_card_id?: string
     effects: Array<EffectOutcomeSummary>
     command_id?: string
+  }
+  | {
+    event_version: 5
+    type: "attack_assigned"
+    sequence: number
+    state_version: number
+    turn: number
+    actor_position: number
+    villain_id: string
+    amount: number
+    effects: Array<EffectOutcomeSummary>
+    command_id?: string
+    effect_stop: "stable" | "choice" | "terminal"
+    prng_counter: number
+    choice?: PendingChoiceSummary
   }
 
 export interface RealtimeSnapshotMessage {
@@ -845,6 +901,14 @@ function isRfc3339DateTime(value: string): boolean {
   const month = Number(match[2])
   const day = Number(match[3])
   return month >= 1 && month <= 12 && day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+export function isPendingStunChoiceSummary(value: unknown): value is PendingStunChoiceSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["status","id","cause","responsible_position","kind","options","min","max"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "pending") && typeof value["id"] === 'string' && [...value["id"]].length >= 1 && [...value["id"]].length <= 256 && typeof value["cause"] === 'string' && [...value["cause"]].length >= 1 && [...value["cause"]].length <= 256 && typeof value["responsible_position"] === 'number' && Number.isInteger(value["responsible_position"]) && value["responsible_position"] >= 1 && value["responsible_position"] <= 4 && typeof value["kind"] === 'string' && (value["kind"] === "stun_discard") && Array.isArray(value["options"]) && value["options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["options"].length >= 2 && value["options"].length <= 4096 && hasUniqueItems(value["options"]) && typeof value["min"] === 'number' && Number.isInteger(value["min"]) && value["min"] >= 1 && value["min"] <= 32 && typeof value["max"] === 'number' && Number.isInteger(value["max"]) && value["max"] >= 1 && value["max"] <= 32 && value["min"] <= value["max"] && value["max"] < value["options"].length
+}
+
+export function isLocationSummary(value: unknown): value is LocationSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["instance_id","catalog_id","name","control","control_limit","dark_arts_count"].includes(key)) && typeof value["instance_id"] === 'string' && [...value["instance_id"]].length >= 1 && typeof value["catalog_id"] === 'string' && [...value["catalog_id"]].length >= 1 && typeof value["name"] === 'string' && [...value["name"]].length >= 1 && typeof value["control"] === 'number' && Number.isInteger(value["control"]) && value["control"] >= 0 && value["control"] <= 65535 && typeof value["control_limit"] === 'number' && Number.isInteger(value["control_limit"]) && value["control_limit"] >= 1 && value["control_limit"] <= 65535 && typeof value["dark_arts_count"] === 'number' && Number.isInteger(value["dark_arts_count"]) && value["dark_arts_count"] >= 1 && value["dark_arts_count"] <= 255
 }
 
 export function isHeroId(value: unknown): value is HeroId {
@@ -1024,7 +1088,7 @@ export function isPendingTargetChoiceSummary(value: unknown): value is PendingTa
 }
 
 export function isPendingChoiceSummary(value: unknown): value is PendingChoiceSummary {
-  return [(isPendingEffectChoiceSummary(value)),(isPendingTargetChoiceSummary(value))].filter(Boolean).length === 1
+  return [(isPendingEffectChoiceSummary(value)),(isPendingTargetChoiceSummary(value)),(isPendingStunChoiceSummary(value))].filter(Boolean).length === 1
 }
 
 export function isChoiceSummary(value: unknown): value is ChoiceSummary {
@@ -1072,7 +1136,7 @@ export function isVillainSummary(value: unknown): value is VillainSummary {
 }
 
 export function isTableSummary(value: unknown): value is TableSummary {
-  return isRecord(value) && Object.keys(value).every((key) => ["hand","play_area","draw_pile_count","discard_pile_count","market","hogwarts_deck_count","active_villains","villain_deck_count"].includes(key)) && Array.isArray(value["hand"]) && value["hand"].every((entry) => isCardSummary(entry)) && Array.isArray(value["play_area"]) && value["play_area"].every((entry) => isCardSummary(entry)) && typeof value["draw_pile_count"] === 'number' && Number.isInteger(value["draw_pile_count"]) && value["draw_pile_count"] >= 0 && typeof value["discard_pile_count"] === 'number' && Number.isInteger(value["discard_pile_count"]) && value["discard_pile_count"] >= 0 && Array.isArray(value["market"]) && value["market"].every((entry) => isMarketCardSummary(entry)) && typeof value["hogwarts_deck_count"] === 'number' && Number.isInteger(value["hogwarts_deck_count"]) && value["hogwarts_deck_count"] >= 0 && Array.isArray(value["active_villains"]) && value["active_villains"].every((entry) => isVillainSummary(entry)) && typeof value["villain_deck_count"] === 'number' && Number.isInteger(value["villain_deck_count"]) && value["villain_deck_count"] >= 0
+  return isRecord(value) && Object.keys(value).every((key) => ["hand","play_area","draw_pile_count","discard_pile_count","market","hogwarts_deck_count","active_villains","villain_deck_count","current_location","location_deck_count","location_discard_count","villain_discard_count"].includes(key)) && Array.isArray(value["hand"]) && value["hand"].every((entry) => isCardSummary(entry)) && Array.isArray(value["play_area"]) && value["play_area"].every((entry) => isCardSummary(entry)) && typeof value["draw_pile_count"] === 'number' && Number.isInteger(value["draw_pile_count"]) && value["draw_pile_count"] >= 0 && typeof value["discard_pile_count"] === 'number' && Number.isInteger(value["discard_pile_count"]) && value["discard_pile_count"] >= 0 && Array.isArray(value["market"]) && value["market"].every((entry) => isMarketCardSummary(entry)) && typeof value["hogwarts_deck_count"] === 'number' && Number.isInteger(value["hogwarts_deck_count"]) && value["hogwarts_deck_count"] >= 0 && Array.isArray(value["active_villains"]) && value["active_villains"].every((entry) => isVillainSummary(entry)) && typeof value["villain_deck_count"] === 'number' && Number.isInteger(value["villain_deck_count"]) && value["villain_deck_count"] >= 0 && [(isLocationSummary(value["current_location"])),(value["current_location"] === null)].filter(Boolean).length === 1 && typeof value["location_deck_count"] === 'number' && Number.isInteger(value["location_deck_count"]) && value["location_deck_count"] >= 0 && typeof value["location_discard_count"] === 'number' && Number.isInteger(value["location_discard_count"]) && value["location_discard_count"] >= 0 && typeof value["villain_discard_count"] === 'number' && Number.isInteger(value["villain_discard_count"]) && value["villain_discard_count"] >= 0
 }
 
 export function isEffectOutcomeSummary(value: unknown): value is EffectOutcomeSummary {
@@ -1096,7 +1160,7 @@ export function isEngineControlSummary(value: unknown): value is EngineControlSu
 }
 
 export function isEndTurnOutcomeSummary(value: unknown): value is EndTurnOutcomeSummary {
-  return [(isRecord(value) && Object.keys(value).every((key) => ["type","card_id","from","to"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "card_moved") && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["from"] === 'string' && (value["from"] === "hero_hand" || value["from"] === "hero_play_area") && typeof value["to"] === 'string' && (value["to"] === "hero_discard_pile")),(isRecord(value) && Object.keys(value).every((key) => ["type","card_id","from","to"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "card_moved") && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["from"] === 'string' && (value["from"] === "hero_draw_pile") && typeof value["to"] === 'string' && (value["to"] === "hero_hand")),(isRecord(value) && Object.keys(value).every((key) => ["type","owner_position","zone","bottom_to_top"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "pile_shuffled") && typeof value["owner_position"] === 'number' && Number.isInteger(value["owner_position"]) && value["owner_position"] >= 1 && value["owner_position"] <= 4 && typeof value["zone"] === 'string' && (value["zone"] === "hero_draw_pile") && Array.isArray(value["bottom_to_top"]) && value["bottom_to_top"].every((entry) => typeof entry === 'string' && [...entry].length >= 1) && value["bottom_to_top"].length >= 1 && value["bottom_to_top"].length <= 4096 && hasUniqueItems(value["bottom_to_top"])),(isRecord(value) && Object.keys(value).every((key) => ["type","resource","before"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "resource_reset") && typeof value["resource"] === 'string' && (value["resource"] === "attack" || value["resource"] === "influence") && typeof value["before"] === 'number' && Number.isInteger(value["before"]) && value["before"] >= 0 && value["before"] <= 65535)].filter(Boolean).length === 1
+  return [(isRecord(value) && Object.keys(value).every((key) => ["type","card_id","from","to"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "card_moved") && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["from"] === 'string' && (value["from"] === "hero_hand" || value["from"] === "hero_play_area") && typeof value["to"] === 'string' && (value["to"] === "hero_discard_pile")),(isRecord(value) && Object.keys(value).every((key) => ["type","card_id","from","to"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "card_moved") && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["from"] === 'string' && (value["from"] === "hero_draw_pile") && typeof value["to"] === 'string' && (value["to"] === "hero_hand")),(isRecord(value) && Object.keys(value).every((key) => ["type","owner_position","zone","bottom_to_top"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "pile_shuffled") && typeof value["owner_position"] === 'number' && Number.isInteger(value["owner_position"]) && value["owner_position"] >= 1 && value["owner_position"] <= 4 && typeof value["zone"] === 'string' && (value["zone"] === "hero_draw_pile") && Array.isArray(value["bottom_to_top"]) && value["bottom_to_top"].every((entry) => typeof entry === 'string' && [...entry].length >= 1) && value["bottom_to_top"].length >= 1 && value["bottom_to_top"].length <= 4096 && hasUniqueItems(value["bottom_to_top"])),(isRecord(value) && Object.keys(value).every((key) => ["type","resource","before"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "resource_reset") && typeof value["resource"] === 'string' && (value["resource"] === "attack" || value["resource"] === "influence") && typeof value["before"] === 'number' && Number.isInteger(value["before"]) && value["before"] >= 0 && value["before"] <= 65535),(isRecord(value) && Object.keys(value).every((key) => ["type","location_id","next_location_id"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "location_advanced") && typeof value["location_id"] === 'string' && [...value["location_id"]].length >= 1 && (!Object.hasOwn(value, "next_location_id") || (typeof value["next_location_id"] === 'string' && [...value["next_location_id"]].length >= 1))),(isRecord(value) && Object.keys(value).every((key) => ["type","villain_id"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "villain_revealed") && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1),(isRecord(value) && Object.keys(value).every((key) => ["type","position","before","after"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "hero_recovered") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && typeof value["before"] === 'number' && Number.isInteger(value["before"]) && (value["before"] === 0) && typeof value["after"] === 'number' && Number.isInteger(value["after"]) && (value["after"] === 10))].filter(Boolean).length === 1
 }
 
 export function isTurnStepSummary(value: unknown): value is TurnStepSummary {
@@ -1108,7 +1172,7 @@ export function isTurnSummary(value: unknown): value is TurnSummary {
 }
 
 export function isGameParticipant(value: unknown): value is GameParticipant {
-  return isRecord(value) && Object.keys(value).every((key) => ["display_name","role","position","hero","resources","hand_count"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["role"] === 'string' && (value["role"] === "host" || value["role"] === "guest") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && isHeroSummary(value["hero"]) && isGameResources(value["resources"]) && typeof value["hand_count"] === 'number' && Number.isInteger(value["hand_count"]) && value["hand_count"] >= 0
+  return isRecord(value) && Object.keys(value).every((key) => ["display_name","role","position","hero","resources","hand_count","stunned"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["role"] === 'string' && (value["role"] === "host" || value["role"] === "guest") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && isHeroSummary(value["hero"]) && isGameResources(value["resources"]) && typeof value["hand_count"] === 'number' && Number.isInteger(value["hand_count"]) && value["hand_count"] >= 0 && typeof value["stunned"] === 'boolean'
 }
 
 export function isGameProjectionResponse(value: unknown): value is GameProjectionResponse {
@@ -1128,15 +1192,15 @@ export function isLegacyChoiceResolvedRealtimeGameEvent(value: unknown): value i
 }
 
 export function isTurnCompletedRealtimeGameEvent(value: unknown): value is TurnCompletedRealtimeGameEvent {
-  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","end_turn","steps","control","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "turn_completed") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && Array.isArray(value["end_turn"]) && value["end_turn"].every((entry) => isEndTurnOutcomeSummary(entry)) && value["end_turn"].length >= 2 && value["end_turn"].length <= 4102 && Array.isArray(value["steps"]) && value["steps"].every((entry) => isTurnStepSummary(entry)) && value["steps"].length >= 2 && value["steps"].length <= 3 && isEngineControlSummary(value["control"]) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","end_turn","steps","control","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4 || value["event_version"] === 5) && typeof value["type"] === 'string' && (value["type"] === "turn_completed") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && Array.isArray(value["end_turn"]) && value["end_turn"].every((entry) => isEndTurnOutcomeSummary(entry)) && value["end_turn"].length >= 2 && value["end_turn"].length <= 4102 && Array.isArray(value["steps"]) && value["steps"].every((entry) => isTurnStepSummary(entry)) && value["steps"].length >= 2 && value["steps"].length <= 3 && isEngineControlSummary(value["control"]) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
 }
 
 export function isChoiceResolvedRealtimeGameEvent(value: unknown): value is ChoiceResolvedRealtimeGameEvent {
-  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","choice_id","choice_cause","selected_options","steps","control","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "choice_resolved") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["choice_id"] === 'string' && [...value["choice_id"]].length >= 1 && [...value["choice_id"]].length <= 256 && typeof value["choice_cause"] === 'string' && [...value["choice_cause"]].length >= 1 && [...value["choice_cause"]].length <= 256 && Array.isArray(value["selected_options"]) && value["selected_options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["selected_options"].length >= 0 && value["selected_options"].length <= 32 && hasUniqueItems(value["selected_options"]) && Array.isArray(value["steps"]) && value["steps"].every((entry) => isChoiceResolutionStepSummary(entry)) && value["steps"].length >= 1 && value["steps"].length <= 2 && isEngineControlSummary(value["control"]) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","choice_id","choice_cause","selected_options","steps","control","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4 || value["event_version"] === 5) && typeof value["type"] === 'string' && (value["type"] === "choice_resolved") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["choice_id"] === 'string' && [...value["choice_id"]].length >= 1 && [...value["choice_id"]].length <= 256 && typeof value["choice_cause"] === 'string' && [...value["choice_cause"]].length >= 1 && [...value["choice_cause"]].length <= 256 && Array.isArray(value["selected_options"]) && value["selected_options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1 && [...entry].length <= 256) && value["selected_options"].length >= 0 && value["selected_options"].length <= 32 && hasUniqueItems(value["selected_options"]) && Array.isArray(value["steps"]) && value["steps"].every((entry) => isChoiceResolutionStepSummary(entry)) && value["steps"].length >= 1 && value["steps"].length <= 2 && isEngineControlSummary(value["control"]) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
 }
 
 export function isRealtimeGameEvent(value: unknown): value is RealtimeGameEvent {
-  return [(isDarkArtsCompletedRealtimeGameEvent(value)),(isChoiceResolvedRealtimeGameEvent(value)),(isLegacyChoiceResolvedRealtimeGameEvent(value)),(isTurnCompletedRealtimeGameEvent(value)),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","card_id","targets","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "card_played") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && Array.isArray(value["targets"]) && value["targets"].every((entry) => isEffectTargetBinding(entry)) && value["targets"].length <= 4096 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isPendingChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))) && ((isRecord(value) && value["effect_stop"] === "choice") ? (isRecord(value) && Object.hasOwn(value, "choice")) : (!(isRecord(value) && Object.hasOwn(value, "choice"))))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","villain_id","amount","effects","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "attack_assigned") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1 && typeof value["amount"] === 'number' && Number.isInteger(value["amount"]) && value["amount"] >= 1 && value["amount"] <= 65535 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","card_id","cost","refill_card_id","effects","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "card_acquired") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["cost"] === 'number' && Number.isInteger(value["cost"]) && value["cost"] >= 0 && value["cost"] <= 65535 && (!Object.hasOwn(value, "refill_card_id") || (typeof value["refill_card_id"] === 'string' && [...value["refill_card_id"]].length >= 1)) && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))))].filter(Boolean).length === 1
+  return [(isDarkArtsCompletedRealtimeGameEvent(value)),(isChoiceResolvedRealtimeGameEvent(value)),(isLegacyChoiceResolvedRealtimeGameEvent(value)),(isTurnCompletedRealtimeGameEvent(value)),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","card_id","targets","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4 || value["event_version"] === 5) && typeof value["type"] === 'string' && (value["type"] === "card_played") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && Array.isArray(value["targets"]) && value["targets"].every((entry) => isEffectTargetBinding(entry)) && value["targets"].length <= 4096 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isPendingChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))) && ((isRecord(value) && value["effect_stop"] === "choice") ? (isRecord(value) && Object.hasOwn(value, "choice")) : (!(isRecord(value) && Object.hasOwn(value, "choice"))))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","villain_id","amount","effects","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "attack_assigned") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1 && typeof value["amount"] === 'number' && Number.isInteger(value["amount"]) && value["amount"] >= 1 && value["amount"] <= 65535 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","card_id","cost","refill_card_id","effects","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4 || value["event_version"] === 5) && typeof value["type"] === 'string' && (value["type"] === "card_acquired") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["cost"] === 'number' && Number.isInteger(value["cost"]) && value["cost"] >= 0 && value["cost"] <= 65535 && (!Object.hasOwn(value, "refill_card_id") || (typeof value["refill_card_id"] === 'string' && [...value["refill_card_id"]].length >= 1)) && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","villain_id","amount","effects","command_id","effect_stop","prng_counter","choice"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 5) && typeof value["type"] === 'string' && (value["type"] === "attack_assigned") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1 && typeof value["amount"] === 'number' && Number.isInteger(value["amount"]) && value["amount"] >= 1 && value["amount"] <= 65535 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))) && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "choice") || (isPendingChoiceSummary(value["choice"]))) && ((isRecord(value) && value["effect_stop"] === "choice") ? (isRecord(value) && Object.hasOwn(value, "choice")) : (!(isRecord(value) && Object.hasOwn(value, "choice")))))].filter(Boolean).length === 1
 }
 
 export function isRealtimeSnapshotMessage(value: unknown): value is RealtimeSnapshotMessage {

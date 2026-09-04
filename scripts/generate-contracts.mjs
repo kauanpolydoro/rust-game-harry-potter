@@ -44,6 +44,7 @@ const enumAliases = new Map([
 ])
 
 function typeScriptType(schema, indentationLevel) {
+  if (schema.type === 'null') return 'null'
   if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
     return schema.oneOf
       .map((variant) => typeScriptType(variant, indentationLevel))
@@ -114,6 +115,7 @@ function refinementValidationExpressions(schema, value) {
 }
 
 function validationExpression(schema, value) {
+  if (schema.type === 'null') return `${value} === null`
   if (Object.hasOwn(schema, 'const')) {
     return `${value} === ${JSON.stringify(schema.const)}`
   }

@@ -75,6 +75,7 @@ function projection(cursor = 0): GameProjectionResponse {
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
       hand_count: 0,
+      stunned: false,
     },
     participants: [
       {
@@ -84,6 +85,7 @@ function projection(cursor = 0): GameProjectionResponse {
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
         hand_count: 0,
+        stunned: false,
       },
       {
         display_name: 'Luna',
@@ -92,6 +94,7 @@ function projection(cursor = 0): GameProjectionResponse {
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
         hand_count: 0,
+        stunned: false,
       },
     ],
     snapshot: {
@@ -119,6 +122,10 @@ function projection(cursor = 0): GameProjectionResponse {
       market: [],
       play_area: [],
       villain_deck_count: 0,
+      villain_discard_count: 0,
+      location_deck_count: 0,
+      location_discard_count: 0,
+      current_location: null,
     },
     turn: {
       active_position: activePosition,

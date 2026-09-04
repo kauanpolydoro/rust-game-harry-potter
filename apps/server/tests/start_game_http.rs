@@ -41,6 +41,280 @@ fn terminal_manifest() -> ContentManifest {
     playable_manifest_variant(Some(json!({ "type": "terminal", "outcome": "won" })))
 }
 
+fn stunned_locations_manifest() -> ContentManifest {
+    let mut candidate = playable_candidate(Some(json!({
+        "type": "apply",
+        "target": { "zone": "heroes", "owner": "actor", "cardinality": { "min": 1, "max": 1 } },
+        "operation": { "type": "modify_resource", "resource": "health", "amount": -10 }
+    })));
+    candidate["entries"][6]["functional"]["control_limit"] = proven_value(1);
+    candidate["entries"][6]["functional"]["dark_arts_count"] = proven_value(1);
+    candidate["entries"][9]["copies"] = json!(8);
+    for index in 12..18 {
+        candidate["entries"][index]["copies"] = json!(1);
+    }
+    candidate["entries"][18]["kind"] = json!("location");
+    candidate["entries"][18]["required_functional_fields"] =
+        json!(["control_limit", "dark_arts_count", "effect"]);
+    candidate["entries"][18]["functional"] = candidate["entries"][6]["functional"].clone();
+    candidate["game_setups"] = json!([{
+        "adventure_id": "adventure:001",
+        "confidence": "adaptation",
+        "sources": ["fixture-source"],
+        "entities": [
+            { "catalog_id": "fixture:location", "copies": 1, "zone": "active_location", "owner": "none" },
+            { "catalog_id": "fixture:entry-018", "copies": 1, "zone": "location_deck", "owner": "none" },
+            { "catalog_id": "fixture:starter-card", "copies": 2, "zone": "hero_hand", "owner": "each_participant" }
+        ]
+    }]);
+    import_playable_candidate(&candidate, &["rule:functional"])
+}
+
+async fn accepted_request(room: &ReadyRoom, request: Request<Body>) -> Value {
+    let response = room
+        .app
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the command must receive a response");
+    let status = response.status();
+    let body = response_json(response).await;
+    assert_eq!(status, StatusCode::OK, "response body: {body}");
+    body["projection"].clone()
+}
+
+#[tokio::test]
+async fn stunned_players_resume_after_reload_and_locations_end_the_game_without_elimination() {
+    let room = ready_room_with_manifest(stunned_locations_manifest()).await;
+    let initial = start_ready_game(&room, "stunned-locations").await;
+    assert_eq!(initial["participant"]["resources"]["health"], 0);
+    assert_eq!(initial["participant"]["stunned"], true);
+    assert_eq!(initial["choice"]["kind"], "stun_discard");
+    assert_eq!(initial["choice"]["min"], 1);
+    assert_eq!(initial["table"]["current_location"]["control"], 0);
+
+    let resolved = accepted_request(
+        &room,
+        resolve_choice_request(
+            &room.host_cookie,
+            uuid::Uuid::new_v4(),
+            1,
+            initial["choice"]["id"].as_str().expect("stun choice id"),
+            &[initial["choice"]["options"][0]
+                .as_str()
+                .expect("stun discard option")],
+        ),
+    )
+    .await;
+    assert_eq!(resolved["participant"]["hand_count"], 1);
+    assert_eq!(resolved["table"]["current_location"]["control"], 1);
+    assert_eq!(resolved["game"]["status"], "in_progress");
+    let next = accepted_request(
+        &room,
+        command_request(&room.host_cookie, uuid::Uuid::new_v4(), 2),
+    )
+    .await;
+    assert_eq!(next["participant"]["resources"]["health"], 10);
+    assert_eq!(
+        next["table"]["current_location"]["catalog_id"],
+        "fixture:entry-018"
+    );
+    assert_eq!(next["table"]["location_discard_count"], 1);
+    assert_eq!(
+        next["participants"].as_array().expect("participants").len(),
+        2
+    );
+    assert_eq!(next["choice"]["responsible_position"], 2);
+
+    let guest = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header(header::COOKIE, &room.guest_cookie)
+                .body(Body::empty())
+                .expect("guest session request"),
+        )
+        .await
+        .expect("guest session response");
+    assert_eq!(guest.status(), StatusCode::OK);
+    let guest = response_json(guest).await;
+    let resolved = accepted_request(
+        &room,
+        resolve_choice_request(
+            &room.guest_cookie,
+            uuid::Uuid::new_v4(),
+            3,
+            guest["choice"]["id"]
+                .as_str()
+                .expect("guest stun choice id"),
+            &[guest["choice"]["options"][0]
+                .as_str()
+                .expect("guest stun discard option")],
+        ),
+    )
+    .await;
+    assert_eq!(resolved["table"]["current_location"]["control"], 1);
+    let lost = accepted_request(
+        &room,
+        command_request(&room.guest_cookie, uuid::Uuid::new_v4(), 4),
+    )
+    .await;
+    assert_eq!(lost["game"]["status"], "lost");
+    assert_eq!(lost["choice"]["status"], "none");
+    assert_eq!(lost["legal_actions"], json!([]));
+    assert_eq!(lost["table"]["location_discard_count"], 2);
+    let rejected = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.guest_cookie, uuid::Uuid::new_v4(), 5))
+        .await
+        .expect("terminal command response");
+    assert_eq!(rejected.status(), StatusCode::CONFLICT);
+}
+
+fn final_reward_manifest() -> ContentManifest {
+    let mut candidate = playable_candidate(Some(json!({
+        "type": "apply",
+        "target": { "zone": "heroes", "owner": "actor", "cardinality": { "min": 1, "max": 1 } },
+        "operation": { "type": "modify_resource", "resource": "attack", "amount": 2 }
+    })));
+    candidate["entries"][6]["functional"]["control_limit"] = proven_value(1);
+    candidate["entries"][6]["functional"]["dark_arts_count"] = proven_value(1);
+    candidate["entries"][11]["functional"]["health"] = proven_value(2);
+    candidate["entries"][11]["functional"]["reward"] = proven_rule("rule:final-reward");
+    candidate["entries"][9]["functional"]["effect"] = proven_rule("rule:card-damage");
+    candidate["entries"][9]["copies"] = json!(4);
+    candidate["entries"][12]["copies"] = json!(1);
+    candidate["entries"][13]["copies"] = json!(1);
+    candidate["rules"].as_array_mut().expect("fixture rules").push(json!({
+        "id": "rule:card-damage", "trigger": "manual", "order": 0,
+        "effect": {"type": "apply", "target": {"zone": "active_villains", "owner": "any", "cardinality": {"min": 1, "max": 1}},
+                   "operation": {"type": "modify_resource", "resource": "health", "amount": -2}}
+    }));
+    candidate["rules"].as_array_mut().expect("fixture rules").push(json!({
+        "id": "rule:final-reward", "trigger": "villain_reward", "order": 0,
+        "effect": { "type": "choice", "audience": "actor", "options": [
+            { "type": "apply",
+              "target": { "zone": "heroes", "owner": "actor", "cardinality": { "min": 1, "max": 1 } },
+              "operation": { "type": "modify_resource", "resource": "influence", "amount": 1 } },
+            { "type": "apply",
+              "target": { "zone": "active_location", "owner": "any", "cardinality": { "min": 1, "max": 1 } },
+              "operation": { "type": "modify_resource", "resource": "control", "amount": 1 } }
+        ] }
+    }));
+    candidate["game_setups"] = json!([{
+        "adventure_id": "adventure:001", "confidence": "adaptation", "sources": ["fixture-source"],
+        "entities": [
+            { "catalog_id": "fixture:location", "copies": 1, "zone": "active_location", "owner": "none" },
+            { "catalog_id": "fixture:villain", "copies": 1, "zone": "active_villains", "owner": "none" },
+            { "catalog_id": "fixture:starter-card", "copies": 1, "zone": "hero_hand", "owner": "each_participant" }
+        ]
+    }]);
+    import_playable_candidate(
+        &candidate,
+        &["rule:functional", "rule:final-reward", "rule:card-damage"],
+    )
+}
+
+#[tokio::test]
+async fn final_villain_reward_resumes_from_storage_before_victory_or_tie_defeat() {
+    for (card_damage, option, expected_status) in [
+        (false, "option:1", "won"),
+        (false, "option:2", "lost"),
+        (true, "option:1", "won"),
+        (true, "option:2", "lost"),
+    ] {
+        let room = ready_room_with_manifest(final_reward_manifest()).await;
+        let initial = start_ready_game(&room, "final-reward").await;
+        let mut command = json!({
+            "command_id": uuid::Uuid::new_v4().to_string(), "expected_state_version": 1, "type": "assign_attack",
+            "villain_id": initial["table"]["active_villains"][0]["instance_id"], "amount": 2
+        });
+        if card_damage {
+            command = json!({"command_id": uuid::Uuid::new_v4().to_string(), "expected_state_version": 1, "type": "play_card",
+                "card_id": initial["table"]["hand"][0]["instance_id"], "targets": []});
+        }
+        let reward = accepted_request(
+            &room,
+            json_request(
+                "POST",
+                "/api/games/current/commands",
+                &command,
+                Some(&room.host_cookie),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(reward["game"]["status"], "in_progress");
+        assert_eq!(reward["table"]["active_villains"], json!([]));
+        assert_eq!(reward["table"]["villain_discard_count"], 1);
+        assert_eq!(reward["choice"]["status"], "pending");
+        let terminal = accepted_request(
+            &room,
+            resolve_choice_request(
+                &room.host_cookie,
+                uuid::Uuid::new_v4(),
+                2,
+                reward["choice"]["id"].as_str().expect("reward choice"),
+                &[option],
+            ),
+        )
+        .await;
+        assert_eq!(terminal["game"]["status"], expected_status);
+        assert_eq!(terminal["choice"]["status"], "none");
+        assert_eq!(terminal["legal_actions"], json!([]));
+        let rejected = room
+            .app
+            .clone()
+            .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 3))
+            .await
+            .expect("terminal response");
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+    }
+}
+
+#[tokio::test]
+async fn persisted_locations_and_villain_capacity_must_remain_restorable() {
+    let room = ready_room_with_manifest(final_reward_manifest()).await;
+    start_ready_game(&room, "terminal-layout").await;
+    let snapshot: Value = sqlx::query_scalar("SELECT games.snapshot FROM games JOIN rooms ON rooms.id = games.room_id WHERE rooms.code = $1")
+        .bind(&room.room_code).fetch_one(&room.database).await.expect("committed snapshot");
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
+            .bind(&snapshot)
+            .fetch_one(&room.database)
+            .await
+            .expect("valid layout")
+    );
+    let mut no_capacity = snapshot.clone();
+    no_capacity["active_villain_limit"] = json!(0);
+    let mut two_locations = snapshot.clone();
+    let mut extra = two_locations["effects"]["entities"]
+        .as_array()
+        .expect("entities")
+        .iter()
+        .find(|entity| entity["zone"] == "active_location")
+        .expect("location")
+        .clone();
+    extra["id"] = json!("instance:duplicate-location");
+    extra["zone_index"] = json!(1);
+    two_locations["effects"]["entities"]
+        .as_array_mut()
+        .expect("entities")
+        .push(extra);
+    for invalid in [no_capacity, two_locations] {
+        assert!(
+            !sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
+                .bind(&invalid)
+                .fetch_one(&room.database)
+                .await
+                .expect("invalid layout validation")
+        );
+    }
+}
+
 fn each_hero_choice_manifest() -> ContentManifest {
     playable_manifest_variant(Some(json!({
         "type": "choice",
@@ -201,6 +475,7 @@ fn gameplay_manifest() -> ContentManifest {
             "rule:functional",
             "rule:starter-resources",
             "rule:card-effect",
+            "rule:villain-reward",
         ],
     )
 }
@@ -233,7 +508,12 @@ fn optional_target_manifest() -> ContentManifest {
 
     import_playable_candidate(
         &candidate,
-        &["rule:functional", "rule:optional-card", "rule:card-effect"],
+        &[
+            "rule:functional",
+            "rule:optional-card",
+            "rule:card-effect",
+            "rule:villain-reward",
+        ],
     )
 }
 
@@ -329,6 +609,16 @@ fn gameplay_rules() -> Value {
                 }
             }
         }
+        ,{
+            "id": "rule:villain-reward",
+            "trigger": "villain_reward",
+            "order": 0,
+            "effect": {
+                "type": "apply",
+                "target": { "zone": "heroes", "owner": "actor", "cardinality": { "min": 1, "max": 1 } },
+                "operation": { "type": "modify_resource", "resource": "health", "amount": 1 }
+            }
+        }
     ])
 }
 
@@ -339,6 +629,11 @@ fn configure_gameplay_entries(candidate: &mut Value) {
     candidate["entries"][9]["functional"]["effect"] = proven_rule("rule:starter-resources");
     candidate["entries"][11]["functional"]["effect"] = proven_rule("rule:card-effect");
     candidate["entries"][11]["functional"]["health"] = proven_value(2);
+    candidate["entries"][11]["functional"]["reward"] = proven_rule("rule:villain-reward");
+    candidate["entries"][14]["kind"] = json!("villain");
+    candidate["entries"][14]["required_functional_fields"] =
+        candidate["entries"][11]["required_functional_fields"].clone();
+    candidate["entries"][14]["functional"] = candidate["entries"][11]["functional"].clone();
     for (index, id, name, cost) in [
         (12, "fixture:market-second", "Market Second", 1),
         (13, "fixture:deck-first", "Deck First", 4),
@@ -389,6 +684,12 @@ fn gameplay_setups() -> Value {
                 "catalog_id": "fixture:villain",
                 "copies": 1,
                 "zone": "active_villains",
+                "owner": "none"
+            },
+            {
+                "catalog_id": "fixture:entry-014",
+                "copies": 1,
+                "zone": "villain_deck",
                 "owner": "none"
             }
         ]
@@ -592,7 +893,7 @@ async fn insert_test_event(
         SET state_version = ($2 ->> 'state_version')::BIGINT,
             sequence = ($2 ->> 'sequence')::BIGINT,
             snapshot = snapshot || jsonb_build_object(
-                'snapshot_version', 3,
+                'snapshot_version', 4,
                 'state_version', $2 -> 'state_version',
                 'sequence', $2 -> 'sequence',
                 'turn', jsonb_build_object(
@@ -634,7 +935,7 @@ async fn insert_test_event(
             $1,
             $2,
             1,
-            4,
+            5,
             'turn_completed',
             $3,
             $4,
@@ -680,7 +981,7 @@ fn test_turn_completed_payload(
     prng_counter: u64,
 ) -> Value {
     json!({
-        "event_version": 4,
+        "event_version": 5,
         "type": "turn_completed",
         "sequence": sequence,
         "state_version": state_version,
@@ -1341,7 +1642,7 @@ async fn assert_choice_codec_versions(room: &ReadyRoom) {
     .fetch_one(&room.database)
     .await
     .expect("the v3 Snapshot and v4 choice events must be queryable");
-    assert_eq!(versions, (3, 4, 4));
+    assert_eq!(versions, (4, 5, 5));
 }
 
 async fn assert_winning_choice_artifacts(room: &ReadyRoom, winning_command_id: uuid::Uuid) {
@@ -1500,7 +1801,7 @@ async fn routine_recovery_rotation_and_regeneration_do_not_renew_game_retention(
 }
 
 fn assert_initial_synchronization_projection(projection: &Value) {
-    assert_eq!(projection["snapshot"]["snapshot_version"], 3);
+    assert_eq!(projection["snapshot"]["snapshot_version"], 4);
     assert_eq!(projection["snapshot"]["state_version"], 1);
     assert_eq!(projection["snapshot"]["sequence"], 0);
     assert_eq!(projection["snapshot"]["cursor"], 0);
@@ -1634,7 +1935,7 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
     assert!(stored.6.starts_with("blake3:"));
     let snapshot: Value =
         serde_json::from_str(&stored.7).expect("the persisted Snapshot must be JSON");
-    assert_eq!(snapshot["snapshot_version"], 3);
+    assert_eq!(snapshot["snapshot_version"], 4);
     assert_eq!(
         snapshot["versions"]["manifest_digest"],
         room.manifest.digest
@@ -2050,7 +2351,7 @@ fn assert_committed_turn_event(snapshot: &Value, event: &Value) {
     );
     assert_eq!(event["sequence"], 1);
     assert_eq!(event["state_version"], 2);
-    assert_eq!(event["event_version"], 4);
+    assert_eq!(event["event_version"], 5);
     assert_eq!(event["type"], "turn_completed");
     assert_eq!(event["turn"], 1);
     assert_eq!(event["actor_position"], 1);
@@ -2143,8 +2444,8 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     assert_eq!(stored.7, 1);
     assert!(stored.8, "the receipt and game must share one expiration");
     assert!(stored.9, "an accepted action must renew retention");
-    assert_eq!(stored.10, 3);
-    assert_eq!(stored.11, 4);
+    assert_eq!(stored.10, 4);
+    assert_eq!(stored.11, 5);
     let snapshot: Value = serde_json::from_str(&stored.3).expect("snapshot must be JSON");
     let event: Value = serde_json::from_str(&stored.5).expect("event must be JSON");
     assert_committed_turn_event(&snapshot, &event);
@@ -2316,7 +2617,7 @@ async fn active_player_ends_actions_and_commits_the_next_turn_after_automatic_ph
 }
 
 fn assert_initial_each_hero_choice(started: &Value) -> String {
-    assert_eq!(started["snapshot"]["snapshot_version"], 3);
+    assert_eq!(started["snapshot"]["snapshot_version"], 4);
     assert_eq!(started["snapshot"]["state_version"], 1);
     assert_eq!(started["snapshot"]["sequence"], 0);
     assert_eq!(started["turn"]["phase"], "dark_arts");
@@ -2515,17 +2816,10 @@ async fn assign_all_gameplay_attack(room: &ReadyRoom, instances: &GameplayInstan
         0
     );
     assert_eq!(
-        attacked["projection"]["table"]["active_villains"][0]["instance_id"],
-        instances.villain
+        attacked["projection"]["table"]["active_villains"],
+        json!([])
     );
-    assert_eq!(
-        attacked["projection"]["table"]["active_villains"][0]["health"],
-        0
-    );
-    assert_eq!(
-        attacked["projection"]["table"]["active_villains"][0]["attackable"],
-        false
-    );
+    assert_eq!(attacked["projection"]["table"]["villain_discard_count"], 1);
 }
 
 async fn acquire_card_and_assert_replay(room: &ReadyRoom, instances: &GameplayInstances) -> String {
@@ -2646,6 +2940,10 @@ async fn assert_persisted_gameplay_state(
     assert!(instance_ids_in_zone(entities, "hogwarts_deck").is_empty());
     assert_eq!(
         instance_ids_in_zone(entities, "active_villains"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        instance_ids_in_zone(entities, "villain_discard"),
         vec![instances.villain.clone()]
     );
 }
@@ -2681,7 +2979,7 @@ async fn assert_gameplay_command_history(
     );
     let acquisition_event: Value =
         serde_json::from_str(&events[2].1).expect("the acquisition event must be JSON");
-    assert_eq!(acquisition_event["event_version"], 4);
+    assert_eq!(acquisition_event["event_version"], 5);
     assert_eq!(acquisition_event["card_id"], instances.market_card);
     assert_eq!(acquisition_event["cost"], 2);
     assert_eq!(acquisition_event["refill_card_id"], refill_card_id);
@@ -2842,7 +3140,7 @@ async fn resolve_first_each_hero_choice(room: &ReadyRoom, choice_id: &str) -> St
     assert_eq!(resolved["receipt"]["type"], "resolve_choice");
     assert_eq!(resolved["receipt"]["accepted_state_version"], 2);
     assert_eq!(resolved["receipt"]["accepted_sequence"], 1);
-    assert_eq!(resolved["projection"]["snapshot"]["snapshot_version"], 3);
+    assert_eq!(resolved["projection"]["snapshot"]["snapshot_version"], 4);
     assert_eq!(resolved["projection"]["snapshot"]["state_version"], 2);
     assert_eq!(resolved["projection"]["snapshot"]["sequence"], 1);
     assert_eq!(resolved["projection"]["turn"]["active_position"], 1);
@@ -2883,7 +3181,7 @@ async fn complete_second_each_hero_choice(room: &ReadyRoom, second_choice_id: &s
     let completed = response_json(completed).await;
     assert_eq!(completed["receipt"]["accepted_state_version"], 3);
     assert_eq!(completed["receipt"]["accepted_sequence"], 2);
-    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 3);
+    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 4);
     assert_eq!(completed["projection"]["snapshot"]["state_version"], 3);
     assert_eq!(completed["projection"]["snapshot"]["sequence"], 2);
     assert_eq!(completed["projection"]["turn"]["number"], 1);
@@ -3198,7 +3496,7 @@ async fn an_event_actor_must_belong_to_the_games_room() {
             state_version,
             payload
         )
-        VALUES ($1, $2, 1, 4, 'turn_completed', $3, $4, 2, $5)
+        VALUES ($1, $2, 1, 5, 'turn_completed', $3, $4, 2, $5)
         ",
     )
     .bind(game_id)
@@ -3270,7 +3568,7 @@ async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
                 $1,
                 $2,
                 1,
-                4,
+                5,
                 'turn_completed',
                 $3,
                 $4,
@@ -3347,7 +3645,7 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
                 $1,
                 $2,
                 1,
-                4,
+                5,
                 $3,
                 $4,
                 $5,
@@ -3490,7 +3788,7 @@ async fn a_v4_event_rejects_an_incomplete_automatic_effect_outcome() {
             state_version,
             payload
         )
-        VALUES ($1, $2, 1, 4, 'turn_completed', $3, $4, 2, $5)
+        VALUES ($1, $2, 1, 5, 'turn_completed', $3, $4, 2, $5)
         ",
     )
     .bind(game_id)
@@ -3517,7 +3815,8 @@ async fn a_v4_event_rejects_an_incomplete_automatic_effect_outcome() {
 #[tokio::test]
 async fn v4_event_validation_rejects_nulls_and_cross_field_inconsistencies() {
     let room = ready_room().await;
-    let valid = test_turn_completed_payload(1, 2, 1, 1);
+    let mut valid = test_turn_completed_payload(1, 2, 1, 1);
+    valid["event_version"] = json!(4);
     assert!(
         sqlx::query_scalar::<_, bool>("SELECT valid_turn_completed_payload_v4($1)")
             .bind(&valid)
@@ -3758,6 +4057,24 @@ async fn is_snapshot_valid_for_v15_upgrade(
     .unwrap_or_else(|error| panic!("{failure_context}: {error}"))
 }
 
+fn legacy_v3_snapshot_fixture(mut current: Value) -> Value {
+    current["snapshot_version"] = json!(3);
+    current
+        .as_object_mut()
+        .expect("snapshot object")
+        .remove("active_villain_limit");
+    for entity in current["effects"]["entities"]
+        .as_array_mut()
+        .expect("effect entities")
+    {
+        let entity = entity.as_object_mut().expect("entity object");
+        entity.remove("resource_limits");
+        entity.remove("reward_rule_id");
+        entity.remove("dark_arts_count");
+    }
+    current
+}
+
 fn legacy_v1_snapshot_fixture(current: &Value) -> Value {
     let mut legacy_v1 = current.clone();
     legacy_v1["snapshot_version"] = json!(1);
@@ -3898,30 +4215,28 @@ fn invalid_v15_upgrade_snapshot_fixtures(
     ]
 }
 
+async fn committed_snapshot(room: &ReadyRoom) -> Value {
+    sqlx::query_scalar("SELECT games.snapshot FROM games JOIN rooms ON rooms.id = games.room_id WHERE rooms.code = $1")
+        .bind(&room.room_code).fetch_one(&room.database).await.expect("the committed snapshot must be queryable")
+}
+
 #[tokio::test]
 async fn v15_upgrade_preflight_rejects_legacy_snapshots_that_cannot_be_restored() {
     let room = ready_room().await;
     start_ready_game(&room, "legacy-snapshot-preflight-start").await;
-    let (game_id, current) = sqlx::query_as::<_, (uuid::Uuid, Value)>(
-        r"
-        SELECT games.id, games.snapshot
-        FROM games
-        JOIN rooms ON rooms.id = games.room_id
-        WHERE rooms.code = $1
-        ",
-    )
-    .bind(&room.room_code)
-    .fetch_one(&room.database)
-    .await
-    .expect("the current game snapshot must be queryable");
+    let current = committed_snapshot(&room).await;
+    let current = legacy_v3_snapshot_fixture(current);
     let expected_participants = current["participants"].clone();
 
-    sqlx::query("SELECT require_game_snapshot_for_v15_upgrade($1, $2::JSONB)")
-        .bind(game_id)
-        .bind(&current)
-        .execute(&room.database)
+    assert!(
+        is_snapshot_valid_for_v15_upgrade(
+            &room.database,
+            &current,
+            &expected_participants,
+            "the V3 snapshot must pass its historical preflight"
+        )
         .await
-        .expect("the current structured snapshot must pass the upgrade preflight");
+    );
 
     let legacy_v1 = legacy_v1_snapshot_fixture(&current);
     let accepted = is_snapshot_valid_for_v15_upgrade(
@@ -4010,7 +4325,7 @@ async fn v15_upgrade_preflight_rejects_legacy_snapshots_that_cannot_be_restored(
 }
 
 #[tokio::test]
-async fn v3_snapshot_validation_rejects_codec_incompatible_effects_and_identifiers() {
+async fn v4_snapshot_validation_rejects_codec_incompatible_effects_and_identifiers() {
     let room = ready_room().await;
     start_ready_game(&room, "snapshot-validator-start").await;
     let snapshot = sqlx::query_scalar::<_, Value>(
@@ -4026,7 +4341,7 @@ async fn v3_snapshot_validation_rejects_codec_incompatible_effects_and_identifie
     .await
     .expect("the current snapshot must exist");
     assert!(
-        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v3($1)")
+        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
             .bind(&snapshot)
             .fetch_one(&room.database)
             .await
@@ -4097,7 +4412,7 @@ async fn v3_snapshot_validation_rejects_codec_incompatible_effects_and_identifie
         ),
         ("active player outside participants", absent_active_player),
     ] {
-        let accepted = sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v3($1)")
+        let accepted = sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
             .bind(candidate)
             .fetch_one(&room.database)
             .await
@@ -5411,7 +5726,7 @@ fn assert_public_choice_resolution_event(
     let event_batch: Value =
         serde_json::from_str(serialized).expect("the choice event batch must be JSON");
     let event = &event_batch["events"][0];
-    assert_eq!(event["event_version"], 4);
+    assert_eq!(event["event_version"], 5);
     assert_eq!(event["type"], "choice_resolved");
     assert_eq!(event["choice_id"], first_choice_id);
     assert_eq!(event["choice_cause"], "rule:functional");
@@ -5451,7 +5766,7 @@ fn assert_no_private_choice_continuation(serialized: &str) {
 }
 
 fn assert_realtime_turn_completed(event: &Value) {
-    assert_eq!(event["event_version"], 4);
+    assert_eq!(event["event_version"], 5);
     assert_eq!(event["type"], "turn_completed");
     assert_eq!(
         event["steps"]
@@ -5672,7 +5987,7 @@ async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participan
     assert_eq!(host["protocol_version"], 1);
     assert_eq!(host["type"], "snapshot");
     assert_eq!(host["cursor"], 0);
-    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 3);
+    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 4);
     assert_eq!(host["projection"]["snapshot"]["cursor"], 0);
     assert_eq!(
         host["projection"]["legal_actions"],
@@ -6209,7 +6524,7 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
         serde_json::from_str(&synchronized).expect("synchronization must be JSON");
     assert_eq!(synchronized["type"], "synchronized");
     assert_eq!(synchronized["cursor"], 0);
-    assert_eq!(synchronized["snapshot_version"], 3);
+    assert_eq!(synchronized["snapshot_version"], 4);
     assert_eq!(synchronized["digest"], projection["snapshot"]["digest"]);
 
     let command_id = uuid::Uuid::new_v4();

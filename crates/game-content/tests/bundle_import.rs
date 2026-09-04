@@ -173,6 +173,11 @@ fn effect_rule_schema_supports_turn_phase_triggers_and_explicit_order() {
         ("dark_arts", EffectTrigger::DarkArts, "dark_arts"),
         ("dark_arts_completed", EffectTrigger::DarkArts, "dark_arts"),
         ("villains", EffectTrigger::Villains, "villains"),
+        (
+            "villain_reward",
+            EffectTrigger::VillainReward,
+            "villain_reward",
+        ),
         ("manual", EffectTrigger::Manual, "manual"),
     ];
 
@@ -434,27 +439,57 @@ fn bundle_with_setup_entity(
                 "confidence": "candidate",
                 "sources": ["fixture-source"],
                 "value": 5
+            },
+            "reward": {
+                "confidence": "candidate",
+                "sources": ["fixture-source"],
+                "rule": "rule:setup-reward"
+            }
+        }),
+        "location" => json!({
+            "control_limit": {
+                "confidence": "candidate",
+                "sources": ["fixture-source"],
+                "value": 4
+            },
+            "dark_arts_count": {
+                "confidence": "candidate",
+                "sources": ["fixture-source"],
+                "value": 2
+            },
+            "effect": {
+                "confidence": "candidate",
+                "sources": ["fixture-source"],
+                "rule": "rule:setup-entity"
             }
         }),
         _ => json!({}),
     };
-    bundle["rules"] = json!([{
-        "id": "rule:setup-entity",
-        "order": 0,
-        "effect": {
-            "type": "apply",
-            "target": {
-                "zone": "heroes",
-                "owner": "actor",
-                "cardinality": { "min": 1, "max": 1 }
-            },
-            "operation": {
-                "type": "modify_resource",
-                "resource": "attack",
-                "amount": 1
+    bundle["rules"] = json!([
+        {
+            "id": "rule:setup-entity",
+            "order": 0,
+            "effect": {
+                "type": "apply",
+                "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": { "min": 1, "max": 1 }
+                },
+                "operation": {
+                    "type": "modify_resource",
+                    "resource": "attack",
+                    "amount": 1
+                }
             }
+        },
+        {
+            "id": "rule:setup-reward",
+            "trigger": "villain_reward",
+            "order": 0,
+            "effect": { "type": "no_op" }
         }
-    }]);
+    ]);
     bundle["game_setups"] = json!([{
         "adventure_id": "fixture:entry-000",
         "confidence": "candidate",
@@ -904,6 +939,10 @@ fn game_setup_copy_requirements_must_fit_the_catalog_inventory() {
         .as_object_mut()
         .expect("functional data should be an object")
         .remove("health");
+    participant_excess["entries"][1]["functional"]
+        .as_object_mut()
+        .expect("functional data should be an object")
+        .remove("reward");
 
     for (bundle, expected_message) in [
         (zero_copies, "must request at least one copy"),
@@ -998,6 +1037,10 @@ fn every_supported_setup_kind_zone_and_owner_combination_imports() {
         ("hogwarts_card", "market", "none"),
         ("villain", "villain_deck", "none"),
         ("villain", "active_villains", "none"),
+        ("villain", "villain_discard", "none"),
+        ("location", "active_location", "none"),
+        ("location", "location_deck", "none"),
+        ("location", "location_discard", "none"),
     ];
 
     for (kind, zone, owner) in cases {
@@ -1005,6 +1048,7 @@ fn every_supported_setup_kind_zone_and_owner_combination_imports() {
             "starter_card" => &["effect"],
             "hogwarts_card" => &["cost", "effect"],
             "villain" => &["effect", "health", "reward"],
+            "location" => &["control_limit", "dark_arts_count", "effect"],
             _ => unreachable!("the fixture contains only setup-compatible kinds"),
         };
         let mut bundle = bundle_with_setup_entity(kind, required_fields, zone, owner);

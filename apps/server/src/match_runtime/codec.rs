@@ -3,20 +3,20 @@ use game_domain::{
     EffectEntityKind, EffectEntityPlacement, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
     EffectPathSegment, EffectResource, EffectStop, EffectTargetBinding, EffectWorld, EffectZone,
     EndTurnOutcome, EngineControl, GameEvent, GamePhase, GameStateRestoreInput, GameStatus,
-    InitialGameState, InitialPlayer, MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH,
-    MAX_EFFECT_ROLL_INDEX, MAX_TURN_STEPS, PendingEffectChoice, PendingEffectChoiceKind,
-    QueuedEffect, SNAPSHOT_VERSION, TurnStep, restore_game_state,
+    HERO_MAX_HEALTH, InitialGameState, InitialPlayer, MAX_EFFECT_BRANCH_INDEX,
+    MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, MAX_TURN_STEPS, PendingEffectChoice,
+    PendingEffectChoiceKind, QueuedEffect, SNAPSHOT_VERSION, TurnStep, restore_game_state,
 };
 use serde::Deserialize;
 
 use super::{
-    GAME_EVENT_VERSION, PersistedDecisionPoint, PersistedEffectChoice, PersistedEffectContinuation,
-    PersistedEffectCursor, PersistedEffectEntity, PersistedEffectOutcome,
-    PersistedEffectPathSegment, PersistedEffectTargetBinding, PersistedEffects,
-    PersistedEndTurnOutcome, PersistedEngineControl, PersistedEventChoice, PersistedGameEvent,
-    PersistedLegacyEffectChoice, PersistedPlayer, PersistedPrng, PersistedQueuedEffect,
-    PersistedSnapshot, PersistedTurn, PersistedTurnStep, PersistedVersions, StoredCommandGame,
-    StoredGame, StoredRoomParticipant, hero_id,
+    GAME_EVENT_VERSION, HERO_ACTION_EVENT_VERSION, PersistedDecisionPoint, PersistedEffectChoice,
+    PersistedEffectContinuation, PersistedEffectCursor, PersistedEffectEntity,
+    PersistedEffectOutcome, PersistedEffectPathSegment, PersistedEffectTargetBinding,
+    PersistedEffects, PersistedEndTurnOutcome, PersistedEngineControl, PersistedEventChoice,
+    PersistedGameEvent, PersistedLegacyEffectChoice, PersistedPlayer, PersistedPrng,
+    PersistedQueuedEffect, PersistedSnapshot, PersistedTurn, PersistedTurnStep, PersistedVersions,
+    StoredCommandGame, StoredGame, StoredRoomParticipant, hero_id,
 };
 use crate::http_support::ApiError;
 
@@ -28,7 +28,7 @@ const MAX_EFFECT_ENTITIES: usize = 4_096;
 const MAX_EFFECT_OUTCOMES: usize = 4_096;
 const MAX_EFFECT_QUEUE: usize = 4_096;
 const MAX_CHOICE_OPTIONS: usize = 4_096;
-const MAX_END_TURN_OUTCOMES: usize = MAX_EFFECT_ENTITIES + 6;
+const MAX_END_TURN_OUTCOMES: usize = MAX_EFFECT_ENTITIES + 8;
 const MAX_PILE_CARDS: usize = 4_096;
 const MAX_IDENTIFIER_BYTES: usize = 256;
 
@@ -149,6 +149,20 @@ pub(super) fn command_domain_state(
         pending_choice.as_ref(),
         &last_effects,
     )?;
+    let active_villain_limit = persisted.active_villain_limit.map_or_else(
+        || {
+            u8::try_from(
+                persisted
+                    .effects
+                    .entities
+                    .iter()
+                    .filter(|entity| entity.zone == "active_villains")
+                    .count(),
+            )
+            .map_err(|error| ApiError::internal_with("match application operation", error))
+        },
+        Ok,
+    )?;
 
     restore_game_state(GameStateRestoreInput {
         snapshot_version: persisted.snapshot_version,
@@ -158,6 +172,7 @@ pub(super) fn command_domain_state(
         turn: persisted.turn.number,
         phase,
         active_position: persisted.turn.active_position,
+        active_villain_limit,
         adventure_id: &persisted.adventure_id,
         content_version: &persisted.versions.content,
         ruleset_version: &persisted.versions.ruleset,
@@ -183,7 +198,7 @@ pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSna
     validate_persisted_json_size(serialized)?;
     let snapshot: PersistedSnapshot = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    if !matches!(snapshot.snapshot_version, 1 | 2 | SNAPSHOT_VERSION)
+    if !matches!(snapshot.snapshot_version, 1 | 2 | 3 | SNAPSHOT_VERSION)
         || (snapshot.snapshot_version == 1 && snapshot.effects.choice.is_some())
     {
         return Err(ApiError::internal());
@@ -201,10 +216,16 @@ pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEv
         (CLOSED_EFFECT_EVENT_VERSION, "dark_arts_completed") => decode_v2_event(serialized)?,
         (CHOICE_EVENT_VERSION, "dark_arts_completed") => decode_v3_dark_arts_event(serialized)?,
         (CHOICE_EVENT_VERSION, "choice_resolved") => decode_v3_choice_event(serialized)?,
-        (GAME_EVENT_VERSION, "turn_completed") => decode_v4_turn_event(serialized)?,
-        (GAME_EVENT_VERSION, "choice_resolved") => decode_v4_choice_event(serialized)?,
+        (HERO_ACTION_EVENT_VERSION | GAME_EVENT_VERSION, "turn_completed") => {
+            decode_v4_turn_event(serialized)?
+        }
+        (HERO_ACTION_EVENT_VERSION | GAME_EVENT_VERSION, "choice_resolved") => {
+            decode_v4_choice_event(serialized)?
+        }
+        (GAME_EVENT_VERSION, "dark_arts_completed") => serde_json::from_str(serialized)
+            .map_err(|error| ApiError::internal_with("match application operation", error))?,
         (
-            CHOICE_EVENT_VERSION | GAME_EVENT_VERSION,
+            CHOICE_EVENT_VERSION | HERO_ACTION_EVENT_VERSION | GAME_EVENT_VERSION,
             "card_played" | "attack_assigned" | "card_acquired",
         ) => serde_json::from_str(serialized)
             .map_err(|error| ApiError::internal_with("match application operation", error))?,
@@ -569,15 +590,20 @@ fn validate_persisted_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiEr
         _ => return Err(ApiError::internal()),
     };
     let version_shape_is_valid = match snapshot.snapshot_version {
-        1 => !has_structured_control && snapshot.effects.choice.is_none(),
-        2 => !has_structured_control,
-        SNAPSHOT_VERSION => has_structured_control,
+        1 => {
+            !has_structured_control
+                && snapshot.effects.choice.is_none()
+                && snapshot.active_villain_limit.is_none()
+        }
+        2 => !has_structured_control && snapshot.active_villain_limit.is_none(),
+        3 => has_structured_control && snapshot.active_villain_limit.is_none(),
+        SNAPSHOT_VERSION => has_structured_control && snapshot.active_villain_limit.is_some(),
         _ => false,
     };
     if !version_shape_is_valid {
         return Err(ApiError::internal());
     }
-    let bounded_identifiers = snapshot.snapshot_version == SNAPSHOT_VERSION;
+    let bounded_identifiers = snapshot.snapshot_version >= 3;
     let valid_snapshot_identifier = |value: &str| {
         if bounded_identifiers {
             valid_identifier(value)
@@ -651,6 +677,14 @@ fn validate_structured_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiE
         PersistedQueuedEffect::EffectChoice {
             responsible_position,
             ..
+        }
+        | PersistedQueuedEffect::FinishStun {
+            responsible_position,
+            ..
+        }
+        | PersistedQueuedEffect::StunChoice {
+            responsible_position,
+            ..
         } => participant_positions.contains(responsible_position),
     });
     let choice_state_is_coherent = match (decision_point, &snapshot.effects.choice) {
@@ -715,9 +749,18 @@ fn valid_effect_entity(entity: &PersistedEffectEntity, bounded_identifiers: bool
         && entity.owner_position.is_none_or(valid_position)
         && domain_effect_zone(&entity.zone).is_ok()
         && entity
+            .reward_rule_id
+            .as_deref()
+            .is_none_or(|id| valid_identifier_for_version(id, bounded_identifiers))
+        && entity.dark_arts_count.is_none_or(|count| count > 0)
+        && entity
             .resources
             .keys()
             .all(|resource| domain_effect_resource(resource).is_ok())
+        && entity
+            .resource_limits
+            .iter()
+            .all(|(resource, limit)| domain_effect_resource(resource).is_ok() && *limit > 0)
 }
 
 fn valid_effect_choice(
@@ -734,6 +777,11 @@ fn valid_effect_choice(
         && valid_position(choice.responsible_position)
         && match choice.kind.as_str() {
             "effect" => choice.min == 1 && choice.max == 1,
+            "stun_discard" => {
+                choice.min > 0
+                    && choice.min == choice.max
+                    && usize::from(choice.max) == choice.options.len() / 2
+            }
             "target" => choice.max > 0 && usize::from(choice.max) < choice.options.len(),
             _ => false,
         }
@@ -794,6 +842,14 @@ fn valid_queued_effect(
                 && valid_effect_cursor(cursor, bounded_identifiers, max_path)
         }
         PersistedQueuedEffect::EffectChoice {
+            cursor,
+            responsible_position,
+        }
+        | PersistedQueuedEffect::FinishStun {
+            cursor,
+            responsible_position,
+        }
+        | PersistedQueuedEffect::StunChoice {
             cursor,
             responsible_position,
         } => {
@@ -932,7 +988,7 @@ fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> 
                 valid_closed_effect_event(event, true)
             }
         }
-        GAME_EVENT_VERSION => {
+        HERO_ACTION_EVENT_VERSION => {
             if matches!(
                 event.event_type.as_str(),
                 "card_played" | "attack_assigned" | "card_acquired"
@@ -942,6 +998,13 @@ fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> 
                 valid_v4_event(event)
             }
         }
+        GAME_EVENT_VERSION => match event.event_type.as_str() {
+            "dark_arts_completed" => valid_closed_effect_event(event, true),
+            "card_played" | "attack_assigned" | "card_acquired" => {
+                valid_hero_action_event(event, true)
+            }
+            _ => valid_v4_event(event),
+        },
         _ => false,
     };
     if !valid {
@@ -1051,9 +1114,13 @@ fn valid_hero_action_event(event: &PersistedGameEvent, bounded_identifiers: bool
                 && event.amount.is_some_and(|amount| amount > 0)
                 && event.cost.is_none()
                 && event.refill_card_id.is_none()
-                && event.effect_stop.is_none()
-                && event.choice.is_none()
-                && event.prng_counter.is_none()
+                && if event.event_version == GAME_EVENT_VERSION {
+                    valid_effect_progress(event, bounded_identifiers)
+                } else {
+                    event.effect_stop.is_none()
+                        && event.choice.is_none()
+                        && event.prng_counter.is_none()
+                }
         }
         "card_acquired" => {
             event.card_id.as_deref().is_some_and(valid_choice_value)
@@ -1140,7 +1207,12 @@ fn valid_v4_event(event: &PersistedGameEvent) -> bool {
             valid_end_turn_sequence(end_turn, event.actor_position)
                 && valid_turn_steps(steps)
                 && valid_engine_control(control)
-                && control.turn == event.turn.checked_add(1).unwrap_or(0)
+                && control.turn
+                    == if control.phase == "end_turn" {
+                        event.turn
+                    } else {
+                        event.turn.checked_add(1).unwrap_or(0)
+                    }
                 && event_control_matches_steps(steps, control)
                 && terminal_effects_match_control(steps, control)
         }
@@ -1191,6 +1263,18 @@ fn valid_end_turn_sequence(outcomes: &[PersistedEndTurnOutcome], actor_position:
     }
 
     let mut remaining = outcomes;
+    if matches!(
+        remaining.first(),
+        Some(PersistedEndTurnOutcome::LocationAdvanced { .. })
+    ) {
+        remaining = &remaining[1..];
+    }
+    while matches!(
+        remaining.first(),
+        Some(PersistedEndTurnOutcome::VillainRevealed { .. })
+    ) {
+        remaining = &remaining[1..];
+    }
     for source in ["hero_play_area", "hero_hand"] {
         while let Some(PersistedEndTurnOutcome::CardMoved { from, to, .. }) = remaining.first() {
             if from != source || to != "hero_discard_pile" {
@@ -1216,6 +1300,14 @@ fn valid_end_turn_sequence(outcomes: &[PersistedEndTurnOutcome], actor_position:
         return false;
     }
 
+    let mut refill = refill;
+    let mut recovered_positions = std::collections::BTreeSet::new();
+    while let Some(PersistedEndTurnOutcome::HeroRecovered { position, .. }) = refill.first() {
+        if !recovered_positions.insert(*position) {
+            return false;
+        }
+        refill = &refill[1..];
+    }
     let mut shuffled = false;
     refill.iter().all(|outcome| match outcome {
         PersistedEndTurnOutcome::CardMoved { from, to, .. } => {
@@ -1226,7 +1318,10 @@ fn valid_end_turn_sequence(outcomes: &[PersistedEndTurnOutcome], actor_position:
             true
         }
         PersistedEndTurnOutcome::PileShuffled { .. }
-        | PersistedEndTurnOutcome::ResourceReset { .. } => false,
+        | PersistedEndTurnOutcome::ResourceReset { .. }
+        | PersistedEndTurnOutcome::LocationAdvanced { .. }
+        | PersistedEndTurnOutcome::VillainRevealed { .. }
+        | PersistedEndTurnOutcome::HeroRecovered { .. } => false,
     })
 }
 
@@ -1260,7 +1355,8 @@ fn event_control_matches_steps(
     let last_phase = steps.last().map(|step| step.phase.as_str());
     match (control.status.as_str(), &control.decision_point) {
         ("in_progress", PersistedDecisionPoint::PlayerIntent { .. }) => {
-            last_phase == Some("villains") && control.phase == "hero_actions"
+            matches!(last_phase, Some("villains" | "hero_actions"))
+                && control.phase == "hero_actions"
         }
         ("in_progress", PersistedDecisionPoint::EffectChoice { .. })
         | ("lost" | "won", PersistedDecisionPoint::None) => {
@@ -1277,8 +1373,15 @@ fn valid_turn_steps(steps: &[PersistedTurnStep]) -> bool {
         .collect::<Vec<_>>();
     matches!(
         phases.as_slice(),
-        ["end_turn", "dark_arts"] | ["end_turn", "dark_arts", "villains"]
-    ) && steps.first().is_some_and(|step| step.effects.is_empty())
+        ["end_turn"] | ["end_turn", "dark_arts"] | ["end_turn", "dark_arts", "villains"]
+    ) && steps.first().is_some_and(|step| {
+        if steps.len() == 1 {
+            matches!(step.effects.as_slice(), [PersistedEffectOutcome::Terminal { rule_id, outcome }]
+                if rule_id == "system:game-outcome" && outcome == "lost")
+        } else {
+            step.effects.is_empty()
+        }
+    })
         && steps.len() <= MAX_TURN_STEPS
         && total_step_effects_are_bounded(steps)
         && steps.iter().all(|step| {
@@ -1297,7 +1400,7 @@ fn valid_choice_steps(steps: &[PersistedTurnStep]) -> bool {
         .collect::<Vec<_>>();
     matches!(
         phases.as_slice(),
-        ["dark_arts" | "villains"] | ["dark_arts", "villains"]
+        ["dark_arts" | "villains" | "hero_actions"] | ["dark_arts", "villains"]
     ) && total_step_effects_are_bounded(steps)
         && steps.iter().all(|step| {
             step.effects.len() <= MAX_EFFECT_OUTCOMES
@@ -1350,13 +1453,17 @@ fn valid_engine_control(control: &PersistedEngineControl) -> bool {
         }
         ("in_progress", "hero_actions") => {
             control.queued_phases == ["end_turn"]
-                && control.queued_effects.is_empty()
-                && matches!(
-                    control.decision_point,
-                    PersistedDecisionPoint::PlayerIntent {
-                        responsible_position
-                    } if responsible_position == control.active_position
-                )
+                && (matches!(
+                    &control.decision_point,
+                    PersistedDecisionPoint::EffectChoice { .. }
+                ) && valid_automatic_control(control)
+                    || control.queued_effects.is_empty()
+                        && matches!(
+                            control.decision_point,
+                            PersistedDecisionPoint::PlayerIntent {
+                                responsible_position
+                            } if responsible_position == control.active_position
+                        ))
         }
         ("in_progress", "end_turn") => {
             control.queued_phases.is_empty()
@@ -1379,6 +1486,14 @@ fn valid_automatic_control(control: &PersistedEngineControl) -> bool {
 
 fn valid_end_turn_outcome(outcome: &PersistedEndTurnOutcome, actor_position: u8) -> bool {
     match outcome {
+        PersistedEndTurnOutcome::LocationAdvanced {
+            location_id,
+            next_location_id,
+        } => {
+            valid_identifier(location_id)
+                && next_location_id.as_deref().is_none_or(valid_identifier)
+        }
+        PersistedEndTurnOutcome::VillainRevealed { villain_id } => valid_identifier(villain_id),
         PersistedEndTurnOutcome::CardMoved { card_id, from, to } => {
             valid_identifier(card_id)
                 && matches!(
@@ -1406,6 +1521,11 @@ fn valid_end_turn_outcome(outcome: &PersistedEndTurnOutcome, actor_position: u8)
         PersistedEndTurnOutcome::ResourceReset { resource, .. } => {
             matches!(resource.as_str(), "attack" | "influence")
         }
+        PersistedEndTurnOutcome::HeroRecovered {
+            position,
+            before,
+            after,
+        } => valid_position(*position) && *before == 0 && *after == HERO_MAX_HEALTH,
     }
 }
 
@@ -1449,7 +1569,16 @@ fn card_zone(zone: &str) -> bool {
             | "hogwarts_deck"
             | "market"
             | "villain_deck"
+            | "villain_discard"
     )
+}
+
+fn ordered_effect_zone(zone: &str) -> bool {
+    card_zone(zone)
+        || matches!(
+            zone,
+            "active_location" | "location_deck" | "location_discard"
+        )
 }
 
 pub(super) fn persisted_after_decision(
@@ -1468,6 +1597,7 @@ pub(super) fn persisted_after_decision(
     next.turn.number = state.turn();
     game_phase_name(state.phase()).clone_into(&mut next.turn.phase);
     next.turn.active_position = state.active_position();
+    next.active_villain_limit = Some(state.active_villain_limit());
     next.queued_phases = Some(
         state
             .queued_phases()
@@ -1521,10 +1651,14 @@ fn persisted_turn_event(event: GameEvent) -> Result<(u16, &'static str, String),
             stop,
             prng_counter,
         } => {
-            let event_version = if matches!(&stop, EffectStop::Choice(_)) {
-                CHOICE_EVENT_VERSION
-            } else {
-                CLOSED_EFFECT_EVENT_VERSION
+            let event_version = match &stop {
+                EffectStop::Choice(choice)
+                    if choice.kind == PendingEffectChoiceKind::StunDiscard =>
+                {
+                    GAME_EVENT_VERSION
+                }
+                EffectStop::Choice(_) => CHOICE_EVENT_VERSION,
+                EffectStop::Stable | EffectStop::Terminal(_) => CLOSED_EFFECT_EVENT_VERSION,
             };
             serde_json::to_string(&serde_json::json!({
                 "event_version": event_version,
@@ -1641,6 +1775,8 @@ fn persisted_hero_action_event(event: GameEvent) -> Result<(u16, &'static str, S
             villain_id,
             amount,
             effects,
+            stop,
+            prng_counter,
         } => serde_json::to_string(&serde_json::json!({
             "event_version": GAME_EVENT_VERSION,
             "type": "attack_assigned",
@@ -1651,6 +1787,12 @@ fn persisted_hero_action_event(event: GameEvent) -> Result<(u16, &'static str, S
             "villain_id": villain_id,
             "amount": amount,
             "effects": effects.iter().map(persisted_effect_outcome).collect::<Vec<_>>(),
+            "effect_stop": effect_stop_name(&stop),
+            "choice": match stop {
+                EffectStop::Choice(choice) => Some(persisted_effect_choice(&choice)),
+                EffectStop::Stable | EffectStop::Terminal(_) => None,
+            },
+            "prng_counter": prng_counter,
         }))
         .map(|event| (GAME_EVENT_VERSION, "attack_assigned", event))
         .map_err(|error| ApiError::internal_with("match application operation", error)),
@@ -1713,6 +1855,7 @@ pub(super) fn persisted_snapshot(
             phase: game_phase_name(state.phase()).to_owned(),
             active_position: state.active_position(),
         },
+        active_villain_limit: Some(state.active_villain_limit()),
         queued_phases: Some(
             state
                 .queued_phases()
@@ -1942,6 +2085,18 @@ fn persisted_turn_step(step: &TurnStep) -> PersistedTurnStep {
 
 fn persisted_end_turn_outcome(outcome: &EndTurnOutcome) -> PersistedEndTurnOutcome {
     match outcome {
+        EndTurnOutcome::LocationAdvanced {
+            location_id,
+            next_location_id,
+        } => PersistedEndTurnOutcome::LocationAdvanced {
+            location_id: location_id.clone(),
+            next_location_id: next_location_id.clone(),
+        },
+        EndTurnOutcome::VillainRevealed { villain_id } => {
+            PersistedEndTurnOutcome::VillainRevealed {
+                villain_id: villain_id.clone(),
+            }
+        }
         EndTurnOutcome::CardMoved { card_id, from, to } => PersistedEndTurnOutcome::CardMoved {
             card_id: card_id.clone(),
             from: effect_zone_name(*from).to_owned(),
@@ -1962,6 +2117,15 @@ fn persisted_end_turn_outcome(outcome: &EndTurnOutcome) -> PersistedEndTurnOutco
                 before: *before,
             }
         }
+        EndTurnOutcome::HeroRecovered {
+            position,
+            before,
+            after,
+        } => PersistedEndTurnOutcome::HeroRecovered {
+            position: *position,
+            before: *before,
+            after: *after,
+        },
     }
 }
 
@@ -2024,16 +2188,69 @@ fn domain_effect_world(
         .map(|(_, entity)| {
             let zone = domain_effect_zone(&entity.zone)?;
             let kind = domain_effect_entity_kind(entity.kind.as_deref(), zone)?;
-            let mut domain =
-                EffectEntity::new(entity.id.clone(), entity.owner_position).with_kind(kind);
-            if let Some(catalog_id) = &entity.catalog_id {
-                domain = domain.with_catalog_id(catalog_id.clone());
+            let mut resource_limits = entity
+                .resource_limits
+                .iter()
+                .map(|(resource, limit)| Ok((domain_effect_resource(resource)?, *limit)))
+                .collect::<Result<std::collections::BTreeMap<_, _>, ApiError>>()?;
+            if kind == EffectEntityKind::Hero && resource_limits.is_empty() {
+                resource_limits.insert(EffectResource::Health, HERO_MAX_HEALTH);
             }
-            if let Some(effect_rule_id) = &entity.effect_rule_id {
-                domain = domain.with_effect_rule(effect_rule_id.clone());
+            let catalog_id = || entity.catalog_id.clone().ok_or_else(ApiError::internal);
+            let effect_rule_id = || entity.effect_rule_id.clone().ok_or_else(ApiError::internal);
+            let mut domain = match kind {
+                EffectEntityKind::Generic => {
+                    EffectEntity::new(entity.id.clone(), entity.owner_position)
+                }
+                EffectEntityKind::Hero => {
+                    EffectEntity::new(entity.id.clone(), entity.owner_position)
+                        .with_kind(EffectEntityKind::Hero)
+                }
+                EffectEntityKind::HogwartsCard | EffectEntityKind::StarterCard => {
+                    EffectEntity::card(
+                        entity.id.clone(),
+                        catalog_id()?,
+                        kind,
+                        entity.owner_position,
+                        effect_rule_id()?,
+                        entity.influence_cost,
+                    )
+                }
+                EffectEntityKind::Location => EffectEntity::location(
+                    entity.id.clone(),
+                    catalog_id()?,
+                    effect_rule_id()?,
+                    resource_limits
+                        .get(&EffectResource::Control)
+                        .copied()
+                        .ok_or_else(ApiError::internal)?,
+                    entity.dark_arts_count.ok_or_else(ApiError::internal)?,
+                ),
+                EffectEntityKind::Villain => EffectEntity::villain(
+                    entity.id.clone(),
+                    catalog_id()?,
+                    effect_rule_id()?,
+                    entity
+                        .resources
+                        .get("health")
+                        .copied()
+                        .ok_or_else(ApiError::internal)?,
+                ),
+            };
+            if domain.resource_limits() != &resource_limits {
+                return Err(ApiError::internal());
             }
-            if let Some(influence_cost) = entity.influence_cost {
-                domain = domain.with_influence_cost(influence_cost);
+            if let Some(id) = &entity.catalog_id {
+                domain = domain.with_catalog_id(id.clone());
+            }
+            if let Some(id) = &entity.effect_rule_id {
+                domain = domain.with_effect_rule(id.clone());
+            }
+            if let Some(cost) = entity.influence_cost {
+                domain = domain.with_influence_cost(cost);
+            }
+            if let Some(reward_rule_id) = &entity.reward_rule_id {
+                domain = domain.with_reward_rule(reward_rule_id.clone());
             }
             for (resource, amount) in &entity.resources {
                 domain = domain.with_resource(domain_effect_resource(resource)?, *amount);
@@ -2116,6 +2333,7 @@ fn domain_effect_choice(choice: &PersistedEffectChoice) -> Result<PendingEffectC
         responsible_position: choice.responsible_position,
         kind: match choice.kind.as_str() {
             "effect" => PendingEffectChoiceKind::Effect,
+            "stun_discard" => PendingEffectChoiceKind::StunDiscard,
             "target" => PendingEffectChoiceKind::Target,
             _ => return Err(ApiError::internal()),
         },
@@ -2180,6 +2398,20 @@ fn domain_queued_effect(queued: &PersistedQueuedEffect) -> QueuedEffect {
             cursor: domain_effect_cursor(cursor),
             responsible_position: *responsible_position,
         },
+        PersistedQueuedEffect::FinishStun {
+            cursor,
+            responsible_position,
+        } => QueuedEffect::FinishStun {
+            cursor: domain_effect_cursor(cursor),
+            responsible_position: *responsible_position,
+        },
+        PersistedQueuedEffect::StunChoice {
+            cursor,
+            responsible_position,
+        } => QueuedEffect::StunChoice {
+            cursor: domain_effect_cursor(cursor),
+            responsible_position: *responsible_position,
+        },
     }
 }
 
@@ -2201,11 +2433,18 @@ fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
                 catalog_id: entity.catalog_id().map(str::to_owned),
                 owner_position: entity.owner_position(),
                 effect_rule_id: entity.effect_rule_id().map(str::to_owned),
+                reward_rule_id: entity.reward_rule_id().map(str::to_owned),
                 influence_cost: entity.influence_cost(),
+                dark_arts_count: entity.dark_arts_count(),
                 zone: zone_name.to_owned(),
-                zone_index: card_zone(zone_name).then_some(zone_index),
+                zone_index: ordered_effect_zone(zone_name).then_some(zone_index),
                 resources: entity
                     .resources()
+                    .iter()
+                    .map(|(resource, amount)| (effect_resource_name(*resource).to_owned(), *amount))
+                    .collect(),
+                resource_limits: entity
+                    .resource_limits()
                     .iter()
                     .map(|(resource, amount)| (effect_resource_name(*resource).to_owned(), *amount))
                     .collect(),
@@ -2296,6 +2535,7 @@ fn persisted_effect_choice(choice: &PendingEffectChoice) -> PersistedEffectChoic
         responsible_position: choice.responsible_position,
         kind: match choice.kind {
             PendingEffectChoiceKind::Effect => "effect",
+            PendingEffectChoiceKind::StunDiscard => "stun_discard",
             PendingEffectChoiceKind::Target => "target",
         }
         .to_owned(),
@@ -2357,6 +2597,20 @@ fn persisted_queued_effect(queued: &QueuedEffect) -> PersistedQueuedEffect {
             cursor,
             responsible_position,
         } => PersistedQueuedEffect::EffectChoice {
+            cursor: persisted_effect_cursor(cursor),
+            responsible_position: *responsible_position,
+        },
+        QueuedEffect::FinishStun {
+            cursor,
+            responsible_position,
+        } => PersistedQueuedEffect::FinishStun {
+            cursor: persisted_effect_cursor(cursor),
+            responsible_position: *responsible_position,
+        },
+        QueuedEffect::StunChoice {
+            cursor,
+            responsible_position,
+        } => PersistedQueuedEffect::StunChoice {
             cursor: persisted_effect_cursor(cursor),
             responsible_position: *responsible_position,
         },
@@ -2426,6 +2680,7 @@ fn domain_effect_entity_kind(
         Some("generic") => Ok(EffectEntityKind::Generic),
         Some("hero") => Ok(EffectEntityKind::Hero),
         Some("hogwarts_card") => Ok(EffectEntityKind::HogwartsCard),
+        Some("location") => Ok(EffectEntityKind::Location),
         Some("starter_card") => Ok(EffectEntityKind::StarterCard),
         Some("villain") => Ok(EffectEntityKind::Villain),
         Some(_) => Err(ApiError::internal()),
@@ -2437,6 +2692,7 @@ fn effect_entity_kind_name(kind: EffectEntityKind) -> &'static str {
         EffectEntityKind::Generic => "generic",
         EffectEntityKind::Hero => "hero",
         EffectEntityKind::HogwartsCard => "hogwarts_card",
+        EffectEntityKind::Location => "location",
         EffectEntityKind::StarterCard => "starter_card",
         EffectEntityKind::Villain => "villain",
     }
@@ -2454,8 +2710,11 @@ fn domain_effect_zone(zone: &str) -> Result<EffectZone, ApiError> {
         "hero_play_area" => Ok(EffectZone::HeroPlayArea),
         "heroes" => Ok(EffectZone::Heroes),
         "hogwarts_deck" => Ok(EffectZone::HogwartsDeck),
+        "location_deck" => Ok(EffectZone::LocationDeck),
+        "location_discard" => Ok(EffectZone::LocationDiscard),
         "market" => Ok(EffectZone::Market),
         "villain_deck" => Ok(EffectZone::VillainDeck),
+        "villain_discard" => Ok(EffectZone::VillainDiscard),
         _ => Err(ApiError::internal()),
     }
 }
@@ -2472,8 +2731,11 @@ fn effect_zone_name(zone: EffectZone) -> &'static str {
         EffectZone::HeroPlayArea => "hero_play_area",
         EffectZone::Heroes => "heroes",
         EffectZone::HogwartsDeck => "hogwarts_deck",
+        EffectZone::LocationDeck => "location_deck",
+        EffectZone::LocationDiscard => "location_discard",
         EffectZone::Market => "market",
         EffectZone::VillainDeck => "villain_deck",
+        EffectZone::VillainDiscard => "villain_discard",
     }
 }
 
@@ -2854,7 +3116,7 @@ mod tests {
     }
 
     #[test]
-    fn a_played_card_event_persists_every_explicit_fact_in_v4() {
+    fn a_played_card_event_persists_every_explicit_fact_in_v5() {
         let result = persisted_event(GameEvent::CardPlayed {
             sequence: 7,
             state_version: 8,
@@ -2878,13 +3140,13 @@ mod tests {
         let (event_version, event_type, serialized) =
             result.ok().expect("the event must serialize");
 
-        assert_eq!(event_version, 4);
+        assert_eq!(event_version, 5);
         assert_eq!(event_type, "card_played");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&serialized)
                 .expect("the persisted event must be JSON"),
             json!({
-                "event_version": 4,
+                "event_version": 5,
                 "type": "card_played",
                 "sequence": 7,
                 "state_version": 8,
@@ -2920,11 +3182,13 @@ mod tests {
             villain_id: "instance:villain:1".to_owned(),
             amount: 2,
             effects: Vec::new(),
+            stop: EffectStop::Stable,
+            prng_counter: 0,
         });
         assert_eq!(
             attack,
             json!({
-                "event_version": 4,
+                "event_version": 5,
                 "type": "attack_assigned",
                 "sequence": 8,
                 "state_version": 9,
@@ -2932,11 +3196,12 @@ mod tests {
                 "actor_position": 1,
                 "villain_id": "instance:villain:1",
                 "amount": 2,
-                "effects": []
+                "effects": [],
+                "effect_stop": "stable",
+                "choice": null,
+                "prng_counter": 0
             })
         );
-        assert!(attack.get("effect_stop").is_none());
-        assert!(attack.get("prng_counter").is_none());
 
         let acquisition = serialized_event(GameEvent::CardAcquired {
             sequence: 9,
@@ -2951,7 +3216,7 @@ mod tests {
         assert_eq!(
             acquisition,
             json!({
-                "event_version": 4,
+                "event_version": 5,
                 "type": "card_acquired",
                 "sequence": 9,
                 "state_version": 10,
@@ -2968,7 +3233,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_event_decoder_accepts_v1_through_v4_but_rejects_future_versions() {
+    fn persisted_event_decoder_accepts_v1_through_v5_but_rejects_future_versions() {
         for serialized in [
             json!({
                 "event_version": 1,
@@ -3006,7 +3271,7 @@ mod tests {
         }
 
         let future = json!({
-            "event_version": 5,
+            "event_version": 6,
             "type": "attack_assigned",
             "sequence": 4,
             "state_version": 5,
@@ -3021,58 +3286,7 @@ mod tests {
 
     #[test]
     fn a_snapshot_restores_legacy_kinds_and_preserves_stack_order_and_card_metadata() {
-        let snapshot = PersistedSnapshot {
-            snapshot_version: 1,
-            state_version: 1,
-            sequence: 0,
-            status: "in_progress".to_owned(),
-            adventure_id: "adventure:codec".to_owned(),
-            versions: PersistedVersions {
-                content: "content-v1".to_owned(),
-                ruleset: "rules-v1".to_owned(),
-                manifest: 1,
-                manifest_digest: format!("blake3:{}", "a".repeat(64)),
-                prng: "chacha20-v1".to_owned(),
-                shuffle: "fisher-yates-v1".to_owned(),
-                sampling: "rejection-sampling-v1".to_owned(),
-            },
-            turn: PersistedTurn {
-                number: 1,
-                phase: "hero_action".to_owned(),
-                active_position: 1,
-            },
-            queued_phases: None,
-            queued_effects: None,
-            decision_point: None,
-            last_turn_steps: None,
-            participants: vec![
-                PersistedPlayer {
-                    participant_id: "participant:1".to_owned(),
-                    position: 1,
-                    hero_id: "harry".to_owned(),
-                },
-                PersistedPlayer {
-                    participant_id: "participant:2".to_owned(),
-                    position: 2,
-                    hero_id: "hermione".to_owned(),
-                },
-            ],
-            prng: PersistedPrng {
-                algorithm: "chacha20-v1".to_owned(),
-                counter: 0,
-            },
-            effects: PersistedEffects {
-                entities: vec![
-                    legacy_entity("hero:1", Some(1), "heroes"),
-                    legacy_entity("hero:2", Some(2), "heroes"),
-                    persisted_hogwarts_card("instance:deck:b", "card:b", 4),
-                    persisted_hogwarts_card("instance:deck:a", "card:a", 2),
-                    legacy_entity("instance:legacy", None, "dark_arts_deck"),
-                ],
-                outcomes: Vec::new(),
-                choice: None,
-            },
-        };
+        let snapshot = legacy_card_snapshot();
 
         let state = command_domain_state(&snapshot)
             .ok()
@@ -3118,6 +3332,77 @@ mod tests {
             Some("rule:card:b")
         );
         assert_eq!(repersisted_deck[0].influence_cost, Some(4));
+        assert_eq!(
+            sorted_zone_entities(&repersisted, "dark_arts_deck")[0]
+                .catalog_id
+                .as_deref(),
+            Some("card:legacy")
+        );
+    }
+
+    fn legacy_card_snapshot() -> PersistedSnapshot {
+        PersistedSnapshot {
+            snapshot_version: 1,
+            state_version: 1,
+            sequence: 0,
+            status: "in_progress".to_owned(),
+            adventure_id: "adventure:codec".to_owned(),
+            versions: PersistedVersions {
+                content: "content-v1".to_owned(),
+                ruleset: "rules-v1".to_owned(),
+                manifest: 1,
+                manifest_digest: format!("blake3:{}", "a".repeat(64)),
+                prng: "chacha20-v1".to_owned(),
+                shuffle: "fisher-yates-v1".to_owned(),
+                sampling: "rejection-sampling-v1".to_owned(),
+            },
+            turn: PersistedTurn {
+                number: 1,
+                phase: "hero_action".to_owned(),
+                active_position: 1,
+            },
+            active_villain_limit: None,
+            queued_phases: None,
+            queued_effects: None,
+            decision_point: None,
+            last_turn_steps: None,
+            participants: vec![
+                PersistedPlayer {
+                    participant_id: "participant:1".to_owned(),
+                    position: 1,
+                    hero_id: "harry".to_owned(),
+                },
+                PersistedPlayer {
+                    participant_id: "participant:2".to_owned(),
+                    position: 2,
+                    hero_id: "hermione".to_owned(),
+                },
+            ],
+            prng: PersistedPrng {
+                algorithm: "chacha20-v1".to_owned(),
+                counter: 0,
+            },
+            effects: PersistedEffects {
+                entities: vec![
+                    legacy_entity("hero:1", Some(1), "heroes"),
+                    legacy_entity("hero:2", Some(2), "heroes"),
+                    persisted_hogwarts_card("instance:deck:b", "card:b", 4),
+                    persisted_hogwarts_card("instance:deck:a", "card:a", 2),
+                    legacy_entity_with_metadata(),
+                ],
+                outcomes: Vec::new(),
+                choice: None,
+            },
+        }
+    }
+
+    fn legacy_entity_with_metadata() -> PersistedEffectEntity {
+        PersistedEffectEntity {
+            catalog_id: Some("card:legacy".to_owned()),
+            effect_rule_id: Some("rule:legacy".to_owned()),
+            influence_cost: Some(2),
+            ..legacy_entity("instance:legacy", None, "dark_arts_deck")
+        }
     }
 
     fn sorted_zone_entities<'a>(
@@ -3141,10 +3426,13 @@ mod tests {
             catalog_id: None,
             owner_position,
             effect_rule_id: None,
+            reward_rule_id: None,
             influence_cost: None,
+            dark_arts_count: None,
             zone: zone.to_owned(),
             zone_index: None,
             resources: BTreeMap::new(),
+            resource_limits: BTreeMap::new(),
         }
     }
 
@@ -3159,10 +3447,13 @@ mod tests {
             catalog_id: Some(catalog_id.to_owned()),
             owner_position: None,
             effect_rule_id: Some(format!("rule:{catalog_id}")),
+            reward_rule_id: None,
             influence_cost: Some(influence_cost),
+            dark_arts_count: None,
             zone: "hogwarts_deck".to_owned(),
             zone_index: None,
             resources: BTreeMap::new(),
+            resource_limits: BTreeMap::new(),
         }
     }
 

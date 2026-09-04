@@ -10,6 +10,7 @@ function projection(stateVersion = 1): GameProjectionResponse {
   const participant = {
     display_name: 'Minerva',
     hand_count: 1,
+    stunned: false,
     hero: { id: 'harry' as const, name: 'Harry' },
     position: 1,
     resources: { attack: 2, health: 10, influence: 3 },
@@ -96,6 +97,10 @@ function projection(stateVersion = 1): GameProjectionResponse {
       ],
       play_area: [],
       villain_deck_count: 0,
+      villain_discard_count: 0,
+      location_deck_count: 0,
+      location_discard_count: 0,
+      current_location: null,
     },
     turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }

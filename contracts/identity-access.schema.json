@@ -4,6 +4,115 @@
   "title": "IdentityAccessContracts",
   "$comment": "Cross-property x-refinements are mandatory and enforced by scripts/generate-contracts.mjs; consumers must use the generated guards.",
   "$defs": {
+    "PendingStunChoiceSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-refinements": [
+        "min_lte_max",
+        "max_lt_options_length"
+      ],
+      "required": [
+        "status",
+        "id",
+        "cause",
+        "responsible_position",
+        "kind",
+        "options",
+        "min",
+        "max"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "cause": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "responsible_position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "stun_discard"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      }
+    },
+    "LocationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "catalog_id",
+        "name",
+        "control",
+        "control_limit",
+        "dark_arts_count"
+      ],
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "catalog_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "control": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "control_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "dark_arts_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        }
+      }
+    },
     "HeroId": {
       "type": "string",
       "enum": ["harry", "hermione", "neville", "ron"]
@@ -739,8 +848,15 @@
     },
     "PendingChoiceSummary": {
       "oneOf": [
-        { "$ref": "#/$defs/PendingEffectChoiceSummary" },
-        { "$ref": "#/$defs/PendingTargetChoiceSummary" }
+        {
+          "$ref": "#/$defs/PendingEffectChoiceSummary"
+        },
+        {
+          "$ref": "#/$defs/PendingTargetChoiceSummary"
+        },
+        {
+          "$ref": "#/$defs/PendingStunChoiceSummary"
+        }
       ]
     },
     "ChoiceSummary": {
@@ -883,17 +999,75 @@
         "market",
         "hogwarts_deck_count",
         "active_villains",
-        "villain_deck_count"
+        "villain_deck_count",
+        "current_location",
+        "location_deck_count",
+        "location_discard_count",
+        "villain_discard_count"
       ],
       "properties": {
-        "hand": { "type": "array", "items": { "$ref": "#/$defs/CardSummary" } },
-        "play_area": { "type": "array", "items": { "$ref": "#/$defs/CardSummary" } },
-        "draw_pile_count": { "type": "integer", "minimum": 0 },
-        "discard_pile_count": { "type": "integer", "minimum": 0 },
-        "market": { "type": "array", "items": { "$ref": "#/$defs/MarketCardSummary" } },
-        "hogwarts_deck_count": { "type": "integer", "minimum": 0 },
-        "active_villains": { "type": "array", "items": { "$ref": "#/$defs/VillainSummary" } },
-        "villain_deck_count": { "type": "integer", "minimum": 0 }
+        "hand": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardSummary"
+          }
+        },
+        "play_area": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardSummary"
+          }
+        },
+        "draw_pile_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "discard_pile_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "market": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MarketCardSummary"
+          }
+        },
+        "hogwarts_deck_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active_villains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VillainSummary"
+          }
+        },
+        "villain_deck_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current_location": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LocationSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "location_deck_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "location_discard_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "villain_discard_count": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "EffectOutcomeSummary": {
@@ -1087,62 +1261,217 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "card_id", "from", "to"],
+          "required": [
+            "type",
+            "card_id",
+            "from",
+            "to"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["card_moved"] },
-            "card_id": { "type": "string", "minLength": 1 },
+            "type": {
+              "type": "string",
+              "enum": [
+                "card_moved"
+              ]
+            },
+            "card_id": {
+              "type": "string",
+              "minLength": 1
+            },
             "from": {
               "type": "string",
-              "enum": ["hero_hand", "hero_play_area"]
+              "enum": [
+                "hero_hand",
+                "hero_play_area"
+              ]
             },
             "to": {
               "type": "string",
-              "enum": ["hero_discard_pile"]
+              "enum": [
+                "hero_discard_pile"
+              ]
             }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "card_id", "from", "to"],
+          "required": [
+            "type",
+            "card_id",
+            "from",
+            "to"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["card_moved"] },
-            "card_id": { "type": "string", "minLength": 1 },
+            "type": {
+              "type": "string",
+              "enum": [
+                "card_moved"
+              ]
+            },
+            "card_id": {
+              "type": "string",
+              "minLength": 1
+            },
             "from": {
               "type": "string",
-              "enum": ["hero_draw_pile"]
+              "enum": [
+                "hero_draw_pile"
+              ]
             },
             "to": {
               "type": "string",
-              "enum": ["hero_hand"]
+              "enum": [
+                "hero_hand"
+              ]
             }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "owner_position", "zone", "bottom_to_top"],
+          "required": [
+            "type",
+            "owner_position",
+            "zone",
+            "bottom_to_top"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["pile_shuffled"] },
-            "owner_position": { "type": "integer", "minimum": 1, "maximum": 4 },
-            "zone": { "type": "string", "enum": ["hero_draw_pile"] },
+            "type": {
+              "type": "string",
+              "enum": [
+                "pile_shuffled"
+              ]
+            },
+            "owner_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "zone": {
+              "type": "string",
+              "enum": [
+                "hero_draw_pile"
+              ]
+            },
             "bottom_to_top": {
               "type": "array",
               "minItems": 1,
               "maxItems": 4096,
               "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1 }
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "resource", "before"],
+          "required": [
+            "type",
+            "resource",
+            "before"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["resource_reset"] },
-            "resource": { "type": "string", "enum": ["attack", "influence"] },
-            "before": { "type": "integer", "minimum": 0, "maximum": 65535 }
+            "type": {
+              "type": "string",
+              "enum": [
+                "resource_reset"
+              ]
+            },
+            "resource": {
+              "type": "string",
+              "enum": [
+                "attack",
+                "influence"
+              ]
+            },
+            "before": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "location_id"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "location_advanced"
+              ]
+            },
+            "location_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "next_location_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "villain_id"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "villain_revealed"
+              ]
+            },
+            "villain_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "position",
+            "before",
+            "after"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "hero_recovered"
+              ]
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "before": {
+              "type": "integer",
+              "enum": [
+                0
+              ]
+            },
+            "after": {
+              "type": "integer",
+              "enum": [
+                10
+              ]
+            }
           }
         }
       ]
@@ -1179,14 +1508,46 @@
     "GameParticipant": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "role", "position", "hero", "resources", "hand_count"],
+      "required": [
+        "display_name",
+        "role",
+        "position",
+        "hero",
+        "resources",
+        "hand_count",
+        "stunned"
+      ],
       "properties": {
-        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
-        "role": { "type": "string", "enum": ["host", "guest"] },
-        "position": { "type": "integer", "minimum": 1, "maximum": 4 },
-        "hero": { "$ref": "#/$defs/HeroSummary" },
-        "resources": { "$ref": "#/$defs/GameResources" },
-        "hand_count": { "type": "integer", "minimum": 0 }
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "host",
+            "guest"
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "hero": {
+          "$ref": "#/$defs/HeroSummary"
+        },
+        "resources": {
+          "$ref": "#/$defs/GameResources"
+        },
+        "hand_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stunned": {
+          "type": "boolean"
+        }
       }
     },
     "GameProjectionResponse": {
@@ -1964,7 +2325,8 @@
         "event_version": {
           "type": "integer",
           "enum": [
-            4
+            4,
+            5
           ]
         },
         "type": {
@@ -2040,7 +2402,8 @@
         "event_version": {
           "type": "integer",
           "enum": [
-            4
+            4,
+            5
           ]
         },
         "type": {
@@ -2110,74 +2473,375 @@
     },
     "RealtimeGameEvent": {
       "oneOf": [
-        { "$ref": "#/$defs/DarkArtsCompletedRealtimeGameEvent" },
-        { "$ref": "#/$defs/ChoiceResolvedRealtimeGameEvent" },
-        { "$ref": "#/$defs/LegacyChoiceResolvedRealtimeGameEvent" },
-        { "$ref": "#/$defs/TurnCompletedRealtimeGameEvent" },
+        {
+          "$ref": "#/$defs/DarkArtsCompletedRealtimeGameEvent"
+        },
+        {
+          "$ref": "#/$defs/ChoiceResolvedRealtimeGameEvent"
+        },
+        {
+          "$ref": "#/$defs/LegacyChoiceResolvedRealtimeGameEvent"
+        },
+        {
+          "$ref": "#/$defs/TurnCompletedRealtimeGameEvent"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["event_version", "type", "sequence", "state_version", "turn", "actor_position", "card_id", "targets", "effects", "effect_stop", "prng_counter"],
+          "required": [
+            "event_version",
+            "type",
+            "sequence",
+            "state_version",
+            "turn",
+            "actor_position",
+            "card_id",
+            "targets",
+            "effects",
+            "effect_stop",
+            "prng_counter"
+          ],
           "properties": {
-            "event_version": { "type": "integer", "enum": [4] },
-            "type": { "type": "string", "enum": ["card_played"] },
-            "sequence": { "type": "integer", "minimum": 1 },
-            "state_version": { "type": "integer", "minimum": 2 },
-            "turn": { "type": "integer", "minimum": 1 },
-            "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
-            "card_id": { "type": "string", "minLength": 1 },
-            "targets": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectTargetBinding" } },
-            "effects": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectOutcomeSummary" } },
-            "effect_stop": { "type": "string", "enum": ["stable", "choice", "terminal"] },
-            "choice": { "$ref": "#/$defs/PendingChoiceSummary" },
-            "prng_counter": { "type": "integer", "minimum": 0 },
-            "command_id": { "type": "string", "format": "uuid" }
+            "event_version": {
+              "type": "integer",
+              "enum": [
+                4,
+                5
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "card_played"
+              ]
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state_version": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actor_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "card_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "targets": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/EffectTargetBinding"
+              }
+            },
+            "effects": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/EffectOutcomeSummary"
+              }
+            },
+            "effect_stop": {
+              "type": "string",
+              "enum": [
+                "stable",
+                "choice",
+                "terminal"
+              ]
+            },
+            "choice": {
+              "$ref": "#/$defs/PendingChoiceSummary"
+            },
+            "prng_counter": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "command_id": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           "allOf": [
             {
               "if": {
-                "required": ["effect_stop"],
-                "properties": { "effect_stop": { "const": "choice" } }
+                "required": [
+                  "effect_stop"
+                ],
+                "properties": {
+                  "effect_stop": {
+                    "const": "choice"
+                  }
+                }
               },
-              "then": { "required": ["choice"] },
-              "else": { "not": { "required": ["choice"] } }
+              "then": {
+                "required": [
+                  "choice"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "choice"
+                  ]
+                }
+              }
             }
           ]
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["event_version", "type", "sequence", "state_version", "turn", "actor_position", "villain_id", "amount", "effects"],
+          "required": [
+            "event_version",
+            "type",
+            "sequence",
+            "state_version",
+            "turn",
+            "actor_position",
+            "villain_id",
+            "amount",
+            "effects"
+          ],
           "properties": {
-            "event_version": { "type": "integer", "enum": [4] },
-            "type": { "type": "string", "enum": ["attack_assigned"] },
-            "sequence": { "type": "integer", "minimum": 1 },
-            "state_version": { "type": "integer", "minimum": 2 },
-            "turn": { "type": "integer", "minimum": 1 },
-            "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
-            "villain_id": { "type": "string", "minLength": 1 },
-            "amount": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "effects": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectOutcomeSummary" } },
-            "command_id": { "type": "string", "format": "uuid" }
+            "event_version": {
+              "type": "integer",
+              "enum": [
+                4
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "attack_assigned"
+              ]
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state_version": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actor_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "villain_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "effects": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/EffectOutcomeSummary"
+              }
+            },
+            "command_id": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["event_version", "type", "sequence", "state_version", "turn", "actor_position", "card_id", "cost", "effects"],
+          "required": [
+            "event_version",
+            "type",
+            "sequence",
+            "state_version",
+            "turn",
+            "actor_position",
+            "card_id",
+            "cost",
+            "effects"
+          ],
           "properties": {
-            "event_version": { "type": "integer", "enum": [4] },
-            "type": { "type": "string", "enum": ["card_acquired"] },
-            "sequence": { "type": "integer", "minimum": 1 },
-            "state_version": { "type": "integer", "minimum": 2 },
-            "turn": { "type": "integer", "minimum": 1 },
-            "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
-            "card_id": { "type": "string", "minLength": 1 },
-            "cost": { "type": "integer", "minimum": 0, "maximum": 65535 },
-            "refill_card_id": { "type": "string", "minLength": 1 },
-            "effects": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectOutcomeSummary" } },
-            "command_id": { "type": "string", "format": "uuid" }
+            "event_version": {
+              "type": "integer",
+              "enum": [
+                4,
+                5
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "card_acquired"
+              ]
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state_version": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actor_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "card_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cost": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "refill_card_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "effects": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/EffectOutcomeSummary"
+              }
+            },
+            "command_id": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_version",
+            "type",
+            "sequence",
+            "state_version",
+            "turn",
+            "actor_position",
+            "villain_id",
+            "amount",
+            "effects",
+            "effect_stop",
+            "prng_counter"
+          ],
+          "properties": {
+            "event_version": {
+              "type": "integer",
+              "enum": [
+                5
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "attack_assigned"
+              ]
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state_version": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actor_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "villain_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "effects": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/EffectOutcomeSummary"
+              }
+            },
+            "command_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "effect_stop": {
+              "type": "string",
+              "enum": [
+                "stable",
+                "choice",
+                "terminal"
+              ]
+            },
+            "prng_counter": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "choice": {
+              "$ref": "#/$defs/PendingChoiceSummary"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "effect_stop"
+                ],
+                "properties": {
+                  "effect_stop": {
+                    "const": "choice"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "choice"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "choice"
+                  ]
+                }
+              }
+            }
+          ]
         }
       ]
     },

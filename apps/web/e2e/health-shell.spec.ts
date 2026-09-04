@@ -83,6 +83,7 @@ const initialGameProjection = {
   participant: {
     display_name: 'Minerva',
     hand_count: 0,
+    stunned: false,
     hero: { id: 'harry', name: 'Harry' },
     position: 1,
     resources: { attack: 2, health: 9, influence: 2 },
@@ -92,6 +93,7 @@ const initialGameProjection = {
     {
       display_name: 'Minerva',
       hand_count: 0,
+      stunned: false,
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
       resources: { attack: 2, health: 9, influence: 2 },
@@ -100,6 +102,7 @@ const initialGameProjection = {
     {
       display_name: 'Luna',
       hand_count: 0,
+      stunned: false,
       hero: { id: 'hermione', name: 'Hermione' },
       position: 2,
       resources: { attack: 0, health: 10, influence: 0 },
@@ -131,6 +134,10 @@ const initialGameProjection = {
     market: [],
     play_area: [],
     villain_deck_count: 0,
+    villain_discard_count: 0,
+    location_deck_count: 0,
+    location_discard_count: 0,
+    current_location: null,
   },
   turn: { active_position: 1, number: 1, phase: 'hero_actions' },
 }
@@ -191,6 +198,7 @@ const heroActionProjection = {
   participant: {
     ...initialGameProjection.participant,
     hand_count: 1,
+    stunned: false,
     resources: { attack: 0, health: 9, influence: 0 },
   },
   participants: initialGameProjection.participants.map((participant) =>
@@ -198,6 +206,7 @@ const heroActionProjection = {
       ? {
           ...participant,
           hand_count: 1,
+          stunned: false,
           resources: { attack: 0, health: 9, influence: 0 },
         }
       : participant,
@@ -234,6 +243,10 @@ const heroActionProjection = {
     ],
     play_area: [],
     villain_deck_count: 0,
+    villain_discard_count: 0,
+    location_deck_count: 0,
+    location_discard_count: 0,
+    current_location: null,
   },
 }
 
@@ -249,6 +262,7 @@ const playedCardProjection = {
   participant: {
     ...heroActionProjection.participant,
     hand_count: 0,
+    stunned: false,
     resources: { attack: 2, health: 9, influence: 3 },
   },
   participants: heroActionProjection.participants.map((participant) =>
@@ -256,6 +270,7 @@ const playedCardProjection = {
       ? {
           ...participant,
           hand_count: 0,
+          stunned: false,
           resources: { attack: 2, health: 9, influence: 3 },
         }
       : participant,
@@ -789,7 +804,7 @@ test('a player replays a missed event and falls back to Snapshot within recovery
         }),
       )
       .toEqual({
-        eventVersion: 4,
+        eventVersion: 5,
         phases: ['end_turn', 'dark_arts', 'villains'],
         type: 'turn_completed',
       })

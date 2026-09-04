@@ -65,6 +65,8 @@ function phaseName(phase?: string): string {
 const phaseLabel = computed(() => phaseName(game.value?.turn.phase))
 const phaseGuidance = computed(() => {
   const currentGame = game.value
+  if (currentGame?.game.status === 'won') return 'A equipe venceu. A partida terminou e não aceita novas ações.'
+  if (currentGame?.game.status === 'lost') return 'A partida terminou em derrota. Nenhuma nova ação será aceita.'
   const choice = currentGame?.choice
   if (currentGame && choice?.status === 'pending') {
     const owner = currentGame.participants.find(
@@ -228,6 +230,8 @@ function choiceOptionParticipant(option: string) {
 }
 
 function choiceOptionLabel(option: string): string {
+  const card = game.value?.table.hand.find((candidate) => candidate.instance_id === option)
+  if (card) return card.name
   const participant = choiceOptionParticipant(option)
   if (participant) {
     return participant.display_name
@@ -369,7 +373,7 @@ function acquireCard(cardId: string): void {
         {{ game.snapshot.sequence === 0 ? 'Snapshot inicial confirmado' : 'Estado oficial confirmado' }}
       </p>
       <h2 id="game-heading" tabindex="-1">
-        {{ game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
+        {{ game.game.status === 'won' ? 'Vitória da equipe' : game.game.status === 'lost' ? 'Derrota da equipe' : game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
       </h2>
       <p class="stage-description">
         A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
@@ -537,7 +541,11 @@ function acquireCard(cardId: string): void {
         class="effect-choice"
         aria-labelledby="effect-choice-heading"
       >
-        <h3 id="effect-choice-heading">Escolha oficial pendente</h3>
+        <h3 id="effect-choice-heading">{{ game.choice.kind === 'stun_discard' ? 'Atordoado: escolha o descarte' : 'Escolha oficial pendente' }}</h3>
+        <p v-if="game.choice.kind === 'stun_discard'">
+          Descarte metade da mão, arredondada para baixo. Depois, o Local recebe 1 Controle.
+          Você continua na partida e recupera 10 de Vida ao fim do turno ativo.
+        </p>
         <p id="pending-choice-cardinality">
           {{ pendingChoiceOwner?.display_name ?? 'O participante responsável' }} precisa escolher
           {{

@@ -39,7 +39,8 @@ use codec::{
 pub(crate) use projection::{GameProjectionResponse, projection_for_participant};
 
 const SEED_BYTES: usize = 32;
-const GAME_EVENT_VERSION: u16 = 4;
+const HERO_ACTION_EVENT_VERSION: u16 = 4;
+const GAME_EVENT_VERSION: u16 = 5;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -482,6 +483,8 @@ struct PersistedSnapshot {
     versions: PersistedVersions,
     turn: PersistedTurn,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_villain_limit: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     queued_phases: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     queued_effects: Option<Vec<PersistedQueuedEffect>>,
@@ -560,12 +563,18 @@ struct PersistedEffectEntity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     effect_rule_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    reward_rule_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     influence_cost: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dark_arts_count: Option<u8>,
     zone: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     zone_index: Option<u16>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     resources: BTreeMap<String, u16>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    resource_limits: BTreeMap<String, u16>,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -654,6 +663,14 @@ enum PersistedQueuedEffect {
         cursor: PersistedEffectCursor,
         responsible_position: u8,
     },
+    FinishStun {
+        cursor: PersistedEffectCursor,
+        responsible_position: u8,
+    },
+    StunChoice {
+        cursor: PersistedEffectCursor,
+        responsible_position: u8,
+    },
 }
 
 #[derive(Deserialize)]
@@ -693,6 +710,14 @@ struct PersistedTurnStep {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEndTurnOutcome {
+    LocationAdvanced {
+        location_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next_location_id: Option<String>,
+    },
+    VillainRevealed {
+        villain_id: String,
+    },
     CardMoved {
         card_id: String,
         from: String,
@@ -706,6 +731,11 @@ enum PersistedEndTurnOutcome {
     ResourceReset {
         resource: String,
         before: u16,
+    },
+    HeroRecovered {
+        position: u8,
+        before: u16,
+        after: u16,
     },
 }
 
