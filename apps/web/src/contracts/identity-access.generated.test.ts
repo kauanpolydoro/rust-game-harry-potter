@@ -3,13 +3,19 @@ import { describe, expect, it } from 'vitest'
 import {
   isAssistedRecoveryCredentialResponse,
   isDirectRecoveryCredentialResponse,
+  isDeviceSessionsResponse,
   isErrorResponse,
   isExecuteGameCommandRequest,
   isGameProjectionResponse,
   isRegenerateAssistedRecoveryCredentialRequest,
+  isProtectParticipantRequest,
+  isProtectParticipantResponse,
+  isProtectRoomRequest,
+  isProtectRoomResponse,
   isRealtimeGameEvent,
   isRealtimePresenceMessage,
   isRotateRecoveryPasswordResponse,
+  isRevokeDeviceSessionResponse,
   isSecurityEventsMessage,
   isRecoveredLobbyResponse,
   isRecoveryReplacementRequiredResponse,
@@ -511,6 +517,104 @@ describe('generated identity contract guards', () => {
     ).toBe(true)
     expect(
       isRecoveredLobbyResponse({ kind: 'lobby', recovery_token: 'a'.repeat(64) }),
+    ).toBe(false)
+  })
+
+  it('guards secretless revocation and emergency protection contracts', () => {
+    const session = {
+      created_at: '2026-09-04T18:00:00Z',
+      current: false,
+      id: '736a975d-c348-491a-8c99-bf3459841d66',
+      label: 'Sessão 2',
+    }
+    const sessionEvent = {
+      actor_position: 1,
+      cursor: 3,
+      event_version: 1,
+      occurred_at: '2026-09-04T18:01:00Z',
+      session_label: 'Sessão 2',
+      target_position: 1,
+      type: 'session_revoked',
+    }
+    const participantEvent = {
+      actor_position: 1,
+      cursor: 4,
+      event_version: 1,
+      occurred_at: '2026-09-04T18:02:00Z',
+      recovery_generation: 2,
+      revoked_sessions: 2,
+      target_position: 1,
+      type: 'participant_protected',
+    }
+    const roomEvent = {
+      actor_position: 1,
+      current_session_preserved: true,
+      cursor: 5,
+      event_version: 1,
+      occurred_at: '2026-09-04T18:03:00Z',
+      password_generation: 2,
+      recovery_epoch: 2,
+      revoked_sessions: 3,
+      type: 'room_protected',
+    }
+
+    expect(isDeviceSessionsResponse({ sessions: [session] })).toBe(true)
+    expect(isDeviceSessionsResponse({ sessions: [{ ...session, user_agent: 'secret' }] })).toBe(
+      false,
+    )
+    expect(
+      isRevokeDeviceSessionResponse({
+        revoked_session: { id: session.id, label: session.label },
+        security_event: sessionEvent,
+        status: 'revoked',
+      }),
+    ).toBe(true)
+    expect(isProtectParticipantRequest({ protection_confirmed: true })).toBe(true)
+    expect(isProtectParticipantRequest({ protection_confirmed: false })).toBe(false)
+    expect(
+      isProtectParticipantResponse({
+        participant: { display_name: 'Minerva', position: 1 },
+        recovery_generation: 2,
+        revoked_sessions: 2,
+        security_event: participantEvent,
+        status: 'protected',
+      }),
+    ).toBe(true)
+    const roomRequest = {
+      current_recovery_password: 'a long uncommon passphrase',
+      new_recovery_password: 'a newer uncommon recovery phrase',
+      preserve_current_session: true,
+      protection_confirmed: true,
+    }
+    expect(isProtectRoomRequest(roomRequest)).toBe(true)
+    expect(isProtectRoomRequest({ ...roomRequest, protection_confirmed: false })).toBe(false)
+    expect(
+      isProtectRoomResponse({
+        current_session_preserved: true,
+        password_generation: 2,
+        recovery_epoch: 2,
+        revoked_sessions: 3,
+        security_event: roomEvent,
+        status: 'protected',
+      }),
+    ).toBe(true)
+    expect(
+      isSecurityEventsMessage({
+        cursor: 5,
+        events: [sessionEvent, participantEvent, roomEvent],
+        from_cursor: 2,
+        protocol_version: 1,
+        type: 'security_events',
+      }),
+    ).toBe(true)
+    expect(
+      isSecurityEventsMessage({
+        cursor: 3,
+        events: [{ ...sessionEvent, session_id: session.id }],
+        from_cursor: 2,
+        protocol_version: 1,
+        type: 'security_events',
+      }),
     ).toBe(false)
   })
 })

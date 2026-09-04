@@ -83,6 +83,35 @@
         "host_assistance_risk_acknowledged": { "type": "boolean", "enum": [true] }
       }
     },
+    "RevokeDeviceSessionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "ProtectParticipantRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protection_confirmed"],
+      "properties": {
+        "protection_confirmed": { "type": "boolean", "enum": [true] }
+      }
+    },
+    "ProtectRoomRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current_recovery_password",
+        "new_recovery_password",
+        "preserve_current_session",
+        "protection_confirmed"
+      ],
+      "properties": {
+        "current_recovery_password": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "new_recovery_password": { "type": "string", "minLength": 12, "maxLength": 128 },
+        "preserve_current_session": { "type": "boolean" },
+        "protection_confirmed": { "type": "boolean", "enum": [true] }
+      }
+    },
     "RecoveryParticipant": {
       "type": "object",
       "additionalProperties": false,
@@ -134,6 +163,167 @@
         "delivery": { "type": "string", "enum": ["direct", "host_assisted"] },
         "recovery_generation": { "type": "integer", "minimum": 2 },
         "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SessionRevokedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "target_position",
+        "session_label",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["session_revoked"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "session_label": { "type": "string", "enum": ["Sessão 1", "Sessão 2"] },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ParticipantProtectedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "target_position",
+        "revoked_sessions",
+        "recovery_generation",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["participant_protected"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "revoked_sessions": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RoomProtectedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "password_generation",
+        "recovery_epoch",
+        "revoked_sessions",
+        "current_session_preserved",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["room_protected"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "password_generation": { "type": "integer", "minimum": 2 },
+        "recovery_epoch": { "type": "integer", "minimum": 2 },
+        "revoked_sessions": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "current_session_preserved": { "type": "boolean" },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "DeviceSessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "created_at", "current"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "label": { "type": "string", "enum": ["Sessão 1", "Sessão 2"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "current": { "type": "boolean" }
+      }
+    },
+    "DeviceSessionsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions"],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/DeviceSessionSummary" }
+        }
+      }
+    },
+    "RevokedDeviceSessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "label": { "type": "string", "enum": ["Sessão 1", "Sessão 2"] }
+      }
+    },
+    "RevokeDeviceSessionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "revoked_session", "security_event"],
+      "properties": {
+        "status": { "type": "string", "enum": ["revoked"] },
+        "revoked_session": { "$ref": "#/$defs/RevokedDeviceSessionSummary" },
+        "security_event": { "$ref": "#/$defs/SessionRevokedSecurityEvent" }
+      }
+    },
+    "ProtectParticipantResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "participant",
+        "revoked_sessions",
+        "recovery_generation",
+        "security_event"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["protected"] },
+        "participant": { "$ref": "#/$defs/RecoveryParticipant" },
+        "revoked_sessions": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "security_event": { "$ref": "#/$defs/ParticipantProtectedSecurityEvent" }
+      }
+    },
+    "ProtectRoomResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "password_generation",
+        "recovery_epoch",
+        "revoked_sessions",
+        "current_session_preserved",
+        "security_event"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["protected"] },
+        "password_generation": { "type": "integer", "minimum": 2 },
+        "recovery_epoch": { "type": "integer", "minimum": 2 },
+        "revoked_sessions": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "current_session_preserved": { "type": "boolean" },
+        "security_event": { "$ref": "#/$defs/RoomProtectedSecurityEvent" }
       }
     },
     "RotateRecoveryPasswordResponse": {
@@ -199,7 +389,10 @@
           "items": {
             "oneOf": [
               { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" },
-              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" },
+              { "$ref": "#/$defs/SessionRevokedSecurityEvent" },
+              { "$ref": "#/$defs/ParticipantProtectedSecurityEvent" },
+              { "$ref": "#/$defs/RoomProtectedSecurityEvent" }
             ]
           }
         }
@@ -219,7 +412,10 @@
           "items": {
             "oneOf": [
               { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" },
-              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" },
+              { "$ref": "#/$defs/SessionRevokedSecurityEvent" },
+              { "$ref": "#/$defs/ParticipantProtectedSecurityEvent" },
+              { "$ref": "#/$defs/RoomProtectedSecurityEvent" }
             ]
           }
         }

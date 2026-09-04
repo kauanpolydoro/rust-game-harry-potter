@@ -171,7 +171,7 @@ async fn exercise_upgrade(database: &PgPool) -> TestResult<UpgradeObservation> {
     .await?;
     let fixture = seed_legacy_recovery_state(database).await?;
 
-    MIGRATOR.run(database).await?;
+    MIGRATOR.run_to(16, database).await?;
 
     observe_upgrade(
         database,

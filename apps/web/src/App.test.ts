@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import { useGameCommandStore } from './stores/gameCommand'
 import { useRoomAccessStore } from './stores/roomAccess'
+import { useSecuritySyncStore } from './stores/securitySync'
 
 class SynchronizedWebSocket {
   static readonly CONNECTING = 0
@@ -60,6 +61,11 @@ class SynchronizedWebSocket {
   close(): void {
     this.readyState = SynchronizedWebSocket.CLOSED
     this.onclose?.({ code: 1000 })
+  }
+
+  serverClose(code: number): void {
+    this.readyState = SynchronizedWebSocket.CLOSED
+    this.onclose?.({ code })
   }
 }
 
@@ -3475,5 +3481,160 @@ describe('application shell', () => {
     expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
       `${window.location.origin}${window.location.pathname}#recovery=${hostToken}`,
     )
+  })
+
+  it('revokes the current session and clears private state and pending commands', async () => {
+    const sessionId = 'a8665180-17cb-4564-9174-14ef56f17851'
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    sessionStorage.setItem(
+      'hogwarts.game-command.pending-intent',
+      JSON.stringify({
+        commandId: '642103d0-d780-48ea-bf65-c40228751911',
+        commandType: 'complete_dark_arts',
+        createdAt: '2026-09-04T18:00:00Z',
+        gameId: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+      }),
+    )
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(readyHostLobbyResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session/device-sessions') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sessions: [
+                {
+                  created_at: '2026-09-04T18:00:00Z',
+                  current: true,
+                  id: sessionId,
+                  label: 'Sessão 1',
+                },
+              ],
+            }),
+            { headers: { 'Content-Type': 'application/json' }, status: 200 },
+          ),
+        )
+      }
+      if (url === `/api/session/device-sessions/${sessionId}/revocation`) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              revoked_session: { id: sessionId, label: 'Sessão 1' },
+              security_event: {
+                actor_position: 1,
+                cursor: 1,
+                event_version: 1,
+                occurred_at: '2026-09-04T18:01:00Z',
+                session_label: 'Sessão 1',
+                target_position: 1,
+                type: 'session_revoked',
+              },
+              status: 'revoked',
+            }),
+            { headers: { 'Content-Type': 'application/json' }, status: 200 },
+          ),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    await fireEvent.click(screen.getByText('Gerenciar sessões e proteção'))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Encerrar esta sessão' }))
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Acesso protegido' }),
+    ).toBeVisible()
+    expect(
+      screen.getByText(
+        'Esta sessão foi revogada. O estado privado e as ações pendentes deste navegador foram removidos.',
+      ),
+    ).toBeVisible()
+    expect(localStorage.getItem('hogwarts.session.expected')).toBeNull()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+  })
+
+  it('ignores a late command response when only the game channel observes revocation', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    let completeCommand = (_response: Response): void => undefined
+    const commandResponse = new Promise<Response>((resolve) => {
+      completeCommand = resolve
+    })
+    let submittedCommandId = ''
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        submittedCommandId = body.command_id
+        return commandResponse
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+    const pinia = createPinia()
+    const execute = vi.spyOn(useGameCommandStore(pinia), 'execute')
+    render(App, { global: { plugins: [pinia] } })
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    void fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+    await waitFor(() => expect(screen.getByText('Intenção pendente')).toBeVisible())
+    useSecuritySyncStore(pinia).disconnect()
+    const gameSocket = SynchronizedWebSocket.instances.find(
+      (socket) => socket.requestedProtocol === 'hogwarts.realtime.v2',
+    )
+
+    gameSocket?.serverClose(1008)
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Acesso protegido' }),
+    ).toBeVisible()
+    expect(useRoomAccessStore(pinia).game).toBeNull()
+    expect(useGameCommandStore(pinia).pendingIntent).toBeNull()
+    expect(localStorage.getItem('hogwarts.session.expected')).toBeNull()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+
+    completeCommand(
+      new Response(JSON.stringify(acceptedCommandResponse(submittedCommandId)), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
+
+    await expect(execute.mock.results[0]?.value).resolves.toBeNull()
+    expect(useRoomAccessStore(pinia).game).toBeNull()
+    expect(useGameCommandStore(pinia).receipt).toBeNull()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Partida em andamento' })).toBeNull()
   })
 })

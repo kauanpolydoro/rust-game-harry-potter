@@ -63,6 +63,8 @@ enum ErrorCode {
     RecoveryFailed,
     #[serde(rename = "RECOVERY_CONFIRMATION_FAILED")]
     RecoveryConfirmationFailed,
+    #[serde(rename = "PROTECTION_CONFIRMATION_REQUIRED")]
+    ProtectionConfirmationRequired,
     #[serde(rename = "NOT_ROOM_HOST")]
     NotRoomHost,
     #[serde(rename = "ROOM_PARTICIPANT_NOT_FOUND")]
@@ -150,6 +152,8 @@ enum MessageKey {
     RecoveryFailed,
     #[serde(rename = "room.recovery_password.confirmation_failed")]
     RecoveryConfirmationFailed,
+    #[serde(rename = "access.protection.confirmation_required")]
+    ProtectionConfirmationRequired,
     #[serde(rename = "room.host.required")]
     NotRoomHost,
     #[serde(rename = "room.participant.not_found")]
@@ -342,6 +346,16 @@ impl ApiError {
             ErrorCategory::Authentication,
             RetryPolicy::AfterCorrection,
             MessageKey::RecoveryConfirmationFailed,
+        )
+    }
+
+    pub(crate) const fn protection_confirmation_required() -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ProtectionConfirmationRequired,
+            ErrorCategory::Validation,
+            RetryPolicy::AfterCorrection,
+            MessageKey::ProtectionConfirmationRequired,
         )
     }
 

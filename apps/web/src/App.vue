@@ -10,19 +10,29 @@ import type {
   StartGameRequest,
 } from './contracts/identity-access.generated'
 import { takeRecoveryToken } from './recoveryCredential'
+import { useAccessProtectionStore } from './stores/accessProtection'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
 import { useGameSyncStore } from './stores/gameSync'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
+import { useRecoveryManagementStore } from './stores/recoveryManagement'
 import { useSecuritySyncStore } from './stores/securitySync'
 
+type AccessInvalidationReason =
+  | 'session_revoked'
+  | 'participant_protected'
+  | 'room_protected'
+
+const accessProtection = useAccessProtectionStore()
 const health = useHealthStore()
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
+const recoveryManagement = useRecoveryManagementStore()
 const securitySync = useSecuritySyncStore()
+const accessInvalidationReason = ref<AccessInvalidationReason | null>(null)
 const recoveryToken = ref(takeRecoveryToken())
 const entryMode = ref<'create' | 'join' | 'recover'>(
   recoveryToken.value ? 'recover' : 'create',
@@ -177,6 +187,9 @@ const canCompleteDarkArts = computed(
     !commandSubmissionBlocked.value,
 )
 const serviceHeading = computed(() => {
+  if (accessInvalidationReason.value) {
+    return 'Acesso protegido'
+  }
   if (isRestoringSession.value) {
     return 'Retomando sua sessão'
   }
@@ -186,6 +199,15 @@ const serviceHeading = computed(() => {
   return currentStatus.value.label
 })
 const serviceDescription = computed(() => {
+  if (accessInvalidationReason.value === 'participant_protected') {
+    return 'Todas as sessões e links desta participação foram revogados. Use um novo link de recuperação para retornar.'
+  }
+  if (accessInvalidationReason.value === 'room_protected') {
+    return 'A senha, os links e as sessões da sala foram renovados. Solicite ao Anfitrião as novas credenciais para retornar.'
+  }
+  if (accessInvalidationReason.value === 'session_revoked') {
+    return 'Esta sessão foi revogada. O estado privado e as ações pendentes deste navegador foram removidos.'
+  }
   if (isRestoringSession.value) {
     return 'Confirmando sua posição durável nesta mesa.'
   }
@@ -322,6 +344,30 @@ function retry(): void {
 
 function retrySession(): void {
   void roomAccess.restoreSession()
+}
+
+function handleAccessInvalidation(reason: AccessInvalidationReason): void {
+  accessInvalidationReason.value = reason
+  selectedChoiceOptions.value = []
+  selectedReplacementSessionId.value = ''
+  recoveryToken.value = null
+  gameSync.disconnect()
+  securitySync.disconnect()
+  gameCommand.clearPrivateState()
+  recoveryManagement.$reset()
+  accessProtection.clearPrivateState()
+  roomAccess.clearAuthenticatedSession()
+}
+
+async function returnToEntry(): Promise<void> {
+  accessInvalidationReason.value = null
+  entryMode.value = 'create'
+  displayName.value = ''
+  recoveryPassword.value = ''
+  roomCode.value = ''
+  selectedHero.value = ''
+  await nextTick()
+  document.getElementById('display-name')?.focus()
 }
 
 async function createRoom(): Promise<void> {
@@ -637,6 +683,14 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  [() => securitySync.sessionInvalidated, () => gameSync.sessionInvalidated],
+  ([securitySessionInvalidated, gameSessionInvalidated]) => {
+    if (securitySessionInvalidated || gameSessionInvalidated) {
+      handleAccessInvalidation('session_revoked')
+    }
+  },
+)
 
 onBeforeUnmount(() => {
   gameSync.disconnect()
@@ -670,7 +724,7 @@ onMounted(async () => {
     </header>
 
     <section
-      v-if="health.availability !== 'ready' || isRestoringSession || sessionNeedsRecovery"
+      v-if="health.availability !== 'ready' || isRestoringSession || sessionNeedsRecovery || accessInvalidationReason"
       class="service-check"
       :class="`service-check--${health.availability}`"
       aria-labelledby="service-heading"
@@ -698,6 +752,7 @@ onMounted(async () => {
       v-model:selected-choice-options="selectedChoiceOptions"
       :choice-input-disabled="choiceInputDisabled"
       :is-choice-responsible="isResponsibleForPendingChoice"
+      @access-invalidated="handleAccessInvalidation"
     />
 
     <section
@@ -733,6 +788,7 @@ onMounted(async () => {
         <RecoveryManagement
           :participant="lobby.participant"
           :participants="lobby.participants"
+          @access-invalidated="handleAccessInvalidation"
         />
 
         <dl class="room-details">
@@ -1231,6 +1287,14 @@ onMounted(async () => {
         @click="retry()"
       >
         {{ health.availability === 'checking' ? 'Verificando servidor' : 'Tentar novamente' }}
+      </button>
+      <button
+        v-else-if="accessInvalidationReason"
+        class="primary-button"
+        type="button"
+        @click="returnToEntry()"
+      >
+        Voltar ao início
       </button>
       <button
         v-else-if="sessionNeedsRecovery"

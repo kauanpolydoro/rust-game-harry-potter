@@ -226,6 +226,44 @@ enum RealtimeLoopAction {
     Stop,
 }
 
+struct RealtimeSignals {
+    synchronization: broadcast::Receiver<()>,
+    presence: broadcast::Receiver<()>,
+    revocation: broadcast::Receiver<()>,
+    shutdown: watch::Receiver<bool>,
+}
+
+struct RealtimeIntervals {
+    reconciliation: tokio::time::Interval,
+    session_revalidation: tokio::time::Interval,
+    heartbeat: tokio::time::Interval,
+    presence_reconciliation: tokio::time::Interval,
+}
+
+impl RealtimeIntervals {
+    fn new(game_id: Uuid, participant_id: Uuid, now: tokio::time::Instant) -> Self {
+        Self {
+            reconciliation: realtime_interval(
+                now + REALTIME_RECONCILIATION_INTERVAL
+                    + reconciliation_jitter(game_id, participant_id),
+                REALTIME_RECONCILIATION_INTERVAL,
+            ),
+            session_revalidation: realtime_interval(
+                now + REALTIME_SESSION_REVALIDATION_INTERVAL,
+                REALTIME_SESSION_REVALIDATION_INTERVAL,
+            ),
+            heartbeat: realtime_interval(
+                now + REALTIME_HEARTBEAT_INTERVAL,
+                REALTIME_HEARTBEAT_INTERVAL,
+            ),
+            presence_reconciliation: realtime_interval(
+                now + REALTIME_PRESENCE_RECONCILIATION_INTERVAL,
+                REALTIME_PRESENCE_RECONCILIATION_INTERVAL,
+            ),
+        }
+    }
+}
+
 pub(super) async fn game_events(
     State(state): State<AppState>,
     Query(query): Query<RealtimeQuery>,
@@ -292,13 +330,16 @@ async fn serve_game_events(
     };
     let synchronization_signal = state.subscribe_to_game_synchronization(game_id);
     let presence_signal = state.subscribe_to_game_presence(game_id);
+    let revocation_signal = state.subscribe_to_session_revocation(session.session_id);
     let shutdown = state.subscribe_to_shutdown();
     if *shutdown.borrow() {
         close_socket(&mut socket, close_code::RESTART, "server is shutting down").await;
         drop(synchronization_signal);
         drop(presence_signal);
+        drop(revocation_signal);
         state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
+        state.prune_session_revocation_channel(session.session_id);
         return;
     }
     let force_initial_snapshot = query.cursor.is_none() || position.cursor.is_none();
@@ -315,8 +356,10 @@ async fn serve_game_events(
     {
         drop(synchronization_signal);
         drop(presence_signal);
+        drop(revocation_signal);
         state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
+        state.prune_session_revocation_channel(session.session_id);
         return;
     }
 
@@ -325,8 +368,10 @@ async fn serve_game_events(
     else {
         drop(synchronization_signal);
         drop(presence_signal);
+        drop(revocation_signal);
         state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
+        state.prune_session_revocation_channel(session.session_id);
         return;
     };
     let context = RealtimeConnectionContext {
@@ -342,14 +387,18 @@ async fn serve_game_events(
         context,
         &mut position,
         &mut last_presence,
-        synchronization_signal,
-        presence_signal,
-        shutdown,
+        RealtimeSignals {
+            synchronization: synchronization_signal,
+            presence: presence_signal,
+            revocation: revocation_signal,
+            shutdown,
+        },
     )
     .await;
     disconnect_presence(&state, connection_id, game_id, participant_id).await;
     state.prune_game_synchronization_channel(game_id);
     state.prune_game_presence_channel(game_id);
+    state.prune_session_revocation_channel(session.session_id);
 }
 
 async fn register_connection_presence(
@@ -400,9 +449,7 @@ async fn realtime_event_loop(
     context: RealtimeConnectionContext<'_>,
     position: &mut RealtimePosition,
     last_presence: &mut Option<RealtimePresenceMessage>,
-    mut synchronization_signal: broadcast::Receiver<()>,
-    mut presence_signal: broadcast::Receiver<()>,
-    mut shutdown: watch::Receiver<bool>,
+    signals: RealtimeSignals,
 ) {
     let RealtimeConnectionContext {
         state,
@@ -413,22 +460,13 @@ async fn realtime_event_loop(
     } = context;
     let participant_id = session.participant_id;
     let now = tokio::time::Instant::now();
-    let mut reconciliation = realtime_interval(
-        now + REALTIME_RECONCILIATION_INTERVAL + reconciliation_jitter(game_id, participant_id),
-        REALTIME_RECONCILIATION_INTERVAL,
-    );
-    let mut session_revalidation = realtime_interval(
-        now + REALTIME_SESSION_REVALIDATION_INTERVAL,
-        REALTIME_SESSION_REVALIDATION_INTERVAL,
-    );
-    let mut heartbeat = realtime_interval(
-        now + REALTIME_HEARTBEAT_INTERVAL,
-        REALTIME_HEARTBEAT_INTERVAL,
-    );
-    let mut presence_reconciliation = realtime_interval(
-        now + REALTIME_PRESENCE_RECONCILIATION_INTERVAL,
-        REALTIME_PRESENCE_RECONCILIATION_INTERVAL,
-    );
+    let mut intervals = RealtimeIntervals::new(game_id, participant_id, now);
+    let RealtimeSignals {
+        mut synchronization,
+        mut presence,
+        mut revocation,
+        mut shutdown,
+    } = signals;
     let connection_lifetime = tokio::time::sleep(REALTIME_MAX_CONNECTION_AGE);
     tokio::pin!(connection_lifetime);
     let mut last_client_activity = now;
@@ -447,7 +485,7 @@ async fn realtime_event_loop(
                 )
                 .await
             }
-            notification = synchronization_signal.recv() => {
+            notification = synchronization.recv() => {
                 match notification {
                     Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                         RealtimeLoopAction::Synchronize
@@ -455,7 +493,7 @@ async fn realtime_event_loop(
                     Err(broadcast::error::RecvError::Closed) => RealtimeLoopAction::Continue,
                 }
             }
-            notification = presence_signal.recv(), if protocol.publishes_presence() => {
+            notification = presence.recv(), if protocol.publishes_presence() => {
                 match notification {
                     Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                         RealtimeLoopAction::Presence
@@ -463,14 +501,22 @@ async fn realtime_event_loop(
                     Err(broadcast::error::RecvError::Closed) => RealtimeLoopAction::Continue,
                 }
             }
-            _ = reconciliation.tick() => RealtimeLoopAction::Synchronize,
-            _ = presence_reconciliation.tick(), if protocol.publishes_presence() => {
+            notification = revocation.recv() => {
+                match notification {
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                        validate_realtime_session(socket, state, session, game_id).await
+                    }
+                    Err(broadcast::error::RecvError::Closed) => RealtimeLoopAction::Continue,
+                }
+            }
+            _ = intervals.reconciliation.tick() => RealtimeLoopAction::Synchronize,
+            _ = intervals.presence_reconciliation.tick(), if protocol.publishes_presence() => {
                 RealtimeLoopAction::Presence
             },
-            _ = session_revalidation.tick() => {
+            _ = intervals.session_revalidation.tick() => {
                 validate_realtime_session(socket, state, session, game_id).await
             }
-            _ = heartbeat.tick() => {
+            _ = intervals.heartbeat.tick() => {
                 send_realtime_heartbeat(
                     socket,
                     game_id,

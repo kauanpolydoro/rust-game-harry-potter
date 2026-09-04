@@ -38,6 +38,7 @@ interface ConnectionRequest {
 interface ConnectionCallbacks {
   currentRequest: () => ConnectionRequest | null
   discardAnimations: () => void
+  invalidateSession: () => void
   receive: (serialized: unknown) => void
   updateStatus: (status: GameSyncStatus) => void
 }
@@ -198,6 +199,7 @@ class GameSyncConnection {
       this.callbacks.discardAnimations()
       if (event.code === 1008) {
         this.callbacks.updateStatus('failed')
+        this.callbacks.invalidateSession()
         return
       }
       this.callbacks.updateStatus('reconnecting')
@@ -384,6 +386,7 @@ class GameSyncConnection {
 export const useGameSyncStore = defineStore('gameSync', () => {
   const roomAccess = useRoomAccessStore()
   const status = ref<GameSyncStatus>('disconnected')
+  const sessionInvalidated = ref(false)
   const cursor = ref(0)
   const digest = ref('')
   const snapshotVersion = ref(1)
@@ -421,6 +424,9 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       }
     },
     discardAnimations,
+    invalidateSession: () => {
+      sessionInvalidated.value = true
+    },
     receive,
     updateStatus: (nextStatus) => {
       status.value = nextStatus
@@ -559,6 +565,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     participantPresence.value = {}
     requiredParticipantPosition.value = null
     gameBlocked.value = false
+    sessionInvalidated.value = false
     discardAnimations()
   }
 
@@ -583,6 +590,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     receive,
     requiredParticipantPosition,
     resynchronize,
+    sessionInvalidated,
     snapshotVersion,
     status,
   }

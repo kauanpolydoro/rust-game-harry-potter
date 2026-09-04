@@ -23,7 +23,7 @@ use crate::{
     AppState,
     content_catalog::SelectedContent,
     http_support::{ApiError, idempotency_key, no_store_json},
-    session::authenticated_participant,
+    session::{authenticated_participant, authenticated_session, session_is_active_in_transaction},
 };
 
 mod codec;
@@ -736,7 +736,8 @@ async fn start_game(
     Json(request): Json<StartGameRequest>,
 ) -> Result<Response, ApiError> {
     let key = idempotency_key(&headers)?;
-    let participant_id = authenticated_participant(&state, &headers).await?;
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let participant_id = authenticated.participant_id;
 
     if let Some(stored) = postgres::load_game_start(&state.database, &key).await? {
         return replay_game_start(&state, stored, participant_id, &request).await;
@@ -758,6 +759,9 @@ async fn start_game(
     let actor = postgres::lock_room_actor(&mut transaction, participant_id)
         .await?
         .ok_or_else(ApiError::session_invalid)?;
+    if !session_is_active_in_transaction(&mut transaction, authenticated).await? {
+        return Err(ApiError::session_invalid());
+    }
 
     if let Some(stored) = postgres::load_game_start_in(&mut transaction, &key).await? {
         transaction
@@ -884,12 +888,26 @@ async fn replay_game_start(
     Ok(no_store_json(StatusCode::CREATED, projection))
 }
 
+async fn lock_game_for_command(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    authenticated: crate::session::AuthenticatedSession,
+) -> Result<StoredCommandGame, ApiError> {
+    let stored = postgres::lock_game_for_actor(transaction, authenticated.participant_id)
+        .await?
+        .ok_or_else(ApiError::game_action_not_allowed)?;
+    if !session_is_active_in_transaction(transaction, authenticated).await? {
+        return Err(ApiError::session_invalid());
+    }
+    Ok(stored)
+}
+
 async fn execute_game_command(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<ExecuteGameCommandRequest>,
 ) -> Result<Response, ApiError> {
-    let participant_id = authenticated_participant(&state, &headers).await?;
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let participant_id = authenticated.participant_id;
     let command_id =
         Uuid::parse_str(request.command_id()).map_err(|_| ApiError::invalid_command_id())?;
     let payload_digest = command_payload_digest(&request)?;
@@ -901,9 +919,7 @@ async fn execute_game_command(
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let stored = postgres::lock_game_for_actor(&mut transaction, participant_id)
-        .await?
-        .ok_or_else(ApiError::game_action_not_allowed)?;
+    let stored = lock_game_for_command(&mut transaction, authenticated).await?;
     if stored.expired {
         return Err(ApiError::game_expired());
     }
