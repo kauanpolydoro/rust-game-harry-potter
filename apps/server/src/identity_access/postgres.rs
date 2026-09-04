@@ -2,11 +2,117 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, StoredDeviceSession, StoredLobby, StoredParticipant, StoredRecoveryCandidate,
-    StoredRecoveryCredentialRegeneration, StoredRecoveryCredentialSecurityEvent,
-    StoredRecoveryParticipant, StoredRecoveryPasswordAuthority, StoredRecoveryPasswordRotation,
-    StoredRecoveryRoom, StoredRoomCreation, StoredRoomJoin, StoredSecurityEvent, random_room_code,
+    ApiError, StoredDeviceSession, StoredDeviceSessionRevocation, StoredDeviceSessionSecurityEvent,
+    StoredLobby, StoredParticipant, StoredParticipantProtection, StoredParticipantProtectionEvent,
+    StoredRecoveryCandidate, StoredRecoveryCredentialRegeneration,
+    StoredRecoveryCredentialSecurityEvent, StoredRecoveryParticipant,
+    StoredRecoveryPasswordAuthority, StoredRecoveryPasswordRotation, StoredRecoveryRoom,
+    StoredRoomCreation, StoredRoomJoin, StoredRoomProtection, StoredRoomProtectionEvent,
+    StoredSecurityEvent, random_room_code,
 };
+use crate::session::AuthenticatedSession;
+
+const PROTECT_ROOM_ACCESS_SQL: &str = r"
+    WITH rotated AS (
+        UPDATE rooms
+        SET
+            recovery_password_hash = $4,
+            password_generation = password_generation + 1,
+            recovery_epoch = recovery_epoch + 1,
+            security_event_sequence = security_event_sequence + 1
+        WHERE id = $1
+        RETURNING password_generation, recovery_epoch, security_event_sequence
+    ),
+    superseded AS (
+        UPDATE recovery_credentials
+        SET
+            status = 'superseded',
+            superseded_at = clock_timestamp()
+        FROM participants, rotated
+        WHERE participants.room_id = $1
+          AND recovery_credentials.participant_id = participants.id
+          AND recovery_credentials.status = 'active'
+        RETURNING recovery_credentials.id
+    ),
+    revoked AS (
+        UPDATE device_sessions
+        SET status = 'revoked'
+        FROM participants, rotated
+        WHERE participants.room_id = $1
+          AND device_sessions.participant_id = participants.id
+          AND device_sessions.status = 'active'
+          AND (NOT $5 OR device_sessions.guest_session_id <> $3)
+        RETURNING device_sessions.id, device_sessions.guest_session_id
+    ),
+    notified AS (
+        SELECT pg_notify(
+            'hogwarts_session_revoked',
+            revoked.guest_session_id::text
+        )
+        FROM revoked
+    ),
+    revoked_count AS (
+        SELECT COUNT(*) AS value
+        FROM revoked
+    ),
+    inserted_event AS (
+        INSERT INTO identity_security_events (
+            room_id,
+            sequence,
+            event_type,
+            actor_participant_id,
+            password_generation,
+            recovery_epoch,
+            revoked_session_count,
+            current_session_preserved
+        )
+        SELECT
+            $1,
+            rotated.security_event_sequence,
+            'room_protected',
+            $2,
+            rotated.password_generation,
+            rotated.recovery_epoch,
+            revoked_count.value,
+            $5
+        FROM rotated, revoked_count
+        RETURNING
+            sequence,
+            actor_participant_id,
+            password_generation,
+            recovery_epoch,
+            revoked_session_count,
+            current_session_preserved,
+            created_at
+    ),
+    inserted_recipients AS (
+        INSERT INTO identity_security_event_recipients (
+            room_id,
+            security_event_sequence,
+            participant_id
+        )
+        SELECT $1, inserted_event.sequence, participants.id
+        FROM inserted_event
+        JOIN participants ON participants.room_id = $1
+        RETURNING participant_id
+    )
+    SELECT
+        inserted_event.sequence,
+        actors.position AS actor_position,
+        inserted_event.password_generation,
+        inserted_event.recovery_epoch,
+        inserted_event.revoked_session_count,
+        inserted_event.current_session_preserved,
+        replace(
+            to_char(inserted_event.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+            ' ',
+            'T'
+        ) || 'Z' AS occurred_at
+    FROM inserted_event
+    JOIN participants AS actors ON actors.id = inserted_event.actor_participant_id
+    WHERE EXISTS (SELECT 1 FROM inserted_recipients)
+      AND (SELECT COUNT(*) FROM notified) = inserted_event.revoked_session_count
+    ";
 
 pub(super) struct NewRoomJoin<'a> {
     pub(super) room_id: Uuid,
@@ -100,6 +206,625 @@ pub(super) async fn selected_room_heroes(
     .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
 }
 
+pub(super) async fn active_device_sessions(
+    database: &PgPool,
+    participant_id: Uuid,
+) -> Result<Vec<StoredDeviceSession>, ApiError> {
+    sqlx::query_as::<_, StoredDeviceSession>(
+        r#"
+        SELECT
+            device_sessions.id,
+            device_sessions.guest_session_id,
+            device_sessions.slot,
+            to_char(
+                device_sessions.created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            ) AS created_at
+        FROM device_sessions
+        JOIN guest_sessions ON guest_sessions.id = device_sessions.guest_session_id
+        WHERE device_sessions.participant_id = $1
+          AND device_sessions.status = 'active'
+          AND guest_sessions.expires_at > clock_timestamp()
+        ORDER BY device_sessions.slot
+        "#,
+    )
+    .bind(participant_id)
+    .fetch_all(database)
+    .await
+    .map_err(|error| ApiError::internal_with("list active device sessions", error))
+}
+
+pub(super) async fn lock_game_access_root(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant_id: Uuid,
+) -> Result<Option<Uuid>, ApiError> {
+    // Serialize with game creation before discovering the game root. NO KEY UPDATE
+    // lets an existing command finish its room foreign-key checks while we wait
+    // for the game lock; taking FOR UPDATE here would invert that lock dependency.
+    sqlx::query(
+        r"
+        SELECT rooms.id
+        FROM rooms
+        JOIN participants ON participants.room_id = rooms.id
+        WHERE participants.id = $1
+        FOR NO KEY UPDATE OF rooms
+        ",
+    )
+    .bind(participant_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("lock room access root", error))?;
+    sqlx::query_scalar::<_, Uuid>(
+        r"
+        SELECT games.id
+        FROM games
+        JOIN participants ON participants.room_id = games.room_id
+        WHERE participants.id = $1
+        FOR UPDATE OF games
+        ",
+    )
+    .bind(participant_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("lock game access root", error))
+}
+
+pub(super) async fn load_device_session_revocation(
+    database: &PgPool,
+    idempotency_key: &str,
+) -> Result<Option<StoredDeviceSessionRevocation>, ApiError> {
+    device_session_revocation_query(idempotency_key)
+        .fetch_optional(database)
+        .await
+        .map_err(|error| ApiError::internal_with("load device session revocation", error))
+}
+
+pub(super) async fn load_device_session_revocation_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+) -> Result<Option<StoredDeviceSessionRevocation>, ApiError> {
+    device_session_revocation_query(idempotency_key)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| ApiError::internal_with("load device session revocation", error))
+}
+
+fn device_session_revocation_query(
+    idempotency_key: &str,
+) -> sqlx::query::QueryAs<'_, Postgres, StoredDeviceSessionRevocation, sqlx::postgres::PgArguments>
+{
+    sqlx::query_as::<_, StoredDeviceSessionRevocation>(
+        r"
+        SELECT
+            requests.actor_participant_id,
+            requests.target_device_session_id,
+            target_sessions.guest_session_id AS target_guest_session_id,
+            requests.request_fingerprint,
+            events.sequence,
+            actors.position AS actor_position,
+            targets.position AS target_position,
+            events.session_slot,
+            replace(
+                to_char(events.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM device_session_revocation_requests AS requests
+        JOIN identity_security_events AS events
+          ON events.room_id = requests.room_id
+         AND events.sequence = requests.security_event_sequence
+        JOIN device_sessions AS target_sessions
+          ON target_sessions.id = requests.target_device_session_id
+        JOIN participants AS actors ON actors.id = events.actor_participant_id
+        JOIN participants AS targets ON targets.id = events.target_participant_id
+        WHERE requests.idempotency_key = $1
+          AND requests.completed_at IS NOT NULL
+        ",
+    )
+    .bind(idempotency_key)
+}
+
+pub(super) async fn claim_device_session_revocation(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    target_device_session_id: Uuid,
+    request_fingerprint: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r"
+        INSERT INTO device_session_revocation_requests (
+            idempotency_key,
+            room_id,
+            actor_participant_id,
+            target_device_session_id,
+            request_fingerprint
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(room_id)
+    .bind(actor_participant_id)
+    .bind(target_device_session_id)
+    .bind(request_fingerprint)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map(|claim| claim.is_some())
+    .map_err(|error| ApiError::internal_with("claim device session revocation", error))
+}
+
+pub(super) async fn revoke_device_session(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    target_device_session_id: Uuid,
+) -> Result<StoredDeviceSessionSecurityEvent, ApiError> {
+    sqlx::query_as::<_, StoredDeviceSessionSecurityEvent>(
+        r"
+        WITH revoked AS (
+            UPDATE device_sessions
+            SET status = 'revoked'
+            WHERE id = $3
+              AND participant_id = $2
+              AND status = 'active'
+            RETURNING slot, guest_session_id
+        ),
+        notified AS (
+            SELECT pg_notify(
+                'hogwarts_session_revoked',
+                revoked.guest_session_id::text
+            )
+            FROM revoked
+        ),
+        advanced_room AS (
+            UPDATE rooms
+            SET security_event_sequence = security_event_sequence + 1
+            WHERE id = $1
+              AND EXISTS (SELECT 1 FROM revoked)
+            RETURNING security_event_sequence
+        ),
+        inserted_event AS (
+            INSERT INTO identity_security_events (
+                room_id,
+                sequence,
+                event_type,
+                actor_participant_id,
+                target_participant_id,
+                session_slot
+            )
+            SELECT
+                $1,
+                advanced_room.security_event_sequence,
+                'session_revoked',
+                $2,
+                $2,
+                revoked.slot
+            FROM advanced_room, revoked
+            RETURNING sequence, actor_participant_id, target_participant_id, session_slot, created_at
+        ),
+        inserted_recipient AS (
+            INSERT INTO identity_security_event_recipients (
+                room_id,
+                security_event_sequence,
+                participant_id
+            )
+            SELECT $1, inserted_event.sequence, $2
+            FROM inserted_event
+            RETURNING participant_id
+        )
+        SELECT
+            inserted_event.sequence,
+            actors.position AS actor_position,
+            targets.position AS target_position,
+            inserted_event.session_slot,
+            replace(
+                to_char(inserted_event.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM inserted_event
+        JOIN participants AS actors ON actors.id = inserted_event.actor_participant_id
+        JOIN participants AS targets ON targets.id = inserted_event.target_participant_id
+        WHERE EXISTS (SELECT 1 FROM inserted_recipient)
+          AND (SELECT COUNT(*) FROM notified) = 1
+        ",
+    )
+    .bind(room_id)
+    .bind(actor_participant_id)
+    .bind(target_device_session_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("revoke device session", error))?
+    .ok_or_else(ApiError::session_invalid)
+}
+
+pub(super) async fn complete_device_session_revocation(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    event: &StoredDeviceSessionSecurityEvent,
+) -> Result<(), ApiError> {
+    let completed = sqlx::query(
+        r"
+        UPDATE device_session_revocation_requests
+        SET
+            revoked_session_slot = $2,
+            security_event_sequence = $3,
+            completed_at = clock_timestamp()
+        WHERE idempotency_key = $1
+          AND completed_at IS NULL
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(event.session_slot)
+    .bind(event.sequence)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("complete device session revocation", error))?;
+    if completed.rows_affected() != 1 {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
+pub(super) async fn load_participant_protection(
+    database: &PgPool,
+    idempotency_key: &str,
+) -> Result<Option<StoredParticipantProtection>, ApiError> {
+    participant_protection_query(idempotency_key)
+        .fetch_optional(database)
+        .await
+        .map_err(|error| ApiError::internal_with("load participant protection", error))
+}
+
+pub(super) async fn load_participant_protection_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+) -> Result<Option<StoredParticipantProtection>, ApiError> {
+    participant_protection_query(idempotency_key)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| ApiError::internal_with("load participant protection", error))
+}
+
+fn participant_protection_query(
+    idempotency_key: &str,
+) -> sqlx::query::QueryAs<'_, Postgres, StoredParticipantProtection, sqlx::postgres::PgArguments> {
+    sqlx::query_as::<_, StoredParticipantProtection>(
+        r"
+        SELECT
+            requests.actor_participant_id,
+            requests.actor_guest_session_id,
+            requests.request_fingerprint,
+            events.sequence,
+            actors.position AS actor_position,
+            targets.position AS target_position,
+            targets.display_name,
+            events.revoked_session_count,
+            events.recovery_generation,
+            replace(
+                to_char(events.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM participant_protection_requests AS requests
+        JOIN identity_security_events AS events
+          ON events.room_id = requests.room_id
+         AND events.sequence = requests.security_event_sequence
+        JOIN participants AS actors ON actors.id = events.actor_participant_id
+        JOIN participants AS targets ON targets.id = events.target_participant_id
+        WHERE requests.idempotency_key = $1
+          AND requests.completed_at IS NOT NULL
+        ",
+    )
+    .bind(idempotency_key)
+}
+
+pub(super) async fn claim_participant_protection(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    room_id: Uuid,
+    actor: AuthenticatedSession,
+    request_fingerprint: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r"
+        INSERT INTO participant_protection_requests (
+            idempotency_key,
+            room_id,
+            actor_participant_id,
+            actor_guest_session_id,
+            request_fingerprint
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(room_id)
+    .bind(actor.participant_id)
+    .bind(actor.session_id)
+    .bind(request_fingerprint)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map(|claim| claim.is_some())
+    .map_err(|error| ApiError::internal_with("claim participant protection", error))
+}
+
+pub(super) async fn protect_participant_access(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    participant: &StoredRecoveryParticipant,
+    expected_session_count: i64,
+) -> Result<StoredParticipantProtectionEvent, ApiError> {
+    sqlx::query_as::<_, StoredParticipantProtectionEvent>(
+        r"
+        WITH revoked AS (
+            UPDATE device_sessions
+            SET status = 'revoked'
+            WHERE participant_id = $2
+              AND status = 'active'
+            RETURNING id, guest_session_id
+        ),
+        notified AS (
+            SELECT pg_notify(
+                'hogwarts_session_revoked',
+                revoked.guest_session_id::text
+            )
+            FROM revoked
+        ),
+        revoked_count AS (
+            SELECT COUNT(*) AS value
+            FROM revoked
+            HAVING COUNT(*) = $4
+               AND COUNT(*) > 0
+        ),
+        advanced_room AS (
+            UPDATE rooms
+            SET security_event_sequence = security_event_sequence + 1
+            WHERE id = $1
+              AND EXISTS (SELECT 1 FROM revoked_count)
+            RETURNING security_event_sequence
+        ),
+        inserted_event AS (
+            INSERT INTO identity_security_events (
+                room_id,
+                sequence,
+                event_type,
+                actor_participant_id,
+                target_participant_id,
+                recovery_generation,
+                revoked_session_count
+            )
+            SELECT
+                $1,
+                advanced_room.security_event_sequence,
+                'participant_protected',
+                $2,
+                $2,
+                $3,
+                revoked_count.value
+            FROM advanced_room, revoked_count
+            RETURNING
+                sequence,
+                actor_participant_id,
+                target_participant_id,
+                recovery_generation,
+                revoked_session_count,
+                created_at
+        ),
+        inserted_recipients AS (
+            INSERT INTO identity_security_event_recipients (
+                room_id,
+                security_event_sequence,
+                participant_id
+            )
+            SELECT $1, inserted_event.sequence, participants.id
+            FROM inserted_event
+            JOIN participants ON participants.room_id = $1
+            RETURNING participant_id
+        )
+        SELECT
+            inserted_event.sequence,
+            actors.position AS actor_position,
+            targets.position AS target_position,
+            targets.display_name,
+            inserted_event.revoked_session_count,
+            inserted_event.recovery_generation,
+            replace(
+                to_char(inserted_event.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM inserted_event
+        JOIN participants AS actors ON actors.id = inserted_event.actor_participant_id
+        JOIN participants AS targets ON targets.id = inserted_event.target_participant_id
+        WHERE EXISTS (SELECT 1 FROM inserted_recipients)
+          AND (SELECT COUNT(*) FROM notified) = inserted_event.revoked_session_count
+        ",
+    )
+    .bind(room_id)
+    .bind(participant.participant_id)
+    .bind(participant.recovery_generation)
+    .bind(expected_session_count)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("protect participant access", error))?
+    .ok_or_else(ApiError::internal)
+}
+
+pub(super) async fn complete_participant_protection(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    event: &StoredParticipantProtectionEvent,
+) -> Result<(), ApiError> {
+    let completed = sqlx::query(
+        r"
+        UPDATE participant_protection_requests
+        SET
+            recovery_generation = $2,
+            revoked_session_count = $3,
+            security_event_sequence = $4,
+            completed_at = clock_timestamp()
+        WHERE idempotency_key = $1
+          AND completed_at IS NULL
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(event.recovery_generation)
+    .bind(event.revoked_session_count)
+    .bind(event.sequence)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("complete participant protection", error))?;
+    if completed.rows_affected() != 1 {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
+pub(super) async fn load_room_protection(
+    database: &PgPool,
+    idempotency_key: &str,
+) -> Result<Option<StoredRoomProtection>, ApiError> {
+    room_protection_query(idempotency_key)
+        .fetch_optional(database)
+        .await
+        .map_err(|error| ApiError::internal_with("load room protection", error))
+}
+
+pub(super) async fn load_room_protection_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+) -> Result<Option<StoredRoomProtection>, ApiError> {
+    room_protection_query(idempotency_key)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| ApiError::internal_with("load room protection", error))
+}
+
+fn room_protection_query(
+    idempotency_key: &str,
+) -> sqlx::query::QueryAs<'_, Postgres, StoredRoomProtection, sqlx::postgres::PgArguments> {
+    sqlx::query_as::<_, StoredRoomProtection>(
+        r"
+        SELECT
+            requests.actor_participant_id,
+            requests.actor_guest_session_id,
+            requests.request_fingerprint,
+            events.sequence,
+            actors.position AS actor_position,
+            events.password_generation,
+            events.recovery_epoch,
+            events.revoked_session_count,
+            events.current_session_preserved,
+            replace(
+                to_char(events.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM room_protection_requests AS requests
+        JOIN identity_security_events AS events
+          ON events.room_id = requests.room_id
+         AND events.sequence = requests.security_event_sequence
+        JOIN participants AS actors ON actors.id = events.actor_participant_id
+        WHERE requests.idempotency_key = $1
+          AND requests.completed_at IS NOT NULL
+        ",
+    )
+    .bind(idempotency_key)
+}
+
+pub(super) async fn claim_room_protection(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    room_id: Uuid,
+    actor: AuthenticatedSession,
+    request_fingerprint: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r"
+        INSERT INTO room_protection_requests (
+            idempotency_key,
+            room_id,
+            actor_participant_id,
+            actor_guest_session_id,
+            request_fingerprint
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(room_id)
+    .bind(actor.participant_id)
+    .bind(actor.session_id)
+    .bind(request_fingerprint)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map(|claim| claim.is_some())
+    .map_err(|error| ApiError::internal_with("claim room protection", error))
+}
+
+pub(super) async fn protect_room_access(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    actor_guest_session_id: Uuid,
+    new_password_hash: &str,
+    preserve_current_session: bool,
+) -> Result<StoredRoomProtectionEvent, ApiError> {
+    sqlx::query_as::<_, StoredRoomProtectionEvent>(PROTECT_ROOM_ACCESS_SQL)
+        .bind(room_id)
+        .bind(actor_participant_id)
+        .bind(actor_guest_session_id)
+        .bind(new_password_hash)
+        .bind(preserve_current_session)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| ApiError::internal_with("protect room access", error))?
+        .ok_or_else(ApiError::internal)
+}
+
+pub(super) async fn complete_room_protection(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    event: &StoredRoomProtectionEvent,
+) -> Result<(), ApiError> {
+    let completed = sqlx::query(
+        r"
+        UPDATE room_protection_requests
+        SET
+            password_generation = $2,
+            recovery_epoch = $3,
+            revoked_session_count = $4,
+            current_session_preserved = $5,
+            security_event_sequence = $6,
+            completed_at = clock_timestamp()
+        WHERE idempotency_key = $1
+          AND completed_at IS NULL
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(event.password_generation)
+    .bind(event.recovery_epoch)
+    .bind(event.revoked_session_count)
+    .bind(event.current_session_preserved)
+    .bind(event.sequence)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("complete room protection", error))?;
+    if completed.rows_affected() != 1 {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
 pub(super) async fn load_recovery_password_authority(
     database: &PgPool,
     participant_id: Uuid,
@@ -111,7 +836,8 @@ pub(super) async fn load_recovery_password_authority(
             participants.id AS participant_id,
             participants.role,
             rooms.recovery_password_hash,
-            rooms.password_generation
+            rooms.password_generation,
+            rooms.recovery_epoch
         FROM participants
         JOIN rooms ON rooms.id = participants.room_id
         LEFT JOIN games ON games.room_id = rooms.id
@@ -137,7 +863,8 @@ pub(super) async fn lock_recovery_password_authority(
             participants.id AS participant_id,
             participants.role,
             rooms.recovery_password_hash,
-            rooms.password_generation
+            rooms.password_generation,
+            rooms.recovery_epoch
         FROM participants
         JOIN rooms ON rooms.id = participants.room_id
         LEFT JOIN games ON games.room_id = rooms.id
@@ -330,19 +1057,6 @@ pub(super) async fn rotate_recovery_password(
     .fetch_one(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("rotate recovery password", error))
-}
-
-pub(super) async fn load_recovery_credential_regeneration(
-    database: &PgPool,
-    idempotency_key: &str,
-) -> Result<Option<StoredRecoveryCredentialRegeneration>, ApiError> {
-    sqlx::query_as::<_, StoredRecoveryCredentialRegeneration>(
-        RECOVERY_CREDENTIAL_REGENERATION_SELECT,
-    )
-    .bind(idempotency_key)
-    .fetch_optional(database)
-    .await
-    .map_err(|error| ApiError::internal_with("load recovery credential regeneration", error))
 }
 
 pub(super) async fn load_recovery_credential_regeneration_in_transaction(
@@ -1226,6 +1940,7 @@ pub(super) async fn lock_active_device_sessions(
         r#"
         SELECT
             device_sessions.id,
+            device_sessions.guest_session_id,
             device_sessions.slot,
             to_char(
                 device_sessions.created_at AT TIME ZONE 'UTC',
@@ -1347,23 +2062,27 @@ async fn replace_device_session(
     participant_id: Uuid,
     device_session_id: Uuid,
 ) -> Result<(), ApiError> {
-    let replaced = sqlx::query(
+    let replaced_session_id = sqlx::query_scalar::<_, Uuid>(
         r"
         UPDATE device_sessions
         SET status = 'replaced'
         WHERE id = $1
           AND participant_id = $2
           AND status = 'active'
+        RETURNING guest_session_id
         ",
     )
     .bind(device_session_id)
     .bind(participant_id)
-    .execute(&mut **transaction)
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("replace participant device session", error))?;
-    if replaced.rows_affected() != 1 {
-        return Err(ApiError::recovery_failed());
-    }
+    let replaced_session_id = replaced_session_id.ok_or_else(ApiError::recovery_failed)?;
+    sqlx::query("SELECT pg_notify('hogwarts_session_revoked', $1)")
+        .bind(replaced_session_id.to_string())
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| ApiError::internal_with("publish replaced guest session", error))?;
     Ok(())
 }
 

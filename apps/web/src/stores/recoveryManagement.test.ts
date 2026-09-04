@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRecoveryManagementStore } from './recoveryManagement'
+import { useRoomAccessStore } from './roomAccess'
 import { useSecuritySyncStore } from './securitySync'
 
 function regeneratedResponse(delivery: 'direct' | 'host_assisted') {
@@ -42,6 +43,33 @@ describe('recovery credential management', () => {
     useSecuritySyncStore().disconnect()
     vi.unstubAllGlobals()
   })
+
+  it.each(['direct', 'host_assisted'] as const)(
+    'discards a late %s credential after session invalidation',
+    async (delivery) => {
+      const response = Promise.withResolvers<Response>()
+      vi.stubGlobal('fetch', vi.fn().mockReturnValue(response.promise))
+      const recovery = useRecoveryManagementStore()
+      const operation = delivery === 'direct'
+        ? recovery.regenerateOwnCredential()
+        : recovery.regenerateAssistedCredential(2)
+
+      useRoomAccessStore().clearAuthenticatedSession()
+      recovery.$reset()
+      response.resolve(new Response(JSON.stringify(regeneratedResponse(delivery)), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }))
+
+      expect(await operation).toBe(false)
+      expect(recovery.issuedCredential).toBeNull()
+      expect(recovery.confirmation).toBeNull()
+      expect(recovery.pendingOperation).toBeNull()
+      expect(recovery.status).toBe('idle')
+      expect(localStorage.length).toBe(0)
+      expect(sessionStorage.length).toBe(0)
+    },
+  )
 
   it('retries direct delivery with one idempotency key and keeps the token only in memory', async () => {
     const request = vi

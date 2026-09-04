@@ -17,6 +17,7 @@ import {
   type RotateRecoveryPasswordRequest,
   type RotateRecoveryPasswordResponse,
 } from '../contracts/identity-access.generated'
+import { useRoomAccessStore } from './roomAccess'
 import { useSecuritySyncStore } from './securitySync'
 
 type RecoveryManagementStatus =
@@ -139,6 +140,8 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
         return false
       }
       const pending = this.beginOperation('rotate_password')
+      const roomAccess = useRoomAccessStore()
+      const sessionGeneration = roomAccess.sessionGeneration
       this.status = 'rotating_password'
       try {
         const { body, response } = await requestJson('/api/session/recovery-password', {
@@ -150,6 +153,9 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
           },
           method: 'PUT',
         })
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         if (
           response.ok &&
           isRotateRecoveryPasswordResponse(body) &&
@@ -164,6 +170,9 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
         }
         this.finishFailure(body)
       } catch (error) {
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         this.finishTransportFailure(error)
       }
       return false
@@ -173,6 +182,8 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
         return false
       }
       const pending = this.beginOperation('regenerate_directly')
+      const roomAccess = useRoomAccessStore()
+      const sessionGeneration = roomAccess.sessionGeneration
       this.status = 'regenerating_directly'
       const input = {} satisfies RegenerateOwnRecoveryCredentialRequest
       try {
@@ -185,6 +196,9 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
           },
           method: 'POST',
         })
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         if (
           response.ok &&
           isDirectRecoveryCredentialResponse(body) &&
@@ -211,6 +225,9 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
         }
         this.finishFailure(body)
       } catch (error) {
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         this.finishTransportFailure(error)
       }
       return false
@@ -220,6 +237,8 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
         return false
       }
       const pending = this.beginOperation('regenerate_with_assistance', targetPosition)
+      const roomAccess = useRoomAccessStore()
+      const sessionGeneration = roomAccess.sessionGeneration
       this.status = 'regenerating_with_assistance'
       const input = {
         host_assistance_risk_acknowledged: true,
@@ -237,6 +256,9 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
             method: 'POST',
           },
         )
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         if (
           response.ok &&
           isAssistedRecoveryCredentialResponse(body) &&
@@ -263,6 +285,9 @@ export const useRecoveryManagementStore = defineStore('recoveryManagement', {
         }
         this.finishFailure(body)
       } catch (error) {
+        if (roomAccess.sessionGeneration !== sessionGeneration) {
+          return false
+        }
         this.finishTransportFailure(error)
       }
       return false

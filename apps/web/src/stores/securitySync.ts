@@ -37,12 +37,15 @@ function eventsFitEnvelope(
 ): boolean {
   let previous = fromCursor
   for (const event of events) {
-    const deliveryIsCoherent =
-      event.type === 'recovery_password_rotated' ||
-      (event.delivery === 'direct'
-        ? event.actor_position === event.target_position
-        : event.actor_position !== event.target_position)
-    if (!deliveryIsCoherent || event.cursor <= previous || event.cursor > cursor) {
+    const eventIsCoherent =
+      event.type === 'recovery_credential_regenerated'
+        ? event.delivery === 'direct'
+          ? event.actor_position === event.target_position
+          : event.actor_position !== event.target_position
+        : event.type === 'session_revoked' || event.type === 'participant_protected'
+          ? event.actor_position === event.target_position
+          : true
+    if (!eventIsCoherent || event.cursor <= previous || event.cursor > cursor) {
       return false
     }
     previous = event.cursor
@@ -54,6 +57,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
   const status = ref<SecuritySyncStatus>('disconnected')
   const cursor = ref(0)
   const notices = ref<SecurityNotice[]>([])
+  const sessionInvalidated = ref(false)
   const latestPasswordRotationCursor = ref(0)
   const latestCredentialCursorByPosition = ref<Record<number, number>>({})
   const latestNotice = computed(() => notices.value.at(-1) ?? null)
@@ -134,12 +138,15 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
     const byCursor = new Map(notices.value.map((notice) => [notice.cursor, notice]))
     for (const event of events) {
       byCursor.set(event.cursor, event)
-      if (event.type === 'recovery_password_rotated') {
+      if (event.type === 'recovery_password_rotated' || event.type === 'room_protected') {
         latestPasswordRotationCursor.value = Math.max(
           latestPasswordRotationCursor.value,
           event.cursor,
         )
-      } else {
+      } else if (
+        event.type === 'recovery_credential_regenerated' ||
+        event.type === 'participant_protected'
+      ) {
         latestCredentialCursorByPosition.value = {
           ...latestCredentialCursorByPosition.value,
           [event.target_position]: Math.max(
@@ -279,6 +286,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
       }
       if (event.code === 1008) {
         status.value = 'failed'
+        sessionInvalidated.value = true
         return
       }
       status.value = 'reconnecting'
@@ -311,6 +319,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
     notices.value = []
     latestPasswordRotationCursor.value = 0
     latestCredentialCursorByPosition.value = {}
+    sessionInvalidated.value = false
     reconnectAttempt = 0
   }
 
@@ -335,6 +344,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
     notices,
     receive,
     retry,
+    sessionInvalidated,
     status,
   }
 })

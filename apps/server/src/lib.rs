@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, OnceLock, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -19,7 +19,7 @@ use axum::{
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
 use sha2::Sha256;
-use sqlx::{PgPool, migrate::Migrator};
+use sqlx::{PgPool, migrate::Migrator, postgres::PgListener};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, watch};
 use tracing::Instrument;
 use uuid::Uuid;
@@ -35,6 +35,7 @@ mod session_events;
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
 const MAX_CONCURRENT_RECOVERY_PASSWORD_CHECKS: usize = 4;
+const SESSION_REVOCATION_NOTIFICATION_CHANNEL: &str = "hogwarts_session_revoked";
 
 tokio::task_local! {
     static REQUEST_CORRELATION_ID: Uuid;
@@ -50,6 +51,8 @@ pub struct AppState {
     game_synchronization_fanout: GameSignalFanout,
     game_presence_fanout: GameSignalFanout,
     security_event_fanout: GameSignalFanout,
+    session_revocation_fanout: GameSignalFanout,
+    session_revocation_listener: Arc<OnceLock<AbortOnDrop>>,
     session_token_key: Arc<[u8; 32]>,
     recovery_token_key: Arc<[u8; 32]>,
     recovery_password_checks: Arc<Semaphore>,
@@ -59,6 +62,14 @@ pub struct AppState {
 #[derive(Clone, Default)]
 struct GameSignalFanout {
     channels: Arc<Mutex<HashMap<Uuid, broadcast::Sender<()>>>>,
+}
+
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl GameSignalFanout {
@@ -133,6 +144,8 @@ impl AppState {
             game_synchronization_fanout: GameSignalFanout::default(),
             game_presence_fanout: GameSignalFanout::default(),
             security_event_fanout: GameSignalFanout::default(),
+            session_revocation_fanout: GameSignalFanout::default(),
+            session_revocation_listener: Arc::new(OnceLock::new()),
             session_token_key: Arc::new(session_token_key),
             recovery_token_key: Arc::new(recovery_token_key),
             recovery_password_checks: Arc::new(Semaphore::new(
@@ -213,6 +226,54 @@ impl AppState {
 
     fn prune_security_event_channel(&self, room_id: Uuid) {
         self.security_event_fanout.prune(room_id);
+    }
+
+    fn subscribe_to_session_revocation(&self, session_id: Uuid) -> broadcast::Receiver<()> {
+        self.session_revocation_fanout.subscribe(session_id)
+    }
+
+    fn prune_session_revocation_channel(&self, session_id: Uuid) {
+        self.session_revocation_fanout.prune(session_id);
+    }
+
+    async fn start_session_revocation_listener(&self) -> Result<(), sqlx::Error> {
+        if self.session_revocation_listener.get().is_some() {
+            return Ok(());
+        }
+        let mut listener = PgListener::connect_with(&self.database).await?;
+        listener
+            .listen(SESSION_REVOCATION_NOTIFICATION_CHANNEL)
+            .await?;
+        let fanout = self.session_revocation_fanout.clone();
+        let mut shutdown = self.subscribe_to_shutdown();
+        let task = AbortOnDrop(tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    notification = listener.recv() => {
+                        match notification {
+                            Ok(notification) => {
+                                if let Ok(session_id) = Uuid::parse_str(notification.payload()) {
+                                    fanout.signal(session_id);
+                                } else {
+                                    tracing::warn!("ignored malformed session revocation notification");
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(error = %error, "session revocation listener failed");
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
+                        }
+                    }
+                    changed = shutdown.changed() => {
+                        if changed.is_err() || *shutdown.borrow() {
+                            return;
+                        }
+                    }
+                }
+            }
+        }));
+        let _ = self.session_revocation_listener.set(task);
+        Ok(())
     }
 
     fn idempotent_session_token(
@@ -384,6 +445,7 @@ pub(crate) fn current_correlation_id() -> Uuid {
 pub enum InitializationError {
     Migration(sqlx::migrate::MigrateError),
     Content(sqlx::Error),
+    SessionRevocationListener(sqlx::Error),
 }
 
 impl fmt::Display for InitializationError {
@@ -391,6 +453,9 @@ impl fmt::Display for InitializationError {
         match self {
             Self::Migration(error) => write!(formatter, "database migration failed: {error}"),
             Self::Content(error) => write!(formatter, "content publication failed: {error}"),
+            Self::SessionRevocationListener(error) => {
+                write!(formatter, "session revocation listener failed: {error}")
+            }
         }
     }
 }
@@ -399,7 +464,7 @@ impl Error for InitializationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Migration(error) => Some(error),
-            Self::Content(error) => Some(error),
+            Self::Content(error) | Self::SessionRevocationListener(error) => Some(error),
         }
     }
 }
@@ -420,6 +485,10 @@ pub async fn initialize(state: &AppState) -> Result<(), InitializationError> {
         .publish(&state.database)
         .await
         .map_err(InitializationError::Content)?;
+    state
+        .start_session_revocation_listener()
+        .await
+        .map_err(InitializationError::SessionRevocationListener)?;
     state.mark_started();
     Ok(())
 }

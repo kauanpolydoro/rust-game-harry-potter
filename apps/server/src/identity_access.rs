@@ -15,7 +15,10 @@ use crate::{
     content_catalog::ContentManifestOption,
     http_support::{ApiError, idempotency_key, no_store_json},
     match_runtime,
-    session::authenticated_participant,
+    session::{
+        AuthenticatedSession, authenticated_participant, authenticated_session, presented_session,
+        session_is_active, session_is_active_in_transaction,
+    },
 };
 
 mod credentials;
@@ -33,6 +36,13 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/rooms/{room_code}", get(find_room))
         .route("/api/rooms/{room_code}/participants", post(join_room))
         .route("/api/session/recover", post(recover_participation))
+        .route("/api/session/device-sessions", get(list_device_sessions))
+        .route(
+            "/api/session/device-sessions/{session_id}/revocation",
+            put(revoke_device_session),
+        )
+        .route("/api/session/protection", put(protect_participant))
+        .route("/api/rooms/current/protection", put(protect_room))
         .route(
             "/api/session/recovery-password",
             put(rotate_recovery_password),
@@ -102,6 +112,25 @@ struct RegenerateOwnRecoveryCredentialRequest {}
 #[serde(deny_unknown_fields)]
 struct RegenerateAssistedRecoveryCredentialRequest {
     host_assistance_risk_acknowledged: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevokeDeviceSessionRequest {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtectParticipantRequest {
+    protection_confirmed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtectRoomRequest {
+    current_recovery_password: String,
+    new_recovery_password: String,
+    preserve_current_session: bool,
+    protection_confirmed: bool,
 }
 
 #[derive(Serialize)]
@@ -175,6 +204,90 @@ struct RecoveryCredentialSecurityEvent {
     target_position: i16,
     delivery: &'static str,
     recovery_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(Serialize)]
+struct DeviceSessionsResponse {
+    sessions: Vec<DeviceSessionSummary>,
+}
+
+#[derive(Serialize)]
+struct DeviceSessionSummary {
+    id: String,
+    label: String,
+    created_at: String,
+    current: bool,
+}
+
+#[derive(Serialize)]
+struct RevokedDeviceSessionSummary {
+    id: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct RevokeDeviceSessionResponse {
+    status: &'static str,
+    revoked_session: RevokedDeviceSessionSummary,
+    security_event: DeviceSessionSecurityEvent,
+}
+
+#[derive(Serialize)]
+struct DeviceSessionSecurityEvent {
+    event_version: u16,
+    cursor: i64,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    actor_position: i16,
+    target_position: i16,
+    session_label: String,
+    occurred_at: String,
+}
+
+#[derive(Serialize)]
+struct ProtectParticipantResponse {
+    status: &'static str,
+    participant: RecoveryParticipant,
+    revoked_sessions: i64,
+    recovery_generation: i64,
+    security_event: ParticipantProtectionSecurityEvent,
+}
+
+#[derive(Serialize)]
+struct ParticipantProtectionSecurityEvent {
+    event_version: u16,
+    cursor: i64,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    actor_position: i16,
+    target_position: i16,
+    revoked_sessions: i64,
+    recovery_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(Serialize)]
+struct ProtectRoomResponse {
+    status: &'static str,
+    password_generation: i64,
+    recovery_epoch: i64,
+    revoked_sessions: i64,
+    current_session_preserved: bool,
+    security_event: RoomProtectionSecurityEvent,
+}
+
+#[derive(Serialize)]
+struct RoomProtectionSecurityEvent {
+    event_version: u16,
+    cursor: i64,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    actor_position: i16,
+    password_generation: i64,
+    recovery_epoch: i64,
+    revoked_sessions: i64,
+    current_session_preserved: bool,
     occurred_at: String,
 }
 
@@ -259,6 +372,7 @@ struct StoredRecoveryPasswordAuthority {
     role: String,
     recovery_password_hash: String,
     password_generation: i64,
+    recovery_epoch: i64,
 }
 
 #[derive(FromRow)]
@@ -312,7 +426,7 @@ struct StoredRecoveryCredentialRegeneration {
 
 struct RecoveryCredentialRegenerationCommand {
     idempotency_key: String,
-    actor_participant_id: Uuid,
+    actor: AuthenticatedSession,
     target_position: Option<i16>,
     delivery: &'static str,
     request_fingerprint: String,
@@ -321,8 +435,81 @@ struct RecoveryCredentialRegenerationCommand {
 #[derive(FromRow)]
 struct StoredDeviceSession {
     id: Uuid,
+    guest_session_id: Uuid,
     slot: i16,
     created_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredDeviceSessionRevocation {
+    actor_participant_id: Uuid,
+    target_device_session_id: Uuid,
+    target_guest_session_id: Uuid,
+    request_fingerprint: String,
+    sequence: i64,
+    actor_position: i16,
+    target_position: i16,
+    session_slot: i16,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredDeviceSessionSecurityEvent {
+    sequence: i64,
+    actor_position: i16,
+    target_position: i16,
+    session_slot: i16,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredParticipantProtection {
+    actor_participant_id: Uuid,
+    actor_guest_session_id: Uuid,
+    request_fingerprint: String,
+    sequence: i64,
+    actor_position: i16,
+    target_position: i16,
+    display_name: String,
+    revoked_session_count: i64,
+    recovery_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredParticipantProtectionEvent {
+    sequence: i64,
+    actor_position: i16,
+    target_position: i16,
+    display_name: String,
+    revoked_session_count: i64,
+    recovery_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredRoomProtection {
+    actor_participant_id: Uuid,
+    actor_guest_session_id: Uuid,
+    request_fingerprint: String,
+    sequence: i64,
+    actor_position: i16,
+    password_generation: i64,
+    recovery_epoch: i64,
+    revoked_session_count: i64,
+    current_session_preserved: bool,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredRoomProtectionEvent {
+    sequence: i64,
+    actor_position: i16,
+    password_generation: i64,
+    recovery_epoch: i64,
+    revoked_session_count: i64,
+    current_session_preserved: bool,
+    occurred_at: String,
 }
 
 struct AuthenticatedRecovery {
@@ -567,6 +754,530 @@ async fn join_room(
     room_joined_response(&state, stored, &idempotency_key).await
 }
 
+async fn list_device_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let sessions = postgres::active_device_sessions(&state.database, authenticated.participant_id)
+        .await?
+        .into_iter()
+        .map(|session| DeviceSessionSummary {
+            id: session.id.to_string(),
+            label: format!("Sessão {}", session.slot),
+            created_at: session.created_at,
+            current: session.guest_session_id == authenticated.session_id,
+        })
+        .collect();
+    Ok(no_store_json(
+        StatusCode::OK,
+        DeviceSessionsResponse { sessions },
+    ))
+}
+
+fn parse_device_session_id(session_id: &str) -> Result<Uuid, ApiError> {
+    Uuid::parse_str(session_id)
+        .ok()
+        .filter(|session_id| {
+            session_id.get_version_num() == 4 && session_id.get_variant() == Variant::RFC4122
+        })
+        .ok_or_else(ApiError::session_invalid)
+}
+
+async fn revoke_device_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    Json(_request): Json<RevokeDeviceSessionRequest>,
+) -> Result<Response, ApiError> {
+    let key = idempotency_key(&headers)?;
+    require_session_grant_key(&key)?;
+    let presented = presented_session(&state, &headers).await?;
+    let target_device_session_id = parse_device_session_id(&session_id)?;
+    let request_fingerprint = state.recovery_request_fingerprint(
+        "revoke_device_session",
+        &key,
+        &[target_device_session_id.as_bytes()],
+    );
+    if let Some(stored) = postgres::load_device_session_revocation(&state.database, &key).await? {
+        return replay_device_session_revocation(
+            stored,
+            presented,
+            target_device_session_id,
+            &request_fingerprint,
+        );
+    }
+    if !session_is_active(&state, presented).await? {
+        return Err(ApiError::session_invalid());
+    }
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|error| ApiError::internal_with("device session revocation", error))?;
+    let game_id =
+        postgres::lock_game_access_root(&mut transaction, presented.participant_id).await?;
+    let (room_id, _, _) =
+        postgres::lock_participant_room(&mut transaction, presented.participant_id)
+            .await?
+            .ok_or_else(ApiError::session_invalid)?;
+    if let Some(stored) =
+        postgres::load_device_session_revocation_in_transaction(&mut transaction, &key).await?
+    {
+        let replayed = replay_device_session_revocation(
+            stored,
+            presented,
+            target_device_session_id,
+            &request_fingerprint,
+        );
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| ApiError::internal_with("device session revocation", error))?;
+        return replayed;
+    }
+    if !session_is_active_in_transaction(&mut transaction, presented).await? {
+        return Err(ApiError::session_invalid());
+    }
+    let sessions =
+        postgres::lock_active_device_sessions(&mut transaction, presented.participant_id).await?;
+    let target_is_current = sessions
+        .iter()
+        .find(|session| session.id == target_device_session_id)
+        .map(|session| session.guest_session_id == presented.session_id)
+        .ok_or_else(ApiError::session_invalid)?;
+    let claimed = postgres::claim_device_session_revocation(
+        &mut transaction,
+        &key,
+        room_id,
+        presented.participant_id,
+        target_device_session_id,
+        &request_fingerprint,
+    )
+    .await?;
+    if !claimed {
+        let stored =
+            postgres::load_device_session_revocation_in_transaction(&mut transaction, &key)
+                .await?
+                .ok_or_else(ApiError::internal)?;
+        return replay_device_session_revocation(
+            stored,
+            presented,
+            target_device_session_id,
+            &request_fingerprint,
+        );
+    }
+    let event = postgres::revoke_device_session(
+        &mut transaction,
+        room_id,
+        presented.participant_id,
+        target_device_session_id,
+    )
+    .await?;
+    postgres::complete_device_session_revocation(&mut transaction, &key, &event).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| ApiError::internal_with("device session revocation", error))?;
+    state.signal_security_event(room_id);
+    if let Some(game_id) = game_id {
+        state.signal_game_synchronization(game_id);
+    }
+
+    Ok(device_session_revocation_response(
+        target_device_session_id,
+        event,
+        target_is_current,
+    ))
+}
+
+fn replay_device_session_revocation(
+    stored: StoredDeviceSessionRevocation,
+    presented: crate::session::AuthenticatedSession,
+    target_device_session_id: Uuid,
+    request_fingerprint: &str,
+) -> Result<Response, ApiError> {
+    if stored.actor_participant_id != presented.participant_id
+        || stored.target_device_session_id != target_device_session_id
+        || stored.request_fingerprint != request_fingerprint
+    {
+        return Err(ApiError::idempotency_conflict());
+    }
+    Ok(device_session_revocation_response(
+        stored.target_device_session_id,
+        StoredDeviceSessionSecurityEvent {
+            sequence: stored.sequence,
+            actor_position: stored.actor_position,
+            target_position: stored.target_position,
+            session_slot: stored.session_slot,
+            occurred_at: stored.occurred_at,
+        },
+        stored.target_guest_session_id == presented.session_id,
+    ))
+}
+
+fn device_session_revocation_response(
+    target_device_session_id: Uuid,
+    event: StoredDeviceSessionSecurityEvent,
+    target_is_current: bool,
+) -> Response {
+    let session_label = format!("Sessão {}", event.session_slot);
+    let mut response = no_store_json(
+        StatusCode::OK,
+        RevokeDeviceSessionResponse {
+            status: "revoked",
+            revoked_session: RevokedDeviceSessionSummary {
+                id: target_device_session_id.to_string(),
+                label: session_label.clone(),
+            },
+            security_event: DeviceSessionSecurityEvent {
+                event_version: 1,
+                cursor: event.sequence,
+                event_type: "session_revoked",
+                actor_position: event.actor_position,
+                target_position: event.target_position,
+                session_label,
+                occurred_at: event.occurred_at,
+            },
+        },
+    );
+    if target_is_current {
+        clear_session_cookie(&mut response);
+    }
+    response
+}
+
+async fn protect_participant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ProtectParticipantRequest>,
+) -> Result<Response, ApiError> {
+    if !request.protection_confirmed {
+        return Err(ApiError::protection_confirmation_required());
+    }
+    let key = idempotency_key(&headers)?;
+    require_session_grant_key(&key)?;
+    let presented = presented_session(&state, &headers).await?;
+    let request_fingerprint =
+        state.recovery_request_fingerprint("protect_participant", &key, &[b"protection-confirmed"]);
+    if let Some(stored) = postgres::load_participant_protection(&state.database, &key).await? {
+        return replay_participant_protection(stored, presented, &request_fingerprint);
+    }
+    if !session_is_active(&state, presented).await? {
+        return Err(ApiError::session_invalid());
+    }
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|error| ApiError::internal_with("participant protection", error))?;
+    let game_id =
+        postgres::lock_game_access_root(&mut transaction, presented.participant_id).await?;
+    let (room_id, _, _) =
+        postgres::lock_participant_room(&mut transaction, presented.participant_id)
+            .await?
+            .ok_or_else(ApiError::session_invalid)?;
+    if let Some(stored) =
+        postgres::load_participant_protection_in_transaction(&mut transaction, &key).await?
+    {
+        let replayed = replay_participant_protection(stored, presented, &request_fingerprint);
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| ApiError::internal_with("participant protection", error))?;
+        return replayed;
+    }
+    if !session_is_active_in_transaction(&mut transaction, presented).await? {
+        return Err(ApiError::session_invalid());
+    }
+    let participant =
+        postgres::lock_recovery_participant(&mut transaction, room_id, presented.participant_id)
+            .await?
+            .ok_or_else(ApiError::session_invalid)?;
+    let active_sessions =
+        postgres::lock_active_device_sessions(&mut transaction, presented.participant_id).await?;
+    let claimed = postgres::claim_participant_protection(
+        &mut transaction,
+        &key,
+        room_id,
+        presented,
+        &request_fingerprint,
+    )
+    .await?;
+    if !claimed {
+        let stored = postgres::load_participant_protection_in_transaction(&mut transaction, &key)
+            .await?
+            .ok_or_else(ApiError::internal)?;
+        return replay_participant_protection(stored, presented, &request_fingerprint);
+    }
+    let participant = postgres::advance_recovery_generation(&mut transaction, participant).await?;
+    postgres::supersede_active_recovery_credentials(&mut transaction, participant.participant_id)
+        .await?;
+    let event = postgres::protect_participant_access(
+        &mut transaction,
+        room_id,
+        &participant,
+        i64::try_from(active_sessions.len()).map_err(|_| ApiError::internal())?,
+    )
+    .await?;
+    postgres::complete_participant_protection(&mut transaction, &key, &event).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| ApiError::internal_with("participant protection", error))?;
+    state.signal_security_event(room_id);
+    if let Some(game_id) = game_id {
+        state.signal_game_synchronization(game_id);
+    }
+
+    Ok(participant_protection_response(event))
+}
+
+fn replay_participant_protection(
+    stored: StoredParticipantProtection,
+    presented: crate::session::AuthenticatedSession,
+    request_fingerprint: &str,
+) -> Result<Response, ApiError> {
+    if stored.actor_participant_id != presented.participant_id
+        || stored.actor_guest_session_id != presented.session_id
+        || stored.request_fingerprint != request_fingerprint
+    {
+        return Err(ApiError::idempotency_conflict());
+    }
+    Ok(participant_protection_response(
+        StoredParticipantProtectionEvent {
+            sequence: stored.sequence,
+            actor_position: stored.actor_position,
+            target_position: stored.target_position,
+            display_name: stored.display_name,
+            revoked_session_count: stored.revoked_session_count,
+            recovery_generation: stored.recovery_generation,
+            occurred_at: stored.occurred_at,
+        },
+    ))
+}
+
+fn participant_protection_response(event: StoredParticipantProtectionEvent) -> Response {
+    let mut response = no_store_json(
+        StatusCode::OK,
+        ProtectParticipantResponse {
+            status: "protected",
+            participant: RecoveryParticipant {
+                display_name: event.display_name,
+                position: event.target_position,
+            },
+            revoked_sessions: event.revoked_session_count,
+            recovery_generation: event.recovery_generation,
+            security_event: ParticipantProtectionSecurityEvent {
+                event_version: 1,
+                cursor: event.sequence,
+                event_type: "participant_protected",
+                actor_position: event.actor_position,
+                target_position: event.target_position,
+                revoked_sessions: event.revoked_session_count,
+                recovery_generation: event.recovery_generation,
+                occurred_at: event.occurred_at,
+            },
+        },
+    );
+    clear_session_cookie(&mut response);
+    response
+}
+
+async fn protect_room(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ProtectRoomRequest>,
+) -> Result<Response, ApiError> {
+    if !request.protection_confirmed {
+        return Err(ApiError::protection_confirmation_required());
+    }
+    validate_password(&request.new_recovery_password)?;
+    let key = idempotency_key(&headers)?;
+    require_session_grant_key(&key)?;
+    let presented = presented_session(&state, &headers).await?;
+    let preservation_mode = if request.preserve_current_session {
+        b"preserve-current-session".as_slice()
+    } else {
+        b"revoke-current-session".as_slice()
+    };
+    let request_fingerprint = state.recovery_request_fingerprint(
+        "protect_room",
+        &key,
+        &[
+            request.current_recovery_password.as_bytes(),
+            request.new_recovery_password.as_bytes(),
+            preservation_mode,
+            b"protection-confirmed",
+        ],
+    );
+    if let Some(stored) = postgres::load_room_protection(&state.database, &key).await? {
+        return replay_room_protection(stored, presented, &request_fingerprint);
+    }
+    if !session_is_active(&state, presented).await? {
+        return Err(ApiError::session_invalid());
+    }
+    let (observed, new_password_hash) = authenticate_recovery_password_change(
+        &state,
+        presented.participant_id,
+        request.current_recovery_password,
+        request.new_recovery_password,
+    )
+    .await?;
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|error| ApiError::internal_with("room protection", error))?;
+    let game_id =
+        postgres::lock_game_access_root(&mut transaction, presented.participant_id).await?;
+    let locked =
+        postgres::lock_recovery_password_authority(&mut transaction, presented.participant_id)
+            .await?
+            .ok_or_else(ApiError::recovery_confirmation_failed)?;
+    if let Some(stored) =
+        postgres::load_room_protection_in_transaction(&mut transaction, &key).await?
+    {
+        let replayed = replay_room_protection(stored, presented, &request_fingerprint);
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| ApiError::internal_with("room protection", error))?;
+        return replayed;
+    }
+    if !session_is_active_in_transaction(&mut transaction, presented).await? {
+        return Err(ApiError::session_invalid());
+    }
+    let locked = Some(locked)
+        .filter(|locked| same_recovery_password_authority(locked, &observed))
+        .ok_or_else(ApiError::recovery_confirmation_failed)?;
+    let claimed = postgres::claim_room_protection(
+        &mut transaction,
+        &key,
+        locked.room_id,
+        presented,
+        &request_fingerprint,
+    )
+    .await?;
+    if !claimed {
+        let stored = postgres::load_room_protection_in_transaction(&mut transaction, &key)
+            .await?
+            .ok_or_else(ApiError::internal)?;
+        return replay_room_protection(stored, presented, &request_fingerprint);
+    }
+    let event = postgres::protect_room_access(
+        &mut transaction,
+        locked.room_id,
+        locked.participant_id,
+        presented.session_id,
+        &new_password_hash,
+        request.preserve_current_session,
+    )
+    .await?;
+    postgres::complete_room_protection(&mut transaction, &key, &event).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| ApiError::internal_with("room protection", error))?;
+    state.signal_security_event(locked.room_id);
+    if let Some(game_id) = game_id {
+        state.signal_game_synchronization(game_id);
+    }
+
+    Ok(room_protection_response(event))
+}
+
+async fn authenticate_recovery_password_change(
+    state: &AppState,
+    participant_id: Uuid,
+    current_password: String,
+    new_password: String,
+) -> Result<(StoredRecoveryPasswordAuthority, String), ApiError> {
+    let observed = postgres::load_recovery_password_authority(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::session_invalid)?;
+    if observed.role != "host" {
+        return Err(ApiError::not_room_host());
+    }
+    if current_password.is_empty() || current_password.chars().count() > 128 {
+        return Err(ApiError::recovery_confirmation_failed());
+    }
+    let password_check_permit = state
+        .try_recovery_password_check()
+        .ok_or_else(ApiError::recovery_unavailable)?;
+    if !verify_password(current_password, observed.recovery_password_hash.clone()).await? {
+        return Err(ApiError::recovery_confirmation_failed());
+    }
+    let new_password_hash = hash_password(new_password).await?;
+    drop(password_check_permit);
+    Ok((observed, new_password_hash))
+}
+
+fn same_recovery_password_authority(
+    locked: &StoredRecoveryPasswordAuthority,
+    observed: &StoredRecoveryPasswordAuthority,
+) -> bool {
+    locked.room_id == observed.room_id
+        && locked.participant_id == observed.participant_id
+        && locked.role == observed.role
+        && locked.recovery_password_hash == observed.recovery_password_hash
+        && locked.password_generation == observed.password_generation
+        && locked.recovery_epoch == observed.recovery_epoch
+}
+
+fn replay_room_protection(
+    stored: StoredRoomProtection,
+    presented: crate::session::AuthenticatedSession,
+    request_fingerprint: &str,
+) -> Result<Response, ApiError> {
+    if stored.actor_participant_id != presented.participant_id
+        || stored.actor_guest_session_id != presented.session_id
+        || stored.request_fingerprint != request_fingerprint
+    {
+        return Err(ApiError::idempotency_conflict());
+    }
+    Ok(room_protection_response(StoredRoomProtectionEvent {
+        sequence: stored.sequence,
+        actor_position: stored.actor_position,
+        password_generation: stored.password_generation,
+        recovery_epoch: stored.recovery_epoch,
+        revoked_session_count: stored.revoked_session_count,
+        current_session_preserved: stored.current_session_preserved,
+        occurred_at: stored.occurred_at,
+    }))
+}
+
+fn room_protection_response(event: StoredRoomProtectionEvent) -> Response {
+    let mut response = no_store_json(
+        StatusCode::OK,
+        ProtectRoomResponse {
+            status: "protected",
+            password_generation: event.password_generation,
+            recovery_epoch: event.recovery_epoch,
+            revoked_sessions: event.revoked_session_count,
+            current_session_preserved: event.current_session_preserved,
+            security_event: RoomProtectionSecurityEvent {
+                event_version: 1,
+                cursor: event.sequence,
+                event_type: "room_protected",
+                actor_position: event.actor_position,
+                password_generation: event.password_generation,
+                recovery_epoch: event.recovery_epoch,
+                revoked_sessions: event.revoked_session_count,
+                current_session_preserved: event.current_session_preserved,
+                occurred_at: event.occurred_at,
+            },
+        },
+    );
+    if !event.current_session_preserved {
+        clear_session_cookie(&mut response);
+    }
+    response
+}
+
 async fn rotate_recovery_password(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -575,7 +1286,8 @@ async fn rotate_recovery_password(
     let key = idempotency_key(&headers)?;
     require_session_grant_key(&key)?;
     validate_password(&request.new_recovery_password)?;
-    let participant_id = authenticated_participant(&state, &headers).await?;
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let participant_id = authenticated.participant_id;
     let request_fingerprint = state.recovery_request_fingerprint(
         "rotate_recovery_password",
         &key,
@@ -587,36 +1299,20 @@ async fn rotate_recovery_password(
     if let Some(stored) = postgres::load_recovery_password_rotation(&state.database, &key).await? {
         return replay_recovery_password_rotation(stored, participant_id, &request_fingerprint);
     }
-    let observed = postgres::load_recovery_password_authority(&state.database, participant_id)
-        .await?
-        .ok_or_else(ApiError::session_invalid)?;
-    if observed.role != "host" {
-        return Err(ApiError::not_room_host());
-    }
-    if request.current_recovery_password.is_empty()
-        || request.current_recovery_password.chars().count() > 128
-    {
-        return Err(ApiError::recovery_confirmation_failed());
-    }
-    let password_check_permit = state
-        .try_recovery_password_check()
-        .ok_or_else(ApiError::recovery_unavailable)?;
-    if !verify_password(
+    let (observed, new_password_hash) = authenticate_recovery_password_change(
+        &state,
+        participant_id,
         request.current_recovery_password,
-        observed.recovery_password_hash.clone(),
+        request.new_recovery_password,
     )
-    .await?
-    {
-        return Err(ApiError::recovery_confirmation_failed());
-    }
-    let new_password_hash = hash_password(request.new_recovery_password).await?;
-    drop(password_check_permit);
+    .await?;
 
     let mut transaction = state
         .database
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("recovery password rotation", error))?;
+    postgres::lock_game_access_root(&mut transaction, participant_id).await?;
     let locked = postgres::lock_recovery_password_authority(&mut transaction, participant_id)
         .await?
         .ok_or_else(ApiError::recovery_confirmation_failed)?;
@@ -631,14 +1327,11 @@ async fn rotate_recovery_password(
             .map_err(|error| ApiError::internal_with("recovery password rotation", error))?;
         return replayed;
     }
+    if !session_is_active_in_transaction(&mut transaction, authenticated).await? {
+        return Err(ApiError::session_invalid());
+    }
     let locked = Some(locked)
-        .filter(|locked| {
-            locked.room_id == observed.room_id
-                && locked.participant_id == observed.participant_id
-                && locked.role == observed.role
-                && locked.recovery_password_hash == observed.recovery_password_hash
-                && locked.password_generation == observed.password_generation
-        })
+        .filter(|locked| same_recovery_password_authority(locked, &observed))
         .ok_or_else(ApiError::recovery_confirmation_failed)?;
     let claimed = postgres::claim_recovery_password_rotation(
         &mut transaction,
@@ -744,13 +1437,6 @@ async fn regenerate_recovery_credential(
         risk_acknowledged,
     )
     .await?;
-    if let Some(stored) =
-        postgres::load_recovery_credential_regeneration(&state.database, &command.idempotency_key)
-            .await?
-    {
-        return replay_recovery_credential_regeneration(&state, stored, &command);
-    }
-
     let (committed_room_id, response) =
         commit_recovery_credential_regeneration(&state, &command).await?;
     if let Some(room_id) = committed_room_id {
@@ -767,7 +1453,7 @@ async fn recovery_credential_regeneration_command(
 ) -> Result<RecoveryCredentialRegenerationCommand, ApiError> {
     let idempotency_key = idempotency_key(headers)?;
     require_session_grant_key(&idempotency_key)?;
-    let actor_participant_id = authenticated_participant(state, headers).await?;
+    let actor = authenticated_session(state, headers).await?;
     if target_position.is_some() && !risk_acknowledged {
         return Err(ApiError::host_assistance_risk_not_acknowledged());
     }
@@ -795,7 +1481,7 @@ async fn recovery_credential_regeneration_command(
     };
     Ok(RecoveryCredentialRegenerationCommand {
         idempotency_key,
-        actor_participant_id,
+        actor,
         target_position,
         delivery,
         request_fingerprint,
@@ -811,8 +1497,12 @@ async fn commit_recovery_credential_regeneration(
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("recovery credential regeneration", error))?;
+    postgres::lock_game_access_root(&mut transaction, command.actor.participant_id).await?;
     let (authority, participant) =
         lock_recovery_credential_participants(&mut transaction, command).await?;
+    if !session_is_active_in_transaction(&mut transaction, command.actor).await? {
+        return Err(ApiError::session_invalid());
+    }
     if let Some(replayed) = replay_or_claim_recovery_credential_regeneration(
         state,
         &mut transaction,
@@ -847,7 +1537,7 @@ async fn commit_recovery_credential_regeneration(
     let event = postgres::append_recovery_credential_security_event(
         &mut transaction,
         authority.room_id,
-        command.actor_participant_id,
+        command.actor.participant_id,
         participant.participant_id,
         command.delivery,
         participant.recovery_generation,
@@ -879,7 +1569,7 @@ async fn lock_recovery_credential_participants(
     command: &RecoveryCredentialRegenerationCommand,
 ) -> Result<(StoredRecoveryPasswordAuthority, StoredRecoveryParticipant), ApiError> {
     let authority =
-        postgres::lock_recovery_password_authority(transaction, command.actor_participant_id)
+        postgres::lock_recovery_password_authority(transaction, command.actor.participant_id)
             .await?
             .ok_or_else(ApiError::session_invalid)?;
     if command.target_position.is_some() && authority.role != "host" {
@@ -896,13 +1586,13 @@ async fn lock_recovery_credential_participants(
         None => postgres::lock_recovery_participant(
             transaction,
             authority.room_id,
-            command.actor_participant_id,
+            command.actor.participant_id,
         )
         .await?
         .ok_or_else(ApiError::session_invalid)?,
     };
     if command.target_position.is_some()
-        && participant.participant_id == command.actor_participant_id
+        && participant.participant_id == command.actor.participant_id
     {
         return Err(ApiError::recovery_assistance_not_required());
     }
@@ -928,7 +1618,7 @@ async fn replay_or_claim_recovery_credential_regeneration(
         transaction,
         &command.idempotency_key,
         authority.room_id,
-        command.actor_participant_id,
+        command.actor.participant_id,
         participant.participant_id,
         command.delivery,
         &command.request_fingerprint,
@@ -951,14 +1641,14 @@ fn replay_recovery_credential_regeneration(
     stored: StoredRecoveryCredentialRegeneration,
     command: &RecoveryCredentialRegenerationCommand,
 ) -> Result<Response, ApiError> {
-    if stored.actor_participant_id != command.actor_participant_id
+    if stored.actor_participant_id != command.actor.participant_id
         || stored.delivery != command.delivery
         || stored.request_fingerprint != command.request_fingerprint
         || command
             .target_position
             .is_some_and(|position| stored.target_position != position)
         || (command.target_position.is_none()
-            && stored.target_participant_id != command.actor_participant_id)
+            && stored.target_participant_id != command.actor.participant_id)
     {
         return Err(ApiError::idempotency_conflict());
     }
@@ -1029,6 +1719,7 @@ async fn recover_participation(
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
+    postgres::lock_game_access_root(&mut transaction, recovery.candidate.participant_id).await?;
     let locked = lock_authenticated_recovery(&mut transaction, &recovery).await?;
 
     let successor_recovery_token = state.idempotent_recovery_token(
@@ -1276,7 +1967,8 @@ async fn select_hero(
     Json(request): Json<SelectHeroRequest>,
 ) -> Result<Response, ApiError> {
     let hero = parse_hero(&request.hero_id)?;
-    let participant_id = authenticated_participant(&state, &headers).await?;
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let participant_id = authenticated.participant_id;
     let mut transaction =
         state.database.begin().await.map_err(|error| {
             ApiError::internal_with("identity access application operation", error)
@@ -1285,6 +1977,9 @@ async fn select_hero(
         postgres::lock_participant_room(&mut transaction, participant_id)
             .await?
             .ok_or_else(ApiError::session_invalid)?;
+    if !session_is_active_in_transaction(&mut transaction, authenticated).await? {
+        return Err(ApiError::session_invalid());
+    }
     if room_status != "open" {
         return Err(ApiError::room_sealed());
     }
@@ -1312,7 +2007,8 @@ async fn set_readiness(
     headers: HeaderMap,
     Json(request): Json<SetReadinessRequest>,
 ) -> Result<Response, ApiError> {
-    let participant_id = authenticated_participant(&state, &headers).await?;
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let participant_id = authenticated.participant_id;
     let mut transaction =
         state.database.begin().await.map_err(|error| {
             ApiError::internal_with("identity access application operation", error)
@@ -1321,6 +2017,9 @@ async fn set_readiness(
         postgres::lock_participant_room(&mut transaction, participant_id)
             .await?
             .ok_or_else(ApiError::session_invalid)?;
+    if !session_is_active_in_transaction(&mut transaction, authenticated).await? {
+        return Err(ApiError::session_invalid());
+    }
     if room_status != "open" {
         return Err(ApiError::room_sealed());
     }
@@ -1465,6 +2164,15 @@ fn set_session_cookie(response: &mut Response, token: &str, max_age_seconds: i64
     response.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).expect("hexadecimal session tokens make a valid cookie"),
+    );
+}
+
+fn clear_session_cookie(response: &mut Response) {
+    response.headers_mut().append(
+        header::SET_COOKIE,
+        HeaderValue::from_static(
+            "__Host-session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict",
+        ),
     );
 }
 

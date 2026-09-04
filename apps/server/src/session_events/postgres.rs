@@ -46,6 +46,13 @@ pub(super) async fn load_security_events(
             events.delivery,
             events.password_generation,
             events.recovery_generation,
+            CASE
+                WHEN events.session_slot IS NULL THEN NULL
+                ELSE 'Sessão ' || events.session_slot::TEXT
+            END AS session_label,
+            events.revoked_session_count AS revoked_sessions,
+            events.recovery_epoch,
+            events.current_session_preserved,
             replace(
                 to_char(events.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
                 ' ',
