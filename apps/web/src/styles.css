@@ -460,6 +460,54 @@ input {
   letter-spacing: 0.04em;
 }
 
+.effect-choice,
+.effect-history {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--brass-quiet);
+}
+
+.effect-choice h3,
+.effect-history h3 {
+  margin: 0 0 0.65rem;
+  color: var(--chalk);
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: 1.5rem;
+  line-height: 1.08;
+}
+
+.effect-choice p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--chalk-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.effect-choice ol,
+.effect-history ol {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.9rem 0 0;
+  padding-inline-start: 1.4rem;
+  color: var(--chalk-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.effect-choice li,
+.effect-history li {
+  padding-inline-start: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.effect-choice li::marker,
+.effect-history li::marker {
+  color: var(--brass);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .hero-options {
   display: grid;
   border-block: 1px solid var(--brass-quiet);
@@ -566,6 +614,13 @@ input {
 
 .participant-lineup li span:nth-child(even) {
   text-align: right;
+}
+
+.participant-lineup .resource-line {
+  grid-column: 1 / -1;
+  color: var(--chalk-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .presence-label--online {

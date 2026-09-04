@@ -8,6 +8,12 @@ mod ids;
 mod manifest;
 mod schema;
 
+mod effects;
+
+pub use effects::{
+    Cardinality, Condition, Die, Effect, EffectRule, EffectTrigger, Eligibility, GameOutcome,
+    Operation, Resource, ResourceCost, Selector, TargetOwner, Zone,
+};
 pub use ids::{CardInstanceId, CatalogId, InvalidId, RuleId};
 pub use manifest::{
     ContentGap, ContentManifest, ContentSet, EntryKind, FunctionalConfidence, FunctionalField,

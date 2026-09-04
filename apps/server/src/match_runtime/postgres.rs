@@ -2,8 +2,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, StoredCommandGame, StoredCommandReceipt, StoredGame, StoredGameEvent,
-    StoredGameStart, StoredRoomActor, StoredRoomParticipant,
+    ApiError, GAME_EVENT_VERSION, StoredCommandGame, StoredCommandReceipt, StoredGame,
+    StoredGameEvent, StoredGameStart, StoredRoomActor, StoredRoomParticipant,
 };
 use crate::content_catalog::SelectedContent;
 
@@ -273,6 +273,7 @@ pub(super) async fn game_for_participant(
             games.state_digest,
             games.snapshot::text AS snapshot_json,
             games.prng_algorithm,
+            games.prng_seed,
             games.prng_counter,
             games.shuffle_algorithm,
             games.sampling_algorithm,
@@ -313,6 +314,7 @@ pub(super) async fn lock_game_for_actor(
             games.state_digest,
             games.snapshot::text AS snapshot_json,
             games.prng_algorithm,
+            games.prng_seed,
             games.prng_counter,
             games.shuffle_algorithm,
             games.sampling_algorithm,
@@ -398,6 +400,7 @@ async fn update_game_after_command(
             state_digest = $4,
             snapshot = $5::jsonb,
             prng_counter = $6,
+            status = $7,
             last_game_action_at = clock_timestamp(),
             expires_at = clock_timestamp() + INTERVAL '7 days'
         WHERE id = $1
@@ -416,6 +419,11 @@ async fn update_game_after_command(
     .bind(command.state_digest)
     .bind(command.snapshot_json)
     .bind(counters.prng_counter)
+    .bind(match command.state.status() {
+        game_domain::GameStatus::InProgress => "in_progress",
+        game_domain::GameStatus::Lost => "lost",
+        game_domain::GameStatus::Won => "won",
+    })
     .fetch_one(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("persist game state after command", error))?;
@@ -434,18 +442,23 @@ async fn insert_game_event(
             game_id,
             room_id,
             sequence,
+            event_version,
             event_type,
             command_id,
             actor_participant_id,
             state_version,
             payload
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
         ",
     )
     .bind(command.game_id)
     .bind(room_id)
     .bind(counters.sequence)
+    .bind(
+        i16::try_from(GAME_EVENT_VERSION)
+            .map_err(|error| ApiError::internal_with("append game event", error))?,
+    )
     .bind(command.event_type)
     .bind(command.command_id)
     .bind(command.actor_participant_id)

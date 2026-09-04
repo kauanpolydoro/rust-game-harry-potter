@@ -9,6 +9,7 @@ import {
 function projection() {
   return {
     choice: { status: 'none' },
+    effects: { outcomes: [], status: 'idle' },
     game: {
       adventure: { id: 'adventure:001', name: 'Game 1' },
       expires_at: '2026-09-10T12:00:00Z',
@@ -20,6 +21,7 @@ function projection() {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     participants: [
@@ -27,6 +29,7 @@ function projection() {
         display_name: 'Minerva',
         hero: { id: 'harry', name: 'Harry' },
         position: 1,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
       },
     ],

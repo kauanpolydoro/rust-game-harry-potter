@@ -119,6 +119,7 @@ function unreadyHostLobbyResponse() {
 function gameProjectionResponse() {
   return {
     choice: { status: 'none' },
+    effects: { outcomes: [], status: 'idle' },
     game: {
       adventure: { id: 'adventure:001', name: 'Game 1' },
       expires_at: '2026-09-10T12:00:00Z',
@@ -130,6 +131,7 @@ function gameProjectionResponse() {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     participants: [
@@ -137,12 +139,14 @@ function gameProjectionResponse() {
         display_name: 'Minerva',
         hero: { id: 'harry', name: 'Harry' },
         position: 1,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
       },
       {
         display_name: 'Luna',
         hero: { id: 'hermione', name: 'Hermione' },
         position: 2,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
       },
     ],
@@ -168,10 +172,53 @@ function gameProjectionResponse() {
 
 function completedGameProjectionResponse() {
   const projection = gameProjectionResponse()
+  const participants = projection.participants.map((participant) =>
+    participant.position === 1
+      ? { ...participant, resources: { attack: 2, health: 9, influence: 2 } }
+      : participant,
+  )
   return {
     ...projection,
+    effects: {
+      outcomes: [
+        {
+          after: 9,
+          before: 10,
+          cause: 'cost',
+          resource: 'health',
+          rule_id: 'rule:functional',
+          target_id: 'hero:1',
+          target_position: 1,
+          type: 'resource_changed',
+        },
+        {
+          after: 2,
+          before: 0,
+          cause: 'effect',
+          resource: 'influence',
+          rule_id: 'rule:functional',
+          target_id: 'hero:1',
+          target_position: 1,
+          type: 'resource_changed',
+        },
+        {
+          die: 'd4',
+          result: 3,
+          rule_id: 'rule:functional',
+          type: 'die_rolled',
+        },
+        {
+          reason: 'no_eligible_target',
+          rule_id: 'rule:functional',
+          type: 'no_op',
+        },
+      ],
+      status: 'resolved',
+    },
     game: { ...projection.game, expires_at: '2026-09-10T13:00:00Z' },
     legal_actions: [],
+    participant: participants[0],
+    participants,
     snapshot: {
       ...projection.snapshot,
       cursor: 1,
@@ -1622,6 +1669,14 @@ describe('application shell', () => {
     expect(screen.getByText('Ação do Herói')).toBeVisible()
     expect(screen.getByText('Ação oficial')).toBeVisible()
     expect(screen.getByText(/Recibo aceito no estado v2, sequência 1/)).toBeVisible()
+    expect(screen.getByRole('heading', { level: 3, name: 'Última resolução oficial' })).toBeVisible()
+    expect(screen.getByText('Minerva pagou 1 de Vida (10 → 9).')).toBeVisible()
+    expect(screen.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
+    expect(screen.getByText('Dado D4: resultado 3.')).toBeVisible()
+    expect(
+      screen.getByText('Nenhum alvo era elegível. O efeito foi resolvido sem alterar a mesa.'),
+    ).toBeVisible()
+    expect(screen.getByText('Vida 9 · Ataque 2 · Influência 2')).toBeVisible()
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
 
     const commandCall = request.mock.calls.find(

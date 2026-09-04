@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 const initialGameProjection = {
   choice: { status: 'none' },
+  effects: { outcomes: [], status: 'idle' },
   game: {
     adventure: { id: 'adventure:001', name: 'Game 1' },
     expires_at: '2026-09-10T12:00:00Z',
@@ -13,6 +14,7 @@ const initialGameProjection = {
     display_name: 'Minerva',
     hero: { id: 'harry', name: 'Harry' },
     position: 1,
+    resources: { attack: 0, health: 10, influence: 0 },
     role: 'host',
   },
   participants: [
@@ -20,12 +22,14 @@ const initialGameProjection = {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     {
       display_name: 'Luna',
       hero: { id: 'hermione', name: 'Hermione' },
       position: 2,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'guest',
     },
   ],
@@ -50,8 +54,32 @@ const initialGameProjection = {
 
 const completedGameProjection = {
   ...initialGameProjection,
+  effects: {
+    outcomes: [
+      {
+        after: 2,
+        before: 0,
+        cause: 'effect',
+        resource: 'influence',
+        rule_id: 'rule:functional',
+        target_id: 'hero:1',
+        target_position: 1,
+        type: 'resource_changed',
+      },
+    ],
+    status: 'resolved',
+  },
   game: { ...initialGameProjection.game, expires_at: '2026-09-10T13:00:00Z' },
   legal_actions: [],
+  participant: {
+    ...initialGameProjection.participant,
+    resources: { attack: 2, health: 9, influence: 2 },
+  },
+  participants: initialGameProjection.participants.map((participant) =>
+    participant.position === 1
+      ? { ...participant, resources: { attack: 2, health: 9, influence: 2 } }
+      : participant,
+  ),
   snapshot: {
     ...initialGameProjection.snapshot,
     cursor: 1,
@@ -302,10 +330,24 @@ test('a player replays a missed event and falls back to Snapshot within recovery
     await expect(hostPage.locator('.presence-label--reconnecting')).toContainText('Reconectando')
     await expect(hostPage.locator('.presence-block')).toHaveCount(0)
     await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
+    await expect(
+      hostPage.getByRole('heading', { level: 3, name: 'Última resolução oficial' }),
+    ).toBeVisible()
+    await expect(hostPage.getByText('Minerva pagou 1 de Vida (10 → 9).')).toBeVisible()
+    await expect(hostPage.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
+    await expect(hostPage.getByText(/Dado D4: resultado [1-4]\./)).toBeVisible()
+    await expect(
+      hostPage.getByText('Nenhum alvo era elegível. O efeito foi resolvido sem alterar a mesa.'),
+    ).toBeVisible()
+    await expect(hostPage.getByText('Vida 9 · Ataque 2 · Influência 2')).toBeVisible()
     await guestContext.setOffline(false)
 
     const replayStartedAt = Date.now()
     await expect(guestPage.getByText('Ação do Herói')).toBeVisible({ timeout: 3_000 })
+    await expect(
+      guestPage.getByRole('heading', { level: 3, name: 'Última resolução oficial' }),
+    ).toBeVisible()
+    await expect(guestPage.getByText(/Dado D4: resultado [1-4]\./)).toBeVisible()
     expect(Date.now() - replayStartedAt).toBeLessThan(3_000)
     await expect
       .poll(

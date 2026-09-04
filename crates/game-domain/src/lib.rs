@@ -7,6 +7,16 @@
 
 use std::{collections::BTreeSet, str::FromStr};
 
+mod effects;
+
+pub use effects::{
+    EffectChangeCause, EffectCondition, EffectDefinition, EffectDie, EffectEligibility,
+    EffectEntity, EffectExecutionError, EffectGameOutcome, EffectNoOpReason, EffectOperation,
+    EffectOutcome, EffectResource, EffectResourceCost, EffectRoller, EffectRule, EffectSelector,
+    EffectStop, EffectTargetOwner, EffectTrigger, EffectWorld, EffectZone, PendingEffectChoice,
+    PendingEffectChoiceKind, effect_action_is_affordable,
+};
+
 pub const SNAPSHOT_VERSION: u16 = 1;
 pub const INITIAL_STATE_VERSION: u64 = 1;
 pub const INITIAL_SEQUENCE: u64 = 0;
@@ -121,11 +131,16 @@ pub struct InitialGameState {
     sampling_algorithm: &'static str,
     prng_counter: u64,
     players: Vec<InitialPlayer>,
+    effect_world: EffectWorld,
+    last_effects: Vec<EffectOutcome>,
+    pending_choice: Option<PendingEffectChoice>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
     InProgress,
+    Lost,
+    Won,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,12 +154,13 @@ pub enum GameCommand {
     CompleteDarkArts,
 }
 
-#[derive(Debug, Clone, Copy)]
 pub struct GameCommandInput<'a> {
     pub state: &'a InitialGameState,
     pub actor_position: u8,
     pub expected_state_version: u64,
     pub command: GameCommand,
+    pub effect_rules: &'a [EffectRule],
+    pub die_roller: &'a mut dyn EffectRoller,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,13 +169,16 @@ pub struct GameCommandDecision {
     pub event: GameEvent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameEvent {
     DarkArtsCompleted {
         sequence: u64,
         state_version: u64,
         turn: u32,
         actor_position: u8,
+        effects: Vec<EffectOutcome>,
+        stop: EffectStop,
+        prng_counter: u64,
     },
 }
 
@@ -168,6 +187,7 @@ pub enum GameCommandError {
     StaleStateVersion,
     ActorNotActive,
     CommandNotLegal,
+    EffectExecutionFailed,
     VersionOverflow,
 }
 
@@ -175,6 +195,7 @@ pub enum GameCommandError {
 pub enum GameEventError {
     ActorNotActive,
     EventNotApplicable,
+    EffectTransitionInvalid,
     SequenceMismatch,
     StateVersionMismatch,
     TurnMismatch,
@@ -222,6 +243,9 @@ pub struct GameStateRestoreInput<'a> {
     pub sampling_algorithm: &'a str,
     pub prng_counter: u64,
     pub players: Vec<InitialPlayer>,
+    pub effect_world: EffectWorld,
+    pub last_effects: Vec<EffectOutcome>,
+    pub pending_choice: Option<PendingEffectChoice>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +358,21 @@ impl InitialGameState {
     pub fn players(&self) -> &[InitialPlayer] {
         &self.players
     }
+
+    #[must_use]
+    pub const fn effect_world(&self) -> &EffectWorld {
+        &self.effect_world
+    }
+
+    #[must_use]
+    pub fn last_effects(&self) -> &[EffectOutcome] {
+        &self.last_effects
+    }
+
+    #[must_use]
+    pub const fn pending_choice(&self) -> Option<&PendingEffectChoice> {
+        self.pending_choice.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -441,6 +480,14 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: 0,
+        effect_world: EffectWorld::new(
+            players
+                .iter()
+                .map(|player| EffectEntity::hero(player.position))
+                .collect(),
+        ),
+        last_effects: Vec::new(),
+        pending_choice: None,
         players,
     })
 }
@@ -497,6 +544,16 @@ pub fn restore_game_state(
         || positions != expected_positions
         || heroes.len() != input.players.len()
         || !positions.contains(&input.active_position)
+        || !input.effect_world.is_valid_for_positions(
+            &input
+                .players
+                .iter()
+                .map(InitialPlayer::position)
+                .collect::<Vec<_>>(),
+        )
+        || input.pending_choice.as_ref().is_some_and(|choice| {
+            !positions.contains(&choice.responsible_position) || choice.options.len() < 2
+        })
     {
         return Err(GameStateRestoreError::InvalidPlayers);
     }
@@ -519,6 +576,9 @@ pub fn restore_game_state(
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: input.prng_counter,
         players: input.players,
+        effect_world: input.effect_world,
+        last_effects: input.last_effects,
+        pending_choice: input.pending_choice,
     })
 }
 
@@ -543,38 +603,68 @@ fn valid_blake3_digest(value: &str) -> bool {
 pub fn decide_game_command(
     input: GameCommandInput<'_>,
 ) -> Result<GameCommandDecision, GameCommandError> {
-    if input.expected_state_version != input.state.state_version {
+    let GameCommandInput {
+        state,
+        actor_position,
+        expected_state_version,
+        command,
+        effect_rules,
+        die_roller,
+    } = input;
+    if expected_state_version != state.state_version {
         return Err(GameCommandError::StaleStateVersion);
     }
-    if input.actor_position != input.state.active_position {
+    if actor_position != state.active_position {
         return Err(GameCommandError::ActorNotActive);
     }
-    if !legal_game_commands(input.state, input.actor_position).contains(&input.command) {
+    if !legal_game_commands(state, actor_position, effect_rules).contains(&command) {
         return Err(GameCommandError::CommandNotLegal);
     }
 
-    match input.command {
+    match command {
         GameCommand::CompleteDarkArts => {
-            let state_version = input
-                .state
+            let state_version = state
                 .state_version
                 .checked_add(1)
                 .ok_or(GameCommandError::VersionOverflow)?;
-            let sequence = input
-                .state
+            let sequence = state
                 .sequence
                 .checked_add(1)
+                .ok_or(GameCommandError::VersionOverflow)?;
+            let mut effect_world = state.effect_world.clone();
+            let resolution = effects::execute_effects(
+                &mut effect_world,
+                actor_position,
+                effect_rules,
+                EffectTrigger::DarkArtsCompleted,
+                die_roller,
+            )
+            .map_err(|error| match error {
+                EffectExecutionError::UnaffordableCost => GameCommandError::CommandNotLegal,
+                EffectExecutionError::InvalidDefinition
+                | EffectExecutionError::InvalidRoll
+                | EffectExecutionError::StepLimitExceeded => {
+                    GameCommandError::EffectExecutionFailed
+                }
+            })?;
+            let prng_counter = state
+                .prng_counter
+                .checked_add(resolution.rolls_consumed)
                 .ok_or(GameCommandError::VersionOverflow)?;
             let event = GameEvent::DarkArtsCompleted {
                 sequence,
                 state_version,
-                turn: input.state.turn,
-                actor_position: input.actor_position,
+                turn: state.turn,
+                actor_position,
+                effects: resolution.outcomes,
+                stop: resolution.stop,
+                prng_counter,
             };
-            let state = apply_game_event(input.state, event).map_err(|error| match error {
+            let state = apply_game_event(state, &event).map_err(|error| match error {
                 GameEventError::VersionOverflow => GameCommandError::VersionOverflow,
                 GameEventError::ActorNotActive
                 | GameEventError::EventNotApplicable
+                | GameEventError::EffectTransitionInvalid
                 | GameEventError::SequenceMismatch
                 | GameEventError::StateVersionMismatch
                 | GameEventError::TurnMismatch => GameCommandError::CommandNotLegal,
@@ -590,10 +680,21 @@ pub fn decide_game_command(
 /// External gates such as database-clock expiration are applied by the
 /// application before exposing this result.
 #[must_use]
-pub fn legal_game_commands(state: &InitialGameState, actor_position: u8) -> Vec<GameCommand> {
+pub fn legal_game_commands(
+    state: &InitialGameState,
+    actor_position: u8,
+    effect_rules: &[EffectRule],
+) -> Vec<GameCommand> {
     if state.status == GameStatus::InProgress
         && state.phase == GamePhase::DarkArts
+        && state.pending_choice.is_none()
         && actor_position == state.active_position
+        && effect_action_is_affordable(
+            &state.effect_world,
+            actor_position,
+            effect_rules,
+            EffectTrigger::DarkArtsCompleted,
+        )
     {
         vec![GameCommand::CompleteDarkArts]
     } else {
@@ -607,12 +708,18 @@ pub fn legal_game_commands(state: &InitialGameState, actor_position: u8) -> Vec<
 /// require a connected participant. Availability remains an application-layer
 /// concern and must never change the rule decision itself.
 #[must_use]
-pub fn required_participant_for_decision(state: &InitialGameState) -> Option<u8> {
+pub fn required_participant_for_decision(
+    state: &InitialGameState,
+    effect_rules: &[EffectRule],
+) -> Option<u8> {
+    if let Some(choice) = &state.pending_choice {
+        return Some(choice.responsible_position);
+    }
     state
         .players
         .iter()
         .map(InitialPlayer::position)
-        .find(|position| !legal_game_commands(state, *position).is_empty())
+        .find(|position| !legal_game_commands(state, *position, effect_rules).is_empty())
 }
 
 /// Applies one official event to a game state using the same transition as a
@@ -624,7 +731,7 @@ pub fn required_participant_for_decision(state: &InitialGameState) -> Option<u8>
 /// supplied state.
 pub fn apply_game_event(
     state: &InitialGameState,
-    event: GameEvent,
+    event: &GameEvent,
 ) -> Result<InitialGameState, GameEventError> {
     match event {
         GameEvent::DarkArtsCompleted {
@@ -632,35 +739,75 @@ pub fn apply_game_event(
             state_version,
             turn,
             actor_position,
+            effects,
+            stop,
+            prng_counter,
         } => {
-            if state.phase != GamePhase::DarkArts {
+            if state.status != GameStatus::InProgress
+                || state.phase != GamePhase::DarkArts
+                || state.pending_choice.is_some()
+            {
                 return Err(GameEventError::EventNotApplicable);
             }
-            if actor_position != state.active_position {
+            if *actor_position != state.active_position {
                 return Err(GameEventError::ActorNotActive);
             }
-            if turn != state.turn {
+            if *turn != state.turn {
                 return Err(GameEventError::TurnMismatch);
             }
             let expected_sequence = state
                 .sequence
                 .checked_add(1)
                 .ok_or(GameEventError::VersionOverflow)?;
-            if sequence != expected_sequence {
+            if *sequence != expected_sequence {
                 return Err(GameEventError::SequenceMismatch);
             }
             let expected_state_version = state
                 .state_version
                 .checked_add(1)
                 .ok_or(GameEventError::VersionOverflow)?;
-            if state_version != expected_state_version {
+            if *state_version != expected_state_version {
                 return Err(GameEventError::StateVersionMismatch);
+            }
+            if !effects::effect_transition_is_valid(effects, stop, *actor_position) {
+                return Err(GameEventError::EffectTransitionInvalid);
+            }
+
+            let rolled = effects
+                .iter()
+                .filter(|outcome| matches!(outcome, EffectOutcome::DieRolled { .. }))
+                .count();
+            let expected_prng_counter = state
+                .prng_counter
+                .checked_add(u64::try_from(rolled).map_err(|_| GameEventError::VersionOverflow)?)
+                .ok_or(GameEventError::VersionOverflow)?;
+            if *prng_counter != expected_prng_counter {
+                return Err(GameEventError::EffectTransitionInvalid);
             }
 
             let mut next = state.clone();
-            next.sequence = sequence;
-            next.state_version = state_version;
-            next.phase = GamePhase::HeroAction;
+            effects::apply_effect_outcomes(&mut next.effect_world, effects)
+                .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+            next.sequence = *sequence;
+            next.state_version = *state_version;
+            next.prng_counter = *prng_counter;
+            next.last_effects.clone_from(effects);
+            match stop {
+                EffectStop::Choice(choice) => {
+                    next.pending_choice = Some(choice.clone());
+                }
+                EffectStop::Stable => {
+                    next.phase = GamePhase::HeroAction;
+                    next.pending_choice = None;
+                }
+                EffectStop::Terminal(outcome) => {
+                    next.status = match outcome {
+                        EffectGameOutcome::Lost => GameStatus::Lost,
+                        EffectGameOutcome::Won => GameStatus::Won,
+                    };
+                    next.pending_choice = None;
+                }
+            }
             Ok(next)
         }
     }
@@ -668,7 +815,27 @@ pub fn apply_game_event(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::*;
+
+    struct ScriptedRoller {
+        rolls: VecDeque<u8>,
+    }
+
+    impl ScriptedRoller {
+        fn new(rolls: &[u8]) -> Self {
+            Self {
+                rolls: rolls.iter().copied().collect(),
+            }
+        }
+    }
+
+    impl EffectRoller for ScriptedRoller {
+        fn roll(&mut self, _die: EffectDie) -> Option<u8> {
+            self.rolls.pop_front()
+        }
+    }
 
     const CONTENT: ContentSelection<'static> = ContentSelection {
         adventure_id: "adventure:001",
@@ -837,16 +1004,19 @@ mod tests {
         .expect("the complete lobby should start");
 
         assert_eq!(
-            legal_game_commands(&initial, 1),
+            legal_game_commands(&initial, 1, &[]),
             vec![GameCommand::CompleteDarkArts]
         );
-        assert!(legal_game_commands(&initial, 2).is_empty());
+        assert!(legal_game_commands(&initial, 2, &[]).is_empty());
 
+        let mut roller = ScriptedRoller::new(&[]);
         let decision = decide_game_command(GameCommandInput {
             state: &initial,
             actor_position: 1,
             expected_state_version: 1,
             command: GameCommand::CompleteDarkArts,
+            effect_rules: &[],
+            die_roller: &mut roller,
         })
         .expect("the active participant should complete the phase");
 
@@ -863,16 +1033,22 @@ mod tests {
                 state_version: 2,
                 turn: 1,
                 actor_position: 1,
+                effects: vec![],
+                stop: EffectStop::Stable,
+                prng_counter: 0,
             }
         );
         assert_eq!(
-            apply_game_event(&initial, decision.event)
+            apply_game_event(&initial, &decision.event)
                 .expect("the official event should reconstruct the decided state"),
             decision.state
         );
-        assert!(legal_game_commands(&decision.state, 1).is_empty());
-        assert_eq!(required_participant_for_decision(&initial), Some(1));
-        assert_eq!(required_participant_for_decision(&decision.state), None);
+        assert!(legal_game_commands(&decision.state, 1, &[]).is_empty());
+        assert_eq!(required_participant_for_decision(&initial, &[]), Some(1));
+        assert_eq!(
+            required_participant_for_decision(&decision.state, &[]),
+            None
+        );
     }
 
     #[test]
@@ -885,21 +1061,27 @@ mod tests {
         })
         .expect("the complete lobby should start");
 
+        let mut stale_roller = ScriptedRoller::new(&[]);
         assert_eq!(
             decide_game_command(GameCommandInput {
                 state: &initial,
                 actor_position: 1,
                 expected_state_version: 0,
                 command: GameCommand::CompleteDarkArts,
+                effect_rules: &[],
+                die_roller: &mut stale_roller,
             }),
             Err(GameCommandError::StaleStateVersion)
         );
+        let mut unauthorized_roller = ScriptedRoller::new(&[]);
         assert_eq!(
             decide_game_command(GameCommandInput {
                 state: &initial,
                 actor_position: 2,
                 expected_state_version: 1,
                 command: GameCommand::CompleteDarkArts,
+                effect_rules: &[],
+                die_roller: &mut unauthorized_roller,
             }),
             Err(GameCommandError::ActorNotActive)
         );
@@ -936,6 +1118,9 @@ mod tests {
             sampling_algorithm: initial.sampling_algorithm(),
             prng_counter: initial.prng_counter(),
             players: initial.players().to_vec(),
+            effect_world: initial.effect_world().clone(),
+            last_effects: initial.last_effects().to_vec(),
+            pending_choice: initial.pending_choice().cloned(),
         })
         .expect("the canonical initial snapshot should restore");
 
@@ -967,6 +1152,14 @@ mod tests {
                 sampling_algorithm: SAMPLING_ALGORITHM,
                 prng_counter: 0,
                 players: players.clone(),
+                effect_world: EffectWorld::new(
+                    players
+                        .iter()
+                        .map(|player| EffectEntity::hero(player.position()))
+                        .collect(),
+                ),
+                last_effects: Vec::new(),
+                pending_choice: None,
             })
         };
 
@@ -978,5 +1171,347 @@ mod tests {
             restore(1, 0, "unknown-prng"),
             Err(GameStateRestoreError::UnsupportedAlgorithm)
         );
+    }
+
+    fn actor_selector(zone: EffectZone) -> EffectSelector {
+        EffectSelector {
+            zone,
+            owner: EffectTargetOwner::Actor,
+            min: 1,
+            max: 1,
+            eligibility: Vec::new(),
+        }
+    }
+
+    fn rule(cost: Vec<EffectResourceCost>, effect: EffectDefinition) -> EffectRule {
+        EffectRule {
+            id: "rule:synthetic".to_owned(),
+            trigger: EffectTrigger::DarkArtsCompleted,
+            cost,
+            effect,
+        }
+    }
+
+    fn comprehensive_effect_rule() -> EffectRule {
+        rule(
+            vec![EffectResourceCost {
+                resource: EffectResource::Health,
+                amount: 1,
+            }],
+            EffectDefinition::Sequence {
+                effects: vec![
+                    EffectDefinition::Apply {
+                        target: actor_selector(EffectZone::Heroes),
+                        operation: EffectOperation::ModifyResource {
+                            resource: EffectResource::Attack,
+                            amount: 1,
+                        },
+                    },
+                    EffectDefinition::Condition {
+                        condition: EffectCondition::ResourceAtLeast {
+                            target: actor_selector(EffectZone::Heroes),
+                            resource: EffectResource::Attack,
+                            amount: 1,
+                        },
+                        then: Box::new(EffectDefinition::Repeat {
+                            times: 2,
+                            effect: Box::new(EffectDefinition::Apply {
+                                target: actor_selector(EffectZone::Heroes),
+                                operation: EffectOperation::ModifyResource {
+                                    resource: EffectResource::Influence,
+                                    amount: 1,
+                                },
+                            }),
+                        }),
+                        otherwise: None,
+                    },
+                    EffectDefinition::Roll {
+                        die: EffectDie::D4,
+                        outcomes: vec![
+                            EffectDefinition::NoOp,
+                            EffectDefinition::NoOp,
+                            EffectDefinition::NoOp,
+                            EffectDefinition::Apply {
+                                target: actor_selector(EffectZone::HeroHand),
+                                operation: EffectOperation::Move {
+                                    to: EffectZone::HeroDiscardPile,
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        )
+    }
+
+    #[test]
+    fn closed_effects_resolve_sequences_conditions_repetition_zones_resources_and_dice() {
+        let participants = valid_participants();
+        let mut initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+        initial.effect_world = EffectWorld::new(vec![
+            EffectEntity::hero(1),
+            EffectEntity::hero(2),
+            EffectEntity::new("card:synthetic", Some(1), EffectZone::HeroHand),
+        ]);
+        let effects = [comprehensive_effect_rule()];
+
+        let mut roller = ScriptedRoller::new(&[4]);
+        let decision = decide_game_command(GameCommandInput {
+            state: &initial,
+            actor_position: 1,
+            expected_state_version: 1,
+            command: GameCommand::CompleteDarkArts,
+            effect_rules: &effects,
+            die_roller: &mut roller,
+        })
+        .expect("the validated effect should resolve to a stable point");
+
+        assert_eq!(decision.state.phase(), GamePhase::HeroAction);
+        assert_eq!(decision.state.prng_counter(), 1);
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Health),
+            Some(9)
+        );
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Attack),
+            Some(1)
+        );
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Influence),
+            Some(2)
+        );
+        assert!(
+            decision
+                .state
+                .effect_world()
+                .entities()
+                .iter()
+                .any(|entity| {
+                    entity.id() == "card:synthetic" && entity.zone() == EffectZone::HeroDiscardPile
+                })
+        );
+        assert!(decision.state.last_effects().iter().any(|outcome| matches!(
+            outcome,
+            EffectOutcome::DieRolled {
+                die: EffectDie::D4,
+                result: 4,
+                ..
+            }
+        )));
+        assert_eq!(
+            apply_game_event(&initial, &decision.event)
+                .expect("the effect event should replay deterministically"),
+            decision.state
+        );
+    }
+
+    #[test]
+    fn selectors_stop_at_an_owned_choice_and_impossible_targets_become_no_ops() {
+        let participants = valid_participants();
+        let initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+        let target_choice = [rule(
+            vec![],
+            EffectDefinition::Apply {
+                target: EffectSelector {
+                    zone: EffectZone::Heroes,
+                    owner: EffectTargetOwner::Any,
+                    min: 1,
+                    max: 1,
+                    eligibility: vec![EffectEligibility::ResourceAtLeast {
+                        resource: EffectResource::Health,
+                        amount: 1,
+                    }],
+                },
+                operation: EffectOperation::ModifyResource {
+                    resource: EffectResource::Attack,
+                    amount: 1,
+                },
+            },
+        )];
+
+        let mut choice_roller = ScriptedRoller::new(&[]);
+        let choice = decide_game_command(GameCommandInput {
+            state: &initial,
+            actor_position: 1,
+            expected_state_version: 1,
+            command: GameCommand::CompleteDarkArts,
+            effect_rules: &target_choice,
+            die_roller: &mut choice_roller,
+        })
+        .expect("multiple eligible targets should stop at a human choice");
+
+        assert_eq!(choice.state.phase(), GamePhase::DarkArts);
+        assert_eq!(
+            choice
+                .state
+                .pending_choice()
+                .map(|pending| pending.options.clone()),
+            Some(vec!["hero:1".to_owned(), "hero:2".to_owned()])
+        );
+        assert_eq!(
+            required_participant_for_decision(&choice.state, &target_choice),
+            Some(1)
+        );
+        assert!(legal_game_commands(&choice.state, 1, &target_choice).is_empty());
+
+        let impossible = [rule(
+            vec![],
+            EffectDefinition::Apply {
+                target: actor_selector(EffectZone::HeroHand),
+                operation: EffectOperation::Discard,
+            },
+        )];
+        let mut no_op_roller = ScriptedRoller::new(&[]);
+        let no_op = decide_game_command(GameCommandInput {
+            state: &initial,
+            actor_position: 1,
+            expected_state_version: 1,
+            command: GameCommand::CompleteDarkArts,
+            effect_rules: &impossible,
+            die_roller: &mut no_op_roller,
+        })
+        .expect("an impossible mandatory target should not block resolution");
+
+        assert_eq!(no_op.state.phase(), GamePhase::HeroAction);
+        assert!(matches!(
+            no_op.state.last_effects(),
+            [EffectOutcome::NoOp {
+                reason: EffectNoOpReason::NoEligibleTarget,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn unaffordable_cost_removes_the_action_and_terminal_effects_end_resolution() {
+        let participants = valid_participants();
+        let initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+        let unaffordable = [rule(
+            vec![EffectResourceCost {
+                resource: EffectResource::Influence,
+                amount: 1,
+            }],
+            EffectDefinition::NoOp,
+        )];
+
+        assert!(legal_game_commands(&initial, 1, &unaffordable).is_empty());
+        let mut unaffordable_roller = ScriptedRoller::new(&[]);
+        assert_eq!(
+            decide_game_command(GameCommandInput {
+                state: &initial,
+                actor_position: 1,
+                expected_state_version: 1,
+                command: GameCommand::CompleteDarkArts,
+                effect_rules: &unaffordable,
+                die_roller: &mut unaffordable_roller,
+            }),
+            Err(GameCommandError::CommandNotLegal)
+        );
+
+        let terminal = [rule(
+            vec![],
+            EffectDefinition::Terminal {
+                outcome: EffectGameOutcome::Won,
+            },
+        )];
+        let mut terminal_roller = ScriptedRoller::new(&[]);
+        let decision = decide_game_command(GameCommandInput {
+            state: &initial,
+            actor_position: 1,
+            expected_state_version: 1,
+            command: GameCommand::CompleteDarkArts,
+            effect_rules: &terminal,
+            die_roller: &mut terminal_roller,
+        })
+        .expect("a terminal effect should produce an official terminal state");
+
+        assert_eq!(decision.state.status(), GameStatus::Won);
+        assert!(legal_game_commands(&decision.state, 1, &terminal).is_empty());
+    }
+
+    #[test]
+    fn replay_rejects_malformed_effect_outcomes_and_stop_points() {
+        let participants = valid_participants();
+        let initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+        let invalid_events = [
+            GameEvent::DarkArtsCompleted {
+                sequence: 1,
+                state_version: 2,
+                turn: 1,
+                actor_position: 1,
+                effects: vec![EffectOutcome::DieRolled {
+                    rule_id: "rule:synthetic".to_owned(),
+                    die: EffectDie::D4,
+                    result: 5,
+                }],
+                stop: EffectStop::Stable,
+                prng_counter: 1,
+            },
+            GameEvent::DarkArtsCompleted {
+                sequence: 1,
+                state_version: 2,
+                turn: 1,
+                actor_position: 1,
+                effects: vec![EffectOutcome::Terminal {
+                    rule_id: "rule:synthetic".to_owned(),
+                    outcome: EffectGameOutcome::Won,
+                }],
+                stop: EffectStop::Terminal(EffectGameOutcome::Lost),
+                prng_counter: 0,
+            },
+            GameEvent::DarkArtsCompleted {
+                sequence: 1,
+                state_version: 2,
+                turn: 1,
+                actor_position: 1,
+                effects: vec![EffectOutcome::ResourceChanged {
+                    rule_id: "rule:synthetic".to_owned(),
+                    target_id: "hero:1".to_owned(),
+                    target_position: Some(2),
+                    resource: EffectResource::Health,
+                    before: 10,
+                    after: 9,
+                    cause: EffectChangeCause::Effect,
+                }],
+                stop: EffectStop::Stable,
+                prng_counter: 0,
+            },
+        ];
+
+        for event in invalid_events {
+            assert_eq!(
+                apply_game_event(&initial, &event),
+                Err(GameEventError::EffectTransitionInvalid)
+            );
+        }
     }
 }

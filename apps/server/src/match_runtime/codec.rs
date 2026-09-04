@@ -1,10 +1,13 @@
 use game_domain::{
-    GameEvent, GamePhase, GameStateRestoreInput, GameStatus, InitialGameState, InitialPlayer,
-    SNAPSHOT_VERSION, restore_game_state,
+    EffectChangeCause, EffectDie, EffectEntity, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
+    EffectResource, EffectStop, EffectWorld, EffectZone, GameEvent, GamePhase,
+    GameStateRestoreInput, GameStatus, InitialGameState, InitialPlayer, PendingEffectChoice,
+    PendingEffectChoiceKind, SNAPSHOT_VERSION, restore_game_state,
 };
 
 use super::{
-    GAME_EVENT_VERSION, PersistedGameEvent, PersistedPlayer, PersistedPrng, PersistedSnapshot,
+    GAME_EVENT_VERSION, PersistedEffectChoice, PersistedEffectEntity, PersistedEffectOutcome,
+    PersistedEffects, PersistedGameEvent, PersistedPlayer, PersistedPrng, PersistedSnapshot,
     PersistedTurn, PersistedVersions, StoredCommandGame, StoredGame, StoredRoomParticipant,
     hero_id,
 };
@@ -96,7 +99,9 @@ pub(super) fn command_domain_state(
 ) -> Result<InitialGameState, ApiError> {
     let status = match persisted.status.as_str() {
         "in_progress" => GameStatus::InProgress,
-        _ => return Err(ApiError::game_action_not_allowed()),
+        "lost" => GameStatus::Lost,
+        "won" => GameStatus::Won,
+        _ => return Err(ApiError::internal()),
     };
     let phase = match persisted.turn.phase.as_str() {
         "dark_arts" => GamePhase::DarkArts,
@@ -113,6 +118,19 @@ pub(super) fn command_domain_state(
             ))
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
+    let effect_world = domain_effect_world(&persisted.effects, &players)?;
+    let last_effects = persisted
+        .effects
+        .outcomes
+        .iter()
+        .map(domain_effect_outcome)
+        .collect::<Result<Vec<_>, _>>()?;
+    let pending_choice = persisted
+        .effects
+        .choice
+        .as_ref()
+        .map(domain_effect_choice)
+        .transpose()?;
 
     restore_game_state(GameStateRestoreInput {
         snapshot_version: persisted.snapshot_version,
@@ -132,6 +150,9 @@ pub(super) fn command_domain_state(
         sampling_algorithm: &persisted.versions.sampling,
         prng_counter: persisted.prng.counter,
         players,
+        effect_world,
+        last_effects,
+        pending_choice,
     })
     .map_err(|error| ApiError::internal_with("match application operation", error))
 }
@@ -148,7 +169,7 @@ pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSna
 pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
     let event: PersistedGameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    if event.event_version != GAME_EVENT_VERSION {
+    if event.event_version == 0 || event.event_version > GAME_EVENT_VERSION {
         return Err(ApiError::internal());
     }
     Ok(event)
@@ -163,6 +184,8 @@ pub(super) fn persisted_after_decision(
     next.sequence = state.sequence();
     next.status = match state.status() {
         GameStatus::InProgress => "in_progress".to_owned(),
+        GameStatus::Lost => "lost".to_owned(),
+        GameStatus::Won => "won".to_owned(),
     };
     next.turn.number = state.turn();
     next.turn.phase = match state.phase() {
@@ -171,6 +194,7 @@ pub(super) fn persisted_after_decision(
     };
     next.turn.active_position = state.active_position();
     next.prng.counter = state.prng_counter();
+    next.effects = persisted_effects(state);
     next
 }
 
@@ -181,6 +205,9 @@ pub(super) fn persisted_event(event: GameEvent) -> Result<(&'static str, String)
             state_version,
             turn,
             actor_position,
+            effects,
+            stop,
+            prng_counter,
         } => serde_json::to_string(&serde_json::json!({
             "event_version": GAME_EVENT_VERSION,
             "type": "dark_arts_completed",
@@ -188,6 +215,13 @@ pub(super) fn persisted_event(event: GameEvent) -> Result<(&'static str, String)
             "state_version": state_version,
             "turn": turn,
             "actor_position": actor_position,
+            "effects": effects.iter().map(persisted_effect_outcome).collect::<Vec<_>>(),
+            "effect_stop": effect_stop_name(&stop),
+            "choice": match stop {
+                EffectStop::Choice(choice) => Some(persisted_effect_choice(&choice)),
+                EffectStop::Stable | EffectStop::Terminal(_) => None,
+            },
+            "prng_counter": prng_counter,
         }))
         .map(|event| ("dark_arts_completed", event))
         .map_err(|error| ApiError::internal_with("match application operation", error)),
@@ -204,6 +238,8 @@ pub(super) fn persisted_snapshot(
         sequence: state.sequence(),
         status: match state.status() {
             GameStatus::InProgress => "in_progress".to_owned(),
+            GameStatus::Lost => "lost".to_owned(),
+            GameStatus::Won => "won".to_owned(),
         },
         adventure_id: state.adventure_id().to_owned(),
         versions: PersistedVersions {
@@ -238,5 +274,302 @@ pub(super) fn persisted_snapshot(
             algorithm: state.prng_algorithm().to_owned(),
             counter: state.prng_counter(),
         },
+        effects: persisted_effects(state),
+    }
+}
+
+fn domain_effect_world(
+    persisted: &PersistedEffects,
+    players: &[InitialPlayer],
+) -> Result<EffectWorld, ApiError> {
+    if persisted.entities.is_empty() {
+        return Ok(EffectWorld::new(
+            players
+                .iter()
+                .map(|player| EffectEntity::hero(player.position()))
+                .collect(),
+        ));
+    }
+
+    persisted
+        .entities
+        .iter()
+        .map(|entity| {
+            let mut domain = EffectEntity::new(
+                entity.id.clone(),
+                entity.owner_position,
+                domain_effect_zone(&entity.zone)?,
+            );
+            for (resource, amount) in &entity.resources {
+                domain = domain.with_resource(domain_effect_resource(resource)?, *amount);
+            }
+            Ok(domain)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(EffectWorld::new)
+}
+
+fn domain_effect_outcome(outcome: &PersistedEffectOutcome) -> Result<EffectOutcome, ApiError> {
+    Ok(match outcome {
+        PersistedEffectOutcome::DieRolled {
+            rule_id,
+            die,
+            result,
+        } => EffectOutcome::DieRolled {
+            rule_id: rule_id.clone(),
+            die: domain_effect_die(die)?,
+            result: *result,
+        },
+        PersistedEffectOutcome::Moved {
+            rule_id,
+            target_id,
+            target_position,
+            from,
+            to,
+        } => EffectOutcome::Moved {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+            from: domain_effect_zone(from)?,
+            to: domain_effect_zone(to)?,
+        },
+        PersistedEffectOutcome::NoOp { rule_id, reason } => EffectOutcome::NoOp {
+            rule_id: rule_id.clone(),
+            reason: match reason.as_str() {
+                "explicit" => EffectNoOpReason::Explicit,
+                "no_eligible_target" => EffectNoOpReason::NoEligibleTarget,
+                "zero_cardinality" => EffectNoOpReason::ZeroCardinality,
+                _ => return Err(ApiError::internal()),
+            },
+        },
+        PersistedEffectOutcome::ResourceChanged {
+            rule_id,
+            target_id,
+            target_position,
+            resource,
+            before,
+            after,
+            cause,
+        } => EffectOutcome::ResourceChanged {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+            resource: domain_effect_resource(resource)?,
+            before: *before,
+            after: *after,
+            cause: match cause.as_str() {
+                "cost" => EffectChangeCause::Cost,
+                "effect" => EffectChangeCause::Effect,
+                _ => return Err(ApiError::internal()),
+            },
+        },
+        PersistedEffectOutcome::Terminal { rule_id, outcome } => EffectOutcome::Terminal {
+            rule_id: rule_id.clone(),
+            outcome: match outcome.as_str() {
+                "lost" => EffectGameOutcome::Lost,
+                "won" => EffectGameOutcome::Won,
+                _ => return Err(ApiError::internal()),
+            },
+        },
+    })
+}
+
+fn domain_effect_choice(choice: &PersistedEffectChoice) -> Result<PendingEffectChoice, ApiError> {
+    Ok(PendingEffectChoice {
+        id: choice.id.clone(),
+        responsible_position: choice.responsible_position,
+        kind: match choice.kind.as_str() {
+            "effect" => PendingEffectChoiceKind::Effect,
+            "target" => PendingEffectChoiceKind::Target,
+            _ => return Err(ApiError::internal()),
+        },
+        options: choice.options.clone(),
+        min: choice.min,
+        max: choice.max,
+    })
+}
+
+fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
+    PersistedEffects {
+        entities: state
+            .effect_world()
+            .entities()
+            .iter()
+            .map(|entity| PersistedEffectEntity {
+                id: entity.id().to_owned(),
+                owner_position: entity.owner_position(),
+                zone: effect_zone_name(entity.zone()).to_owned(),
+                resources: entity
+                    .resources()
+                    .iter()
+                    .map(|(resource, amount)| (effect_resource_name(*resource).to_owned(), *amount))
+                    .collect(),
+            })
+            .collect(),
+        outcomes: state
+            .last_effects()
+            .iter()
+            .map(persisted_effect_outcome)
+            .collect(),
+        choice: state.pending_choice().map(persisted_effect_choice),
+    }
+}
+
+pub(super) fn persisted_effect_outcome(outcome: &EffectOutcome) -> PersistedEffectOutcome {
+    match outcome {
+        EffectOutcome::DieRolled {
+            rule_id,
+            die,
+            result,
+        } => PersistedEffectOutcome::DieRolled {
+            rule_id: rule_id.clone(),
+            die: effect_die_name(*die).to_owned(),
+            result: *result,
+        },
+        EffectOutcome::Moved {
+            rule_id,
+            target_id,
+            target_position,
+            from,
+            to,
+        } => PersistedEffectOutcome::Moved {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+            from: effect_zone_name(*from).to_owned(),
+            to: effect_zone_name(*to).to_owned(),
+        },
+        EffectOutcome::NoOp { rule_id, reason } => PersistedEffectOutcome::NoOp {
+            rule_id: rule_id.clone(),
+            reason: match reason {
+                EffectNoOpReason::Explicit => "explicit",
+                EffectNoOpReason::NoEligibleTarget => "no_eligible_target",
+                EffectNoOpReason::ZeroCardinality => "zero_cardinality",
+            }
+            .to_owned(),
+        },
+        EffectOutcome::ResourceChanged {
+            rule_id,
+            target_id,
+            target_position,
+            resource,
+            before,
+            after,
+            cause,
+        } => PersistedEffectOutcome::ResourceChanged {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+            resource: effect_resource_name(*resource).to_owned(),
+            before: *before,
+            after: *after,
+            cause: match cause {
+                EffectChangeCause::Cost => "cost",
+                EffectChangeCause::Effect => "effect",
+            }
+            .to_owned(),
+        },
+        EffectOutcome::Terminal { rule_id, outcome } => PersistedEffectOutcome::Terminal {
+            rule_id: rule_id.clone(),
+            outcome: match outcome {
+                EffectGameOutcome::Lost => "lost",
+                EffectGameOutcome::Won => "won",
+            }
+            .to_owned(),
+        },
+    }
+}
+
+fn persisted_effect_choice(choice: &PendingEffectChoice) -> PersistedEffectChoice {
+    PersistedEffectChoice {
+        id: choice.id.clone(),
+        responsible_position: choice.responsible_position,
+        kind: match choice.kind {
+            PendingEffectChoiceKind::Effect => "effect",
+            PendingEffectChoiceKind::Target => "target",
+        }
+        .to_owned(),
+        options: choice.options.clone(),
+        min: choice.min,
+        max: choice.max,
+    }
+}
+
+fn effect_stop_name(stop: &EffectStop) -> &'static str {
+    match stop {
+        EffectStop::Choice(_) => "choice",
+        EffectStop::Stable => "stable",
+        EffectStop::Terminal(_) => "terminal",
+    }
+}
+
+fn domain_effect_resource(resource: &str) -> Result<EffectResource, ApiError> {
+    match resource {
+        "attack" => Ok(EffectResource::Attack),
+        "control" => Ok(EffectResource::Control),
+        "health" => Ok(EffectResource::Health),
+        "influence" => Ok(EffectResource::Influence),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn effect_resource_name(resource: EffectResource) -> &'static str {
+    match resource {
+        EffectResource::Attack => "attack",
+        EffectResource::Control => "control",
+        EffectResource::Health => "health",
+        EffectResource::Influence => "influence",
+    }
+}
+
+fn domain_effect_zone(zone: &str) -> Result<EffectZone, ApiError> {
+    match zone {
+        "active_location" => Ok(EffectZone::ActiveLocation),
+        "active_villains" => Ok(EffectZone::ActiveVillains),
+        "dark_arts_deck" => Ok(EffectZone::DarkArtsDeck),
+        "dark_arts_discard" => Ok(EffectZone::DarkArtsDiscard),
+        "hero_discard_pile" => Ok(EffectZone::HeroDiscardPile),
+        "hero_draw_pile" => Ok(EffectZone::HeroDrawPile),
+        "hero_hand" => Ok(EffectZone::HeroHand),
+        "hero_play_area" => Ok(EffectZone::HeroPlayArea),
+        "heroes" => Ok(EffectZone::Heroes),
+        "hogwarts_deck" => Ok(EffectZone::HogwartsDeck),
+        "market" => Ok(EffectZone::Market),
+        "villain_deck" => Ok(EffectZone::VillainDeck),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn effect_zone_name(zone: EffectZone) -> &'static str {
+    match zone {
+        EffectZone::ActiveLocation => "active_location",
+        EffectZone::ActiveVillains => "active_villains",
+        EffectZone::DarkArtsDeck => "dark_arts_deck",
+        EffectZone::DarkArtsDiscard => "dark_arts_discard",
+        EffectZone::HeroDiscardPile => "hero_discard_pile",
+        EffectZone::HeroDrawPile => "hero_draw_pile",
+        EffectZone::HeroHand => "hero_hand",
+        EffectZone::HeroPlayArea => "hero_play_area",
+        EffectZone::Heroes => "heroes",
+        EffectZone::HogwartsDeck => "hogwarts_deck",
+        EffectZone::Market => "market",
+        EffectZone::VillainDeck => "villain_deck",
+    }
+}
+
+fn domain_effect_die(die: &str) -> Result<EffectDie, ApiError> {
+    match die {
+        "d4" => Ok(EffectDie::D4),
+        "d6" => Ok(EffectDie::D6),
+        "d8" => Ok(EffectDie::D8),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn effect_die_name(die: EffectDie) -> &'static str {
+    match die {
+        EffectDie::D4 => "d4",
+        EffectDie::D6 => "d6",
+        EffectDie::D8 => "d8",
     }
 }

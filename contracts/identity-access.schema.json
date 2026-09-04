@@ -263,7 +263,7 @@
       "required": ["id", "status", "adventure", "expires_at"],
       "properties": {
         "id": { "type": "string", "format": "uuid" },
-        "status": { "type": "string", "enum": ["in_progress"] },
+        "status": { "type": "string", "enum": ["in_progress", "won", "lost"] },
         "adventure": { "$ref": "#/$defs/GameAdventure" },
         "expires_at": { "type": "string", "format": "date-time" }
       }
@@ -318,7 +318,71 @@
       "additionalProperties": false,
       "required": ["status"],
       "properties": {
-        "status": { "type": "string", "enum": ["none"] }
+        "status": { "type": "string", "enum": ["none", "pending"] },
+        "id": { "type": "string", "minLength": 1 },
+        "responsible_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "kind": { "type": "string", "enum": ["effect", "target"] },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4096,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "min": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "GameResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["health", "attack", "influence"],
+      "properties": {
+        "health": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "attack": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "influence": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
+    },
+    "EffectOutcomeSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "rule_id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["die_rolled", "moved", "no_op", "resource_changed", "terminal"]
+        },
+        "rule_id": { "type": "string", "minLength": 1 },
+        "target_id": { "type": "string", "minLength": 1 },
+        "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "die": { "type": "string", "enum": ["d4", "d6", "d8"] },
+        "result": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "reason": {
+          "type": "string",
+          "enum": ["explicit", "no_eligible_target", "zero_cardinality"]
+        },
+        "resource": {
+          "type": "string",
+          "enum": ["attack", "control", "health", "influence"]
+        },
+        "before": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "after": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "cause": { "type": "string", "enum": ["cost", "effect"] },
+        "outcome": { "type": "string", "enum": ["lost", "won"] }
+      }
+    },
+    "EffectResolutionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "outcomes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["idle", "resolved", "choice", "terminal"] },
+        "outcomes": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/EffectOutcomeSummary" }
+        }
       }
     },
     "TurnSummary": {
@@ -334,12 +398,13 @@
     "GameParticipant": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "role", "position", "hero"],
+      "required": ["display_name", "role", "position", "hero", "resources"],
       "properties": {
         "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
         "role": { "type": "string", "enum": ["host", "guest"] },
         "position": { "type": "integer", "minimum": 1, "maximum": 4 },
-        "hero": { "$ref": "#/$defs/HeroSummary" }
+        "hero": { "$ref": "#/$defs/HeroSummary" },
+        "resources": { "$ref": "#/$defs/GameResources" }
       }
     },
     "GameProjectionResponse": {
@@ -352,7 +417,8 @@
         "participant",
         "participants",
         "legal_actions",
-        "choice"
+        "choice",
+        "effects"
       ],
       "properties": {
         "game": { "$ref": "#/$defs/GameSummary" },
@@ -367,7 +433,8 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "choice": { "$ref": "#/$defs/ChoiceSummary" }
+        "choice": { "$ref": "#/$defs/ChoiceSummary" },
+        "effects": { "$ref": "#/$defs/EffectResolutionSummary" }
       }
     },
     "RealtimeGameEvent": {
@@ -379,15 +446,26 @@
         "sequence",
         "state_version",
         "turn",
-        "actor_position"
+        "actor_position",
+        "effects",
+        "effect_stop",
+        "prng_counter"
       ],
       "properties": {
-        "event_version": { "type": "integer", "enum": [1] },
+        "event_version": { "type": "integer", "enum": [1, 2] },
         "type": { "type": "string", "enum": ["dark_arts_completed"] },
         "sequence": { "type": "integer", "minimum": 1 },
         "state_version": { "type": "integer", "minimum": 2 },
         "turn": { "type": "integer", "minimum": 1 },
         "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "effects": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/EffectOutcomeSummary" }
+        },
+        "effect_stop": { "type": "string", "enum": ["stable", "choice", "terminal"] },
+        "choice": { "$ref": "#/$defs/ChoiceSummary" },
+        "prng_counter": { "type": "integer", "minimum": 0 },
         "command_id": { "type": "string", "format": "uuid" }
       }
     },

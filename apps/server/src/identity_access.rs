@@ -468,7 +468,7 @@ async fn recovered_participation_response(
     participant_id: Uuid,
 ) -> Result<Response, ApiError> {
     if let Some(projection) =
-        match_runtime::projection_for_participant(&state.database, participant_id).await?
+        match_runtime::projection_for_participant(state, participant_id).await?
     {
         return Ok(no_store_json(StatusCode::OK, projection));
     }

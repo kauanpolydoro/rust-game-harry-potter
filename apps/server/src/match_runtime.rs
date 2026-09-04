@@ -6,12 +6,17 @@ use axum::{
     routing::{get, post},
 };
 use game_domain::{
-    ContentSelection, GameCommand, GameCommandError, GameCommandInput, HeroId, InitialGameState,
-    LobbyParticipant, ParticipantRole, StartGameError, StartGameInput, decide_game_command,
-    initialize_game,
+    ContentSelection, EffectDie, EffectRoller, GameCommand, GameCommandError, GameCommandInput,
+    HeroId, InitialGameState, LobbyParticipant, ParticipantRole, StartGameError, StartGameInput,
+    decide_game_command, initialize_game,
+};
+use rand_chacha::{
+    ChaCha20Rng,
+    rand_core::{Rng, SeedableRng},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
@@ -33,7 +38,7 @@ use codec::{
 pub(crate) use projection::{GameProjectionResponse, projection_for_participant};
 
 const SEED_BYTES: usize = 32;
-const GAME_EVENT_VERSION: u16 = 1;
+const GAME_EVENT_VERSION: u16 = 2;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -134,6 +139,7 @@ struct StoredCommandGame {
     state_digest: String,
     snapshot_json: String,
     prng_algorithm: String,
+    prng_seed: Vec<u8>,
     prng_counter: i64,
     shuffle_algorithm: String,
     sampling_algorithm: String,
@@ -195,6 +201,8 @@ struct PersistedSnapshot {
     turn: PersistedTurn,
     participants: Vec<PersistedPlayer>,
     prng: PersistedPrng,
+    #[serde(default, skip_serializing_if = "PersistedEffects::is_empty")]
+    effects: PersistedEffects,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -232,6 +240,81 @@ struct PersistedPrng {
     counter: u64,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffects {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    entities: Vec<PersistedEffectEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    outcomes: Vec<PersistedEffectOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    choice: Option<PersistedEffectChoice>,
+}
+
+impl PersistedEffects {
+    fn is_empty(&self) -> bool {
+        self.entities.is_empty() && self.outcomes.is_empty() && self.choice.is_none()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectEntity {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_position: Option<u8>,
+    zone: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    resources: BTreeMap<String, u16>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PersistedEffectOutcome {
+    DieRolled {
+        rule_id: String,
+        die: String,
+        result: u8,
+    },
+    Moved {
+        rule_id: String,
+        target_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_position: Option<u8>,
+        from: String,
+        to: String,
+    },
+    NoOp {
+        rule_id: String,
+        reason: String,
+    },
+    ResourceChanged {
+        rule_id: String,
+        target_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_position: Option<u8>,
+        resource: String,
+        before: u16,
+        after: u16,
+        cause: String,
+    },
+    Terminal {
+        rule_id: String,
+        outcome: String,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectChoice {
+    id: String,
+    responsible_position: u8,
+    kind: String,
+    options: Vec<String>,
+    min: u16,
+    max: u16,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedGameEvent {
@@ -242,6 +325,48 @@ struct PersistedGameEvent {
     state_version: u64,
     turn: u32,
     actor_position: u8,
+    #[serde(default)]
+    effects: Vec<PersistedEffectOutcome>,
+    #[serde(default = "default_effect_stop")]
+    effect_stop: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    choice: Option<PersistedEffectChoice>,
+    #[serde(default)]
+    prng_counter: u64,
+}
+
+fn default_effect_stop() -> String {
+    "stable".to_owned()
+}
+
+struct ChaChaEffectRoller {
+    seed: [u8; SEED_BYTES],
+    stream: u64,
+}
+
+impl ChaChaEffectRoller {
+    fn new(seed: &[u8], stream: u64) -> Result<Self, ApiError> {
+        let seed = seed
+            .try_into()
+            .map_err(|error| ApiError::internal_with("match application operation", error))?;
+        Ok(Self { seed, stream })
+    }
+}
+
+impl EffectRoller for ChaChaEffectRoller {
+    fn roll(&mut self, die: EffectDie) -> Option<u8> {
+        let mut generator = ChaCha20Rng::from_seed(self.seed);
+        generator.set_stream(self.stream);
+        self.stream = self.stream.checked_add(1)?;
+        let sides = u32::from(die.sides());
+        let unbiased_range = u32::MAX - (u32::MAX % sides);
+        loop {
+            let value = generator.next_u32();
+            if value < unbiased_range {
+                return u8::try_from((value % sides) + 1).ok();
+            }
+        }
+    }
 }
 
 async fn start_game(
@@ -253,7 +378,7 @@ async fn start_game(
     let participant_id = authenticated_participant(&state, &headers).await?;
 
     if let Some(stored) = postgres::load_game_start(&state.database, &key).await? {
-        return replay_game_start(&state.database, stored, participant_id, &request).await;
+        return replay_game_start(&state, stored, participant_id, &request).await;
     }
 
     let content = state
@@ -278,7 +403,7 @@ async fn start_game(
             .rollback()
             .await
             .map_err(|error| ApiError::internal_with("match application operation", error))?;
-        return replay_game_start(&state.database, stored, participant_id, &request).await;
+        return replay_game_start(&state, stored, participant_id, &request).await;
     }
     if actor.room_status != "open" {
         return Err(ApiError::room_sealed());
@@ -308,7 +433,7 @@ async fn start_game(
         let stored = postgres::load_game_start(&state.database, &key)
             .await?
             .ok_or_else(ApiError::internal)?;
-        return replay_game_start(&state.database, stored, participant_id, &request).await;
+        return replay_game_start(&state, stored, participant_id, &request).await;
     }
 
     let snapshot = persisted_snapshot(&initial_state, &stored_participants);
@@ -338,7 +463,7 @@ async fn start_game(
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
 
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
     Ok(no_store_json(StatusCode::CREATED, projection))
@@ -371,7 +496,7 @@ async fn initialize_persisted_game(
 }
 
 async fn replay_game_start(
-    database: &sqlx::PgPool,
+    state: &AppState,
     stored: StoredGameStart,
     participant_id: Uuid,
     request: &StartGameRequest,
@@ -384,7 +509,7 @@ async fn replay_game_start(
         return Err(ApiError::idempotency_conflict());
     }
 
-    let projection = projection_for_participant(database, participant_id)
+    let projection = projection_for_participant(state, participant_id)
         .await?
         .filter(|projection| projection.game.id == stored.game_id.to_string())
         .ok_or_else(ApiError::internal)?;
@@ -425,7 +550,7 @@ async fn execute_game_command(
         {
             return Err(ApiError::idempotency_conflict());
         }
-        let projection = projection_for_participant(&state.database, participant_id)
+        let projection = projection_for_participant(&state, participant_id)
             .await?
             .ok_or_else(ApiError::internal)?;
         return Ok(no_store_json(
@@ -440,6 +565,11 @@ async fn execute_game_command(
     let persisted = decode_persisted_snapshot(&stored.snapshot_json)?;
     verify_persisted_snapshot(&stored, &persisted)?;
     let current = command_domain_state(&persisted)?;
+    let effect_rules = state
+        .content
+        .effect_rules(&stored.manifest_digest)
+        .ok_or_else(ApiError::internal)?;
+    let mut die_roller = ChaChaEffectRoller::new(&stored.prng_seed, current.prng_counter())?;
     let decision = decide_game_command(GameCommandInput {
         state: &current,
         actor_position: u8::try_from(stored.actor_position)
@@ -448,6 +578,8 @@ async fn execute_game_command(
         command: match request.command_type {
             GameCommandType::CompleteDarkArts => GameCommand::CompleteDarkArts,
         },
+        effect_rules: &effect_rules,
+        die_roller: &mut die_roller,
     })
     .map_err(command_error)?;
 
@@ -479,7 +611,7 @@ async fn execute_game_command(
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     state.signal_game_event(stored.id);
 
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
     Ok(no_store_json(
@@ -501,7 +633,7 @@ async fn command_result(
     let receipt = postgres::command_receipt_for_actor(&state.database, participant_id, command_id)
         .await?
         .ok_or_else(ApiError::command_not_found)?;
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
 
@@ -563,7 +695,9 @@ fn command_error(error: GameCommandError) -> ApiError {
         GameCommandError::ActorNotActive | GameCommandError::CommandNotLegal => {
             ApiError::game_action_not_allowed()
         }
-        GameCommandError::VersionOverflow => ApiError::internal(),
+        GameCommandError::EffectExecutionFailed | GameCommandError::VersionOverflow => {
+            ApiError::internal()
+        }
     }
 }
 
