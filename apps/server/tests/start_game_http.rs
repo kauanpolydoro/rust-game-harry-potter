@@ -1288,6 +1288,160 @@ async fn a_game_snapshot_cannot_advance_without_official_history() {
 }
 
 #[tokio::test]
+async fn authoritative_game_state_cannot_change_without_advancing_its_cursor() {
+    let room = ready_room().await;
+    start_ready_game(&room, "same-cursor-rewrite-start").await;
+    let stored_snapshot = sqlx::query_scalar::<_, String>(
+        r"
+        SELECT games.snapshot::text
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the initial snapshot must be queryable");
+    let mut rewritten_snapshot: Value =
+        serde_json::from_str(&stored_snapshot).expect("the initial snapshot must be JSON");
+    rewritten_snapshot["turn"]["number"] = json!(999);
+    let rewritten_snapshot =
+        serde_json::to_string(&rewritten_snapshot).expect("the rewritten snapshot must serialize");
+    let rewritten_digest = format!(
+        "blake3:{}",
+        blake3::hash(rewritten_snapshot.as_bytes()).to_hex()
+    );
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the same-cursor rewrite transaction must start");
+    sqlx::query(
+        r"
+        UPDATE games
+        SET snapshot = $2::jsonb,
+            state_digest = $3
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .bind(rewritten_snapshot)
+    .bind(rewritten_digest)
+    .execute(&mut *transaction)
+    .await
+    .expect("the deferred history constraint should allow the statement");
+
+    let error = transaction
+        .commit()
+        .await
+        .expect_err("a same-cursor state rewrite must be rejected at commit");
+    assert_database_error_code(&error, "23514");
+    assert!(error.to_string().contains("without advancing its cursor"));
+}
+
+#[tokio::test]
+async fn snapshot_numeric_representation_cannot_change_without_advancing_its_cursor() {
+    let room = ready_room().await;
+    start_ready_game(&room, "decimal-snapshot-rewrite-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the decimal snapshot rewrite transaction must start");
+    sqlx::query(
+        r"
+        UPDATE games
+        SET snapshot = jsonb_set(snapshot, '{turn,number}', '1.0'::jsonb)
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&mut *transaction)
+    .await
+    .expect("the deferred history constraint should allow the statement");
+
+    let error = transaction
+        .commit()
+        .await
+        .expect_err("a decimal snapshot rewrite must be rejected at commit");
+    assert_database_error_code(&error, "23514");
+    assert!(error.to_string().contains("without advancing its cursor"));
+}
+
+#[tokio::test]
+async fn an_official_receipt_must_share_the_committed_game_expiration() {
+    let room = ready_room().await;
+    start_ready_game(&room, "receipt-expiration-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the receipt expiration transaction must start");
+    let (game_id, actor_id, room_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            UPDATE games
+            SET sequence = 1,
+                state_version = 2
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            RETURNING id, started_by_participant_id, room_id
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test game cursor must advance inside the transaction");
+    let command_id = uuid::Uuid::new_v4();
+    insert_test_event(&mut transaction, game_id, room_id, command_id, actor_id).await;
+    sqlx::query(
+        r"
+        INSERT INTO game_command_receipts (
+            game_id,
+            room_id,
+            command_id,
+            actor_participant_id,
+            command_type,
+            expected_state_version,
+            payload_digest,
+            accepted_state_version,
+            accepted_sequence,
+            expires_at
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            'complete_dark_arts',
+            1,
+            'blake3:0000000000000000000000000000000000000000000000000000000000000000',
+            2,
+            1,
+            (SELECT expires_at + INTERVAL '1 second' FROM games WHERE id = $1)
+        )
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(command_id)
+    .bind(actor_id)
+    .execute(&mut *transaction)
+    .await
+    .expect("the mismatched receipt should reach the deferred constraint");
+
+    let error = transaction
+        .commit()
+        .await
+        .expect_err("a receipt with another expiration must be rejected at commit");
+    assert_database_error_code(&error, "23514");
+    assert!(
+        error
+            .to_string()
+            .contains("matching official event and receipt")
+    );
+}
+
+#[tokio::test]
 async fn an_official_event_cannot_commit_without_its_receipt() {
     let room = ready_room().await;
     start_ready_game(&room, "orphan-event-start").await;

@@ -162,7 +162,35 @@ RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.room_id IS DISTINCT FROM OLD.room_id
+       OR NEW.started_by_participant_id IS DISTINCT FROM OLD.started_by_participant_id
+       OR NEW.adventure_id IS DISTINCT FROM OLD.adventure_id
+       OR NEW.adventure_name IS DISTINCT FROM OLD.adventure_name
+       OR NEW.manifest_digest IS DISTINCT FROM OLD.manifest_digest
+       OR NEW.manifest_version IS DISTINCT FROM OLD.manifest_version
+       OR NEW.content_version IS DISTINCT FROM OLD.content_version
+       OR NEW.ruleset_version IS DISTINCT FROM OLD.ruleset_version
+       OR NEW.snapshot_version IS DISTINCT FROM OLD.snapshot_version
+       OR NEW.prng_algorithm IS DISTINCT FROM OLD.prng_algorithm
+       OR NEW.prng_seed IS DISTINCT FROM OLD.prng_seed
+       OR NEW.shuffle_algorithm IS DISTINCT FROM OLD.shuffle_algorithm
+       OR NEW.sampling_algorithm IS DISTINCT FROM OLD.sampling_algorithm
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at
+    THEN
+        RAISE EXCEPTION 'started game identity and algorithms are immutable'
+            USING ERRCODE = '23514';
+    END IF;
+
     IF NEW.sequence = OLD.sequence AND NEW.state_version = OLD.state_version THEN
+        IF NEW.status IS DISTINCT FROM OLD.status
+           OR NEW.state_digest IS DISTINCT FROM OLD.state_digest
+           OR NEW.snapshot::text IS DISTINCT FROM OLD.snapshot::text
+           OR NEW.prng_counter IS DISTINCT FROM OLD.prng_counter
+        THEN
+            RAISE EXCEPTION 'authoritative game state cannot change without advancing its cursor'
+                USING ERRCODE = '23514';
+        END IF;
         RETURN NEW;
     END IF;
 
@@ -182,6 +210,7 @@ BEGIN
          AND receipts.actor_participant_id = events.actor_participant_id
          AND receipts.accepted_state_version = events.state_version
          AND receipts.command_type = 'complete_dark_arts'
+         AND receipts.expires_at = NEW.expires_at
         WHERE events.game_id = NEW.id
           AND events.room_id = NEW.room_id
           AND events.sequence = NEW.sequence
@@ -203,6 +232,9 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM game_command_receipts AS receipts
+        JOIN games
+          ON games.id = receipts.game_id
+         AND games.room_id = receipts.room_id
         WHERE receipts.game_id = NEW.game_id
           AND receipts.room_id = NEW.room_id
           AND receipts.accepted_sequence = NEW.sequence
@@ -210,6 +242,7 @@ BEGIN
           AND receipts.actor_participant_id = NEW.actor_participant_id
           AND receipts.accepted_state_version = NEW.state_version
           AND receipts.command_type = 'complete_dark_arts'
+          AND receipts.expires_at = games.expires_at
     ) THEN
         RAISE EXCEPTION 'official game event requires a matching command receipt'
             USING ERRCODE = '23514';
