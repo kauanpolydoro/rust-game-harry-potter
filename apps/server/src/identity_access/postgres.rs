@@ -2,8 +2,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{
-    ApiError, StoredLobby, StoredParticipant, StoredRecoveryCandidate, StoredRoomCreation,
-    StoredRoomJoin, random_room_code,
+    ApiError, StoredDeviceSession, StoredLobby, StoredParticipant, StoredRecoveryCandidate,
+    StoredRoomCreation, StoredRoomJoin, random_room_code,
 };
 
 pub(super) struct NewRoomJoin<'a> {
@@ -22,6 +22,16 @@ pub(super) struct NewRoomCreation<'a> {
     pub(super) guest_session_id: Uuid,
     pub(super) display_name: &'a str,
     pub(super) password_hash: &'a str,
+}
+
+pub(super) struct NewRecoveredSession<'a> {
+    pub(super) guest_session_id: Uuid,
+    pub(super) device_session_id: Uuid,
+    pub(super) recovery_attempt_id: Uuid,
+    pub(super) session_token: &'a str,
+    pub(super) slot: i16,
+    pub(super) replacement: Option<&'a StoredDeviceSession>,
+    pub(super) successor_token_hmac: &'a str,
 }
 
 pub(super) async fn claim_room_creation(
@@ -493,9 +503,11 @@ pub(super) async fn load_recovery_candidate(
             recovery_credentials.id AS credential_id,
             participants.id AS participant_id,
             participants.guest_identity_id,
+            games.id AS game_id,
             rooms.recovery_password_hash,
             recovery_credentials.status,
             recovery_credentials.recovery_attempt_id,
+            recovery_credentials.replaced_device_session_id,
             CASE
                 WHEN consumed_device_sessions.status = 'active'
                  AND consumed_guest_sessions.expires_at > clock_timestamp()
@@ -547,9 +559,11 @@ pub(super) async fn lock_recovery_candidate(
             recovery_credentials.id AS credential_id,
             participants.id AS participant_id,
             participants.guest_identity_id,
+            games.id AS game_id,
             rooms.recovery_password_hash,
             recovery_credentials.status,
             recovery_credentials.recovery_attempt_id,
+            recovery_credentials.replaced_device_session_id,
             CASE
                 WHEN consumed_device_sessions.status = 'active'
                  AND consumed_guest_sessions.expires_at > clock_timestamp()
@@ -591,34 +605,70 @@ pub(super) async fn lock_recovery_candidate(
     .map_err(|error| ApiError::internal_with("lock participant recovery candidate", error))
 }
 
-pub(super) async fn active_session_count(
+pub(super) async fn lock_active_device_sessions(
     transaction: &mut Transaction<'_, Postgres>,
     participant_id: Uuid,
-) -> Result<i64, ApiError> {
-    sqlx::query_scalar(
+) -> Result<Vec<StoredDeviceSession>, ApiError> {
+    let participant_exists =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM participants WHERE id = $1 FOR UPDATE")
+            .bind(participant_id)
+            .fetch_optional(&mut **transaction)
+            .await
+            .map_err(|error| ApiError::internal_with("lock recovery participant", error))?
+            .is_some();
+    if !participant_exists {
+        return Err(ApiError::recovery_failed());
+    }
+
+    sqlx::query(
         r"
-        SELECT COUNT(*)
+        UPDATE device_sessions
+        SET status = 'expired'
+        FROM guest_sessions
+        WHERE device_sessions.participant_id = $1
+          AND device_sessions.status = 'active'
+          AND guest_sessions.id = device_sessions.guest_session_id
+          AND guest_sessions.expires_at <= clock_timestamp()
+        ",
+    )
+    .bind(participant_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("expire participant device sessions", error))?;
+
+    sqlx::query_as::<_, StoredDeviceSession>(
+        r#"
+        SELECT
+            device_sessions.id,
+            device_sessions.slot,
+            to_char(
+                device_sessions.created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            ) AS created_at
         FROM device_sessions
         JOIN guest_sessions ON guest_sessions.id = device_sessions.guest_session_id
         WHERE device_sessions.participant_id = $1
           AND device_sessions.status = 'active'
           AND guest_sessions.expires_at > clock_timestamp()
-        ",
+        ORDER BY device_sessions.slot
+        FOR UPDATE OF device_sessions
+        "#,
     )
     .bind(participant_id)
-    .fetch_one(&mut **transaction)
+    .fetch_all(&mut **transaction)
     .await
-    .map_err(|error| ApiError::internal_with("count participant device sessions", error))
+    .map_err(|error| ApiError::internal_with("lock participant device sessions", error))
 }
 
 pub(super) async fn consume_recovery_credential(
     transaction: &mut Transaction<'_, Postgres>,
     candidate: &StoredRecoveryCandidate,
-    guest_session_id: Uuid,
-    device_session_id: Uuid,
-    recovery_attempt_id: Uuid,
-    session_token: &str,
+    session: NewRecoveredSession<'_>,
 ) -> Result<i64, ApiError> {
+    if let Some(replacement) = session.replacement {
+        replace_device_session(transaction, candidate.participant_id, replacement.id).await?;
+    }
+
     let max_age_seconds = sqlx::query_scalar(
         r"
         INSERT INTO guest_sessions (id, guest_identity_id, token_digest)
@@ -633,22 +683,23 @@ pub(super) async fn consume_recovery_credential(
         )
         ",
     )
-    .bind(guest_session_id)
+    .bind(session.guest_session_id)
     .bind(candidate.guest_identity_id)
-    .bind(session_token)
+    .bind(session.session_token)
     .fetch_one(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("create recovered guest session", error))?;
 
     sqlx::query(
         r"
-        INSERT INTO device_sessions (id, guest_session_id, participant_id)
-        VALUES ($1, $2, $3)
+        INSERT INTO device_sessions (id, guest_session_id, participant_id, slot)
+        VALUES ($1, $2, $3, $4)
         ",
     )
-    .bind(device_session_id)
-    .bind(guest_session_id)
+    .bind(session.device_session_id)
+    .bind(session.guest_session_id)
     .bind(candidate.participant_id)
+    .bind(session.slot)
     .execute(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("create recovered device session", error))?;
@@ -660,6 +711,7 @@ pub(super) async fn consume_recovery_credential(
             status = 'consumed',
             recovery_attempt_id = $3,
             consumed_by_guest_session_id = $2,
+            replaced_device_session_id = $4,
             consumed_at = clock_timestamp()
         WHERE id = $1
           AND status = 'active'
@@ -684,8 +736,9 @@ pub(super) async fn consume_recovery_credential(
         ",
     )
     .bind(candidate.credential_id)
-    .bind(guest_session_id)
-    .bind(recovery_attempt_id)
+    .bind(session.guest_session_id)
+    .bind(session.recovery_attempt_id)
+    .bind(session.replacement.map(|replacement| replacement.id))
     .execute(&mut **transaction)
     .await
     .map_err(|error| ApiError::internal_with("consume participant recovery credential", error))?;
@@ -693,7 +746,39 @@ pub(super) async fn consume_recovery_credential(
         return Err(ApiError::recovery_failed());
     }
 
+    insert_recovery_credential(
+        transaction,
+        candidate.participant_id,
+        session.successor_token_hmac,
+    )
+    .await?;
+
     Ok(max_age_seconds)
+}
+
+async fn replace_device_session(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant_id: Uuid,
+    device_session_id: Uuid,
+) -> Result<(), ApiError> {
+    let replaced = sqlx::query(
+        r"
+        UPDATE device_sessions
+        SET status = 'replaced'
+        WHERE id = $1
+          AND participant_id = $2
+          AND status = 'active'
+        ",
+    )
+    .bind(device_session_id)
+    .bind(participant_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("replace participant device session", error))?;
+    if replaced.rows_affected() != 1 {
+        return Err(ApiError::recovery_failed());
+    }
+    Ok(())
 }
 
 async fn insert_room(

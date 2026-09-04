@@ -52,7 +52,60 @@
           "type": "string",
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "replace_session_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         }
+      }
+    },
+    "RecoverySessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "created_at"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "label": { "type": "string", "enum": ["Sessão 1", "Sessão 2"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RecoveryReplacementRequiredResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "sessions"],
+      "properties": {
+        "status": { "type": "string", "enum": ["replacement_required"] },
+        "sessions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/RecoverySessionSummary" }
+        }
+      }
+    },
+    "RecoveredLobbyResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "recovery_token", "lobby"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["lobby"] },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "lobby": { "$ref": "#/$defs/LobbyResponse" }
+      }
+    },
+    "RecoveredGameResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "recovery_token", "game"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["game"] },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "game": { "$ref": "#/$defs/GameProjectionResponse" }
       }
     },
     "StartGameRequest": {

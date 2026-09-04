@@ -238,22 +238,22 @@ async fn serve_game_events(
         digest: query.digest,
         synchronized: false,
     };
-    let signal = state.subscribe_to_game_events(game_id);
+    let synchronization_signal = state.subscribe_to_game_synchronization(game_id);
     let presence_signal = state.subscribe_to_game_presence(game_id);
     let shutdown = state.subscribe_to_shutdown();
     if *shutdown.borrow() {
         close_socket(&mut socket, close_code::RESTART, "server is shutting down").await;
-        drop(signal);
+        drop(synchronization_signal);
         drop(presence_signal);
-        state.prune_game_event_channel(game_id);
+        state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
         return;
     }
     let force_initial_snapshot = query.cursor.is_none() || position.cursor.is_none();
-    if let Err(error) = synchronize_socket(
+    if !synchronize_connection(
         &mut socket,
         &state,
-        participant_id,
+        session,
         game_id,
         &mut position,
         force_initial_snapshot,
@@ -261,21 +261,9 @@ async fn serve_game_events(
     )
     .await
     {
-        tracing::warn!(
-            error = %error,
-            %game_id,
-            %participant_id,
-            "initial realtime synchronization failed"
-        );
-        close_socket(
-            &mut socket,
-            close_code::ERROR,
-            "initial synchronization failed",
-        )
-        .await;
-        drop(signal);
+        drop(synchronization_signal);
         drop(presence_signal);
-        state.prune_game_event_channel(game_id);
+        state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
         return;
     }
@@ -283,9 +271,9 @@ async fn serve_game_events(
     let Some((connection_id, mut last_presence)) =
         register_connection_presence(&mut socket, &state, session, game_id, protocol).await
     else {
-        drop(signal);
+        drop(synchronization_signal);
         drop(presence_signal);
-        state.prune_game_event_channel(game_id);
+        state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
         return;
     };
@@ -302,13 +290,13 @@ async fn serve_game_events(
         context,
         &mut position,
         &mut last_presence,
-        signal,
+        synchronization_signal,
         presence_signal,
         shutdown,
     )
     .await;
     disconnect_presence(&state, connection_id, game_id, participant_id).await;
-    state.prune_game_event_channel(game_id);
+    state.prune_game_synchronization_channel(game_id);
     state.prune_game_presence_channel(game_id);
 }
 
@@ -360,7 +348,7 @@ async fn realtime_event_loop(
     context: RealtimeConnectionContext<'_>,
     position: &mut RealtimePosition,
     last_presence: &mut Option<RealtimePresenceMessage>,
-    mut signal: broadcast::Receiver<()>,
+    mut synchronization_signal: broadcast::Receiver<()>,
     mut presence_signal: broadcast::Receiver<()>,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -407,7 +395,7 @@ async fn realtime_event_loop(
                 )
                 .await
             }
-            notification = signal.recv() => {
+            notification = synchronization_signal.recv() => {
                 match notification {
                     Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                         RealtimeLoopAction::Synchronize
@@ -497,7 +485,9 @@ async fn apply_realtime_loop_action(
             .await
         }
         RealtimeLoopAction::Synchronize => {
-            if !synchronize_connection(socket, state, session, game_id, position, protocol).await {
+            if !synchronize_connection(socket, state, session, game_id, position, false, protocol)
+                .await
+            {
                 return false;
             }
             !protocol.publishes_presence()
@@ -525,6 +515,17 @@ async fn synchronize_presence(
         protocol,
         ..
     } = context;
+    match revalidate_socket_session(state, session, game_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            return false;
+        }
+        Err(_) => {
+            close_socket(socket, close_code::ERROR, "session revalidation failed").await;
+            return false;
+        }
+    }
     if let Err(error) =
         send_realtime_presence(socket, state, game_id, last_presence, false, protocol).await
     {
@@ -665,6 +666,7 @@ async fn synchronize_connection(
     session: AuthenticatedSession,
     game_id: Uuid,
     position: &mut RealtimePosition,
+    force_snapshot: bool,
     protocol: RealtimeProtocol,
 ) -> bool {
     match revalidate_socket_session(state, session, game_id).await {
@@ -685,7 +687,7 @@ async fn synchronize_connection(
         session.participant_id,
         game_id,
         position,
-        false,
+        force_snapshot,
         protocol,
     )
     .await

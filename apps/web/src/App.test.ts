@@ -198,6 +198,14 @@ function acceptedCommandResponse(commandId: string) {
   }
 }
 
+function recoveredGuestLobbyResponse() {
+  return {
+    kind: 'lobby',
+    lobby: guestLobbyResponse(),
+    recovery_token: '8'.repeat(64),
+  }
+}
+
 function errorResponse(code: string) {
   return {
     error: {
@@ -412,7 +420,7 @@ describe('application shell', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(recoveredGuestLobbyResponse()), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
         }),
@@ -455,6 +463,93 @@ describe('application shell', () => {
     expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBeNull()
   })
 
+  it('requires an explicit session choice before replacing access on a third device', async () => {
+    const token = '6'.repeat(64)
+    const successorToken = '7'.repeat(64)
+    const firstSessionId = '2fe6c1be-50fc-42ac-8c4f-6ef270099c24'
+    const secondSessionId = '8aa543d4-9d6f-4a8c-bd7b-6c6605be48fc'
+    window.__HOGWARTS_RECOVERY_TOKEN__ = token
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessions: [
+              {
+                created_at: '2026-09-01T14:20:00Z',
+                id: firstSessionId,
+                label: 'Sessão 1',
+              },
+              {
+                created_at: '2026-09-03T10:05:00Z',
+                id: secondSessionId,
+                label: 'Sessão 2',
+              },
+            ],
+            status: 'replacement_required',
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            kind: 'lobby',
+            lobby: guestLobbyResponse(),
+            recovery_token: successorToken,
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' })
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Escolha uma sessão para substituir' }),
+    ).toBeVisible()
+    expect(screen.getByText('Criada em 01/09/2026, 11:20')).toBeVisible()
+    expect(screen.getByText('Criada em 03/09/2026, 07:05')).toBeVisible()
+    expect(request).toHaveBeenCalledTimes(2)
+
+    await fireEvent.click(screen.getByRole('radio', { name: 'Sessão 1' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Substituir Sessão 1' }))
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${successorToken}`,
+    )
+    const discovery = JSON.parse(
+      String((request.mock.calls[1]?.[1] as RequestInit | undefined)?.body),
+    ) as { recovery_attempt_id: string }
+    expect(
+      JSON.parse(String((request.mock.calls[2]?.[1] as RequestInit | undefined)?.body)),
+    ).toEqual({
+      recovery_attempt_id: discovery.recovery_attempt_id,
+      recovery_password: 'a long uncommon passphrase',
+      recovery_token: token,
+      replace_session_id: firstSessionId,
+    })
+  })
+
   it('gives a recovery link precedence over an older pending room join', async () => {
     const token = 'f'.repeat(64)
     window.__HOGWARTS_RECOVERY_TOKEN__ = token
@@ -477,7 +572,7 @@ describe('application shell', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(recoveredGuestLobbyResponse()), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
         }),
@@ -518,13 +613,7 @@ describe('application shell', () => {
       )
       .mockRejectedValueOnce(new TypeError('response lost after commit'))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(errorResponse('SESSION_INVALID')), {
-          headers: { 'Content-Type': 'application/json' },
-          status: 401,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(recoveredGuestLobbyResponse()), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
         }),
@@ -552,7 +641,7 @@ describe('application shell', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
     expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
     const retriedAttempt = JSON.parse(
-      String((request.mock.calls[3]?.[1] as RequestInit | undefined)?.body),
+      String((request.mock.calls[2]?.[1] as RequestInit | undefined)?.body),
     ) as { recovery_attempt_id: string }
     expect(retriedAttempt.recovery_attempt_id).toBe(firstAttempt.recovery_attempt_id)
     expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBeNull()

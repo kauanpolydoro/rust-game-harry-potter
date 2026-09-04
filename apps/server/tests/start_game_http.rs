@@ -658,40 +658,21 @@ async fn recovery_restores_the_same_game_snapshot_without_renewing_retention() {
     );
     let recovered = response_json(recovered_response).await;
 
-    assert_eq!(recovered["participant"], initial["participant"]);
-    assert_eq!(recovered["participants"], initial["participants"]);
-    assert_eq!(recovered["snapshot"], initial["snapshot"]);
-    assert_eq!(recovered["game"], initial["game"]);
+    assert_eq!(recovered["kind"], "game");
+    assert_eq!(recovered["game"]["participant"], initial["participant"]);
+    assert_eq!(recovered["game"]["participants"], initial["participants"]);
+    assert_eq!(recovered["game"]["snapshot"], initial["snapshot"]);
+    assert_eq!(recovered["game"]["game"], initial["game"]);
+    assert!(recovered["recovery_token"].as_str().is_some_and(|token| {
+        token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }));
 
-    let (expires_after, active_sessions, credential_status) =
-        sqlx::query_as::<_, (String, i64, String)>(
-            r"
-            SELECT
-                games.expires_at::text,
-                (
-                    SELECT COUNT(*)
-                    FROM device_sessions
-                    JOIN guest_sessions
-                      ON guest_sessions.id = device_sessions.guest_session_id
-                    WHERE device_sessions.participant_id = rooms.host_participant_id
-                      AND device_sessions.status = 'active'
-                      AND guest_sessions.expires_at > clock_timestamp()
-                ),
-                recovery_credentials.status
-            FROM games
-            JOIN rooms ON rooms.id = games.room_id
-            JOIN recovery_credentials
-              ON recovery_credentials.participant_id = rooms.host_participant_id
-            WHERE rooms.code = $1
-            ",
-        )
-        .bind(&room.room_code)
-        .fetch_one(&room.database)
-        .await
-        .expect("the recovered session and retention must be queryable");
+    let (expires_after, active_sessions, consumed_credentials, active_credentials) =
+        recovered_participation_state(&room).await;
     assert_eq!(expires_after, expires_before);
     assert_eq!(active_sessions, 2);
-    assert_eq!(credential_status, "consumed");
+    assert_eq!(consumed_credentials, 1);
+    assert_eq!(active_credentials, 1);
 
     expire_game(&room.database, &room.room_code).await;
 
@@ -717,6 +698,36 @@ async fn recovery_restores_the_same_game_snapshot_without_renewing_retention() {
         response_json(expired_recovery).await["error"]["code"],
         "RECOVERY_FAILED"
     );
+}
+
+async fn recovered_participation_state(room: &ReadyRoom) -> (String, i64, i64, i64) {
+    sqlx::query_as(
+        r"
+        SELECT
+            games.expires_at::text,
+            (
+                SELECT COUNT(*)
+                FROM device_sessions
+                JOIN guest_sessions
+                  ON guest_sessions.id = device_sessions.guest_session_id
+                WHERE device_sessions.participant_id = rooms.host_participant_id
+                  AND device_sessions.status = 'active'
+                  AND guest_sessions.expires_at > clock_timestamp()
+            ),
+            COUNT(*) FILTER (WHERE recovery_credentials.status = 'consumed'),
+            COUNT(*) FILTER (WHERE recovery_credentials.status = 'active')
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        JOIN recovery_credentials
+          ON recovery_credentials.participant_id = rooms.host_participant_id
+        WHERE rooms.code = $1
+        GROUP BY games.expires_at, rooms.host_participant_id
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the recovered session and retention must be queryable")
 }
 
 #[tokio::test]
@@ -2496,8 +2507,8 @@ async fn additional_session_for_participant(room: &ReadyRoom, participant_role: 
     .expect("the additional guest session must be inserted");
     sqlx::query(
         r"
-        INSERT INTO device_sessions (id, guest_session_id, participant_id)
-        SELECT $1, $2, participants.id
+        INSERT INTO device_sessions (id, guest_session_id, participant_id, slot)
+        SELECT $1, $2, participants.id, 2
         FROM participants
         JOIN rooms ON rooms.id = participants.room_id
         WHERE rooms.code = $3
@@ -2914,6 +2925,94 @@ async fn a_revoked_session_closes_its_existing_websocket_before_delivering_an_ev
     let close_code = tokio::time::timeout(Duration::from_secs(2), guest_socket.read_close_code())
         .await
         .expect("the revoked socket must be closed promptly");
+    assert_eq!(close_code, 1008);
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_replaced_session_loses_v1_websocket_authorization_at_the_recovery_commit() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-device-replacement").await;
+
+    let second_device = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recover",
+            &json!({
+                "recovery_token": room.host_recovery_token,
+                "recovery_password": "a long uncommon passphrase",
+                "recovery_attempt_id": uuid::Uuid::new_v4().to_string()
+            }),
+            None,
+            None,
+        ))
+        .await
+        .expect("second-device recovery must receive a response");
+    assert_eq!(second_device.status(), StatusCode::OK);
+    let second_device = response_json(second_device).await;
+    let successor_token = second_device["recovery_token"]
+        .as_str()
+        .expect("recovery must rotate the individual credential");
+
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let (status, _, mut replaced_socket) = websocket_handshake(
+        address,
+        "/api/games/current/events",
+        Some(&room.host_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let _ = replaced_socket.read_text().await;
+
+    let replacement_attempt = uuid::Uuid::new_v4().to_string();
+    let candidates = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recover",
+            &json!({
+                "recovery_token": successor_token,
+                "recovery_password": "a long uncommon passphrase",
+                "recovery_attempt_id": replacement_attempt
+            }),
+            None,
+            None,
+        ))
+        .await
+        .expect("replacement discovery must receive a response");
+    assert_eq!(candidates.status(), StatusCode::CONFLICT);
+    let candidates = response_json(candidates).await;
+    let first_session_id = candidates["sessions"][0]["id"]
+        .as_str()
+        .expect("the first session must be replaceable");
+
+    let replacement = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recover",
+            &json!({
+                "recovery_token": successor_token,
+                "recovery_password": "a long uncommon passphrase",
+                "recovery_attempt_id": replacement_attempt,
+                "replace_session_id": first_session_id
+            }),
+            None,
+            None,
+        ))
+        .await
+        .expect("replacement confirmation must receive a response");
+    assert_eq!(replacement.status(), StatusCode::OK);
+    let close_code =
+        tokio::time::timeout(Duration::from_secs(2), replaced_socket.read_close_code())
+            .await
+            .expect("the recovery commit must promptly close the replaced socket");
     assert_eq!(close_code, 1008);
     server.abort();
 }

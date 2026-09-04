@@ -152,7 +152,7 @@ test('a guest joins with an available hero and keeps the same position after rel
   }
 })
 
-test('a participant uses an individual link once to recover the same position on a second device', async ({
+test('a participant explicitly replaces one of two sessions when recovering on a third device', async ({
   browser,
   page,
 }) => {
@@ -163,6 +163,7 @@ test('a participant uses an individual link once to recover the same position on
   const recoveryLink = await page.getByLabel('Link de recuperação').inputValue()
   expect(recoveryLink).toMatch(/#recovery=[0-9a-f]{64}$/)
 
+  let successorRecoveryLink = ''
   const secondDevice = await browser.newContext()
   const recoveredPage = await secondDevice.newPage()
   try {
@@ -180,6 +181,8 @@ test('a participant uses an individual link once to recover the same position on
     await expect(
       recoveredPage.locator('.room-details').getByText('Posição 1', { exact: true }),
     ).toBeVisible()
+    successorRecoveryLink = await recoveredPage.getByLabel('Link de recuperação').inputValue()
+    expect(successorRecoveryLink).toMatch(/#recovery=[0-9a-f]{64}$/)
     const recoveredSession = (await secondDevice.cookies()).find(
       (cookie) => cookie.name === '__Host-session',
     )
@@ -204,6 +207,43 @@ test('a participant uses an individual link once to recover the same position on
   } finally {
     await replayDevice.close()
   }
+
+  const thirdDevice = await browser.newContext()
+  const replacementPage = await thirdDevice.newPage()
+  try {
+    await replacementPage.goto(successorRecoveryLink)
+    await replacementPage
+      .getByLabel('Senha de recuperação da sala')
+      .fill('a long uncommon passphrase')
+    await replacementPage.getByRole('button', { name: 'Recuperar minha posição' }).click()
+
+    await expect(
+      replacementPage.getByRole('heading', {
+        level: 2,
+        name: 'Escolha uma sessão para substituir',
+      }),
+    ).toBeVisible()
+    await expect(replacementPage.getByRole('radio', { name: 'Sessão 1' })).toBeVisible()
+    await expect(replacementPage.getByRole('radio', { name: 'Sessão 2' })).toBeVisible()
+    await replacementPage.getByRole('radio', { name: 'Sessão 1' }).check()
+    await replacementPage.getByRole('button', { name: 'Substituir Sessão 1' }).click()
+
+    await expect(
+      replacementPage.getByRole('heading', { level: 2, name: 'Sala pronta' }),
+    ).toBeVisible()
+    await expect(replacementPage.getByLabel('Link de recuperação')).toHaveValue(
+      /#recovery=[0-9a-f]{64}$/,
+    )
+  } finally {
+    await thirdDevice.close()
+  }
+
+  const revokedSession = await page.request.get('/api/session')
+  expect(revokedSession.status()).toBe(401)
+  await page.reload()
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' }),
+  ).toBeVisible()
 })
 
 test('a player replays a missed event and falls back to Snapshot within recovery SLOs', async ({

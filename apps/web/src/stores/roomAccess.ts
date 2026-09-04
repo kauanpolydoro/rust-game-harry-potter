@@ -11,6 +11,9 @@ import {
   isGameProjectionResponse,
   isJoinRoomResponse,
   isLobbyResponse,
+  isRecoveredGameResponse,
+  isRecoveredLobbyResponse,
+  isRecoveryReplacementRequiredResponse,
   type CreateRoomResponse,
   type FindRoomResponse,
   type GameProjectionResponse,
@@ -18,6 +21,7 @@ import {
   type JoinRoomRequest,
   type LobbyResponse,
   type RecoverParticipationRequest,
+  type RecoverySessionSummary,
   type StartGameRequest,
 } from '../contracts/identity-access.generated'
 
@@ -26,6 +30,7 @@ type RoomAccessStatus =
   | 'looking_up'
   | 'joining'
   | 'recovering_participation'
+  | 'choosing_recovery_session'
   | 'restoring'
   | 'selecting_hero'
   | 'setting_readiness'
@@ -195,6 +200,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
     sessionExpected: boolean
     issuedRecoveryToken: string | null
     recoveryAttemptId: string | null
+    replacementSessions: Array<RecoverySessionSummary>
   } => {
     const pendingJoinIntent = loadPendingJoinIntent()
     return {
@@ -211,6 +217,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       sessionExpected: sessionIsExpected(),
       issuedRecoveryToken: null,
       recoveryAttemptId: loadRecoveryAttemptId(),
+      replacementSessions: [],
     }
   },
   actions: {
@@ -247,9 +254,11 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
       this.errorCode = null
+      this.replacementSessions = []
       this.status = 'idle'
+      this.clearParticipationRecoveryAttempt()
     },
-    confirmParticipationRecovery(): void {
+    clearParticipationRecoveryAttempt(): void {
       this.recoveryAttemptId = null
       removeRecoveryAttemptId()
     },
@@ -393,22 +402,27 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'POST',
         })
-        if (response.ok && isLobbyResponse(result)) {
-          this.lobby = result
-          this.game = null
-          this.status = 'ready'
-          this.clearPendingJoinIntent()
-          this.confirmParticipationRecovery()
-          this.sessionExpected = true
-          markSessionExpected(true)
-          return true
+        if (response.status === 409 && isRecoveryReplacementRequiredResponse(result)) {
+          this.replacementSessions = result.sessions
+          this.status = 'choosing_recovery_session'
+          return false
         }
-        if (response.ok && isGameProjectionResponse(result)) {
-          this.game = result
-          this.lobby = null
+        if (
+          response.ok &&
+          (isRecoveredLobbyResponse(result) || isRecoveredGameResponse(result))
+        ) {
+          if (result.kind === 'lobby') {
+            this.lobby = result.lobby
+            this.game = null
+          } else {
+            this.game = result.game
+            this.lobby = null
+          }
           this.status = 'ready'
+          this.issuedRecoveryToken = result.recovery_token
+          this.replacementSessions = []
           this.clearPendingJoinIntent()
-          this.confirmParticipationRecovery()
+          this.clearParticipationRecoveryAttempt()
           this.sessionExpected = true
           markSessionExpected(true)
           return true
@@ -419,14 +433,6 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return false
       } catch (error) {
         const recoveryError = transportErrorCode(error)
-        this.sessionExpected = true
-        markSessionExpected(true)
-        this.status = 'idle'
-        await this.restoreSession()
-        if (this.lobby || this.game) {
-          this.confirmParticipationRecovery()
-          return true
-        }
         this.errorCode = recoveryError
         this.status = 'failed'
         this.sessionExpected = false

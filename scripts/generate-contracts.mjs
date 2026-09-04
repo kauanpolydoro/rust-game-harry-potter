@@ -140,11 +140,18 @@ function validationExpression(schema, value) {
       `Array.isArray(${value})`,
       `${value}.every((entry) => ${validationExpression(schema.items, 'entry')})`,
     ]
-    if (typeof schema.minItems === 'number') {
-      checks.push(`${value}.length >= ${schema.minItems}`)
-    }
-    if (typeof schema.maxItems === 'number') {
-      checks.push(`${value}.length <= ${schema.maxItems}`)
+    if (
+      typeof schema.minItems === 'number' &&
+      schema.minItems === schema.maxItems
+    ) {
+      checks.push(`${value}.length === ${schema.minItems}`)
+    } else {
+      if (typeof schema.minItems === 'number') {
+        checks.push(`${value}.length >= ${schema.minItems}`)
+      }
+      if (typeof schema.maxItems === 'number') {
+        checks.push(`${value}.length <= ${schema.maxItems}`)
+      }
     }
     return checks.join(' && ')
   }
