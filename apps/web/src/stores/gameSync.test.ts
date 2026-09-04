@@ -19,7 +19,7 @@ class FakeWebSocket {
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event: { code: number }) => void) | null = null
 
   constructor(url: string | URL, protocol: string | string[]) {
     this.url = String(url)
@@ -39,7 +39,12 @@ class FakeWebSocket {
 
   close(): void {
     this.readyState = FakeWebSocket.CLOSED
-    this.onclose?.()
+    this.onclose?.({ code: 1000 })
+  }
+
+  serverClose(code = 1006): void {
+    this.readyState = FakeWebSocket.CLOSED
+    this.onclose?.({ code })
   }
 }
 
@@ -118,6 +123,8 @@ function eventBatch(fromCursor: number, cursor: number) {
 
 describe('official game synchronization', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
     setActivePinia(createPinia())
@@ -125,6 +132,8 @@ describe('official game synchronization', () => {
 
   afterEach(() => {
     useGameSyncStore().disconnect()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -171,7 +180,7 @@ describe('official game synchronization', () => {
     expect(roomAccess.game?.game.expires_at).toBe('2026-09-10T12:00:00Z')
   })
 
-  it('requests a full snapshot when a batch has a cursor gap', () => {
+  it('schedules a full snapshot without an immediate loop when a batch has a cursor gap', () => {
     const roomAccess = useRoomAccessStore()
     roomAccess.game = projection()
     const sync = useGameSyncStore()
@@ -181,12 +190,17 @@ describe('official game synchronization', () => {
 
     socket?.receive(eventBatch(1, 2))
 
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(sync.status).toBe('reconnecting')
+    vi.advanceTimersByTime(249)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    vi.advanceTimersByTime(1)
     expect(FakeWebSocket.instances).toHaveLength(2)
     expect(FakeWebSocket.instances[1]?.url).toContain('snapshot_version=0')
     expect(roomAccess.game?.snapshot.cursor).toBe(0)
   })
 
-  it('rejects event payload fields outside the public allowlist', () => {
+  it('rejects event payload fields outside the public allowlist without a tight loop', () => {
     const roomAccess = useRoomAccessStore()
     roomAccess.game = projection()
     const sync = useGameSyncStore()
@@ -198,7 +212,192 @@ describe('official game synchronization', () => {
 
     socket?.receive(unsafe)
 
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    vi.advanceTimersByTime(250)
     expect(FakeWebSocket.instances).toHaveLength(2)
     expect(roomAccess.game?.snapshot.cursor).toBe(0)
+  })
+
+  it('rejects a regressive snapshot without replacing newer confirmed state', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection(1)
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+
+    socket?.receive({
+      cursor: 0,
+      projection: projection(0),
+      protocol_version: 1,
+      type: 'snapshot',
+    })
+
+    expect(roomAccess.game?.snapshot.cursor).toBe(1)
+    expect(sync.cursor).toBe(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('recovers instead of applying an event batch with a regressive state version', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection(1)
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    const regressive = eventBatch(1, 2)
+    regressive.projection.snapshot.state_version = 1
+
+    socket?.receive(regressive)
+
+    expect(roomAccess.game?.snapshot.cursor).toBe(1)
+    expect(sync.status).toBe('reconnecting')
+    vi.advanceTimersByTime(250)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(FakeWebSocket.instances[1]?.url).toContain('snapshot_version=0')
+  })
+
+  it('resets synchronization coordinates when the active game changes', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection(5)
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+
+    const replacement = projection(0)
+    replacement.game.id = '9db43390-a2ea-42df-8d18-ce4d1e530302'
+    roomAccess.game = replacement
+    sync.connect(replacement)
+
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(FakeWebSocket.instances[1]?.url).toContain('cursor=0')
+    expect(sync.cursor).toBe(0)
+    expect(sync.snapshotVersion).toBe(1)
+  })
+
+  it('uses bounded exponential backoff with jitter until a connection is stable', () => {
+    vi.mocked(Math.random).mockReturnValue(1)
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+
+    for (const delay of [750, 1_500, 3_000, 6_000, 12_000, 24_000, 30_000, 30_000]) {
+      FakeWebSocket.instances.at(-1)?.serverClose()
+      const count = FakeWebSocket.instances.length
+      vi.advanceTimersByTime(delay - 1)
+      expect(FakeWebSocket.instances).toHaveLength(count)
+      vi.advanceTimersByTime(1)
+      expect(FakeWebSocket.instances).toHaveLength(count + 1)
+    }
+  })
+
+  it('resets the retry sequence only after the connection remains stable', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+
+    FakeWebSocket.instances[0]?.serverClose()
+    vi.advanceTimersByTime(250)
+    const recovered = FakeWebSocket.instances[1]
+    recovered?.open()
+    vi.advanceTimersByTime(5_000)
+    recovered?.serverClose()
+
+    vi.advanceTimersByTime(249)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    vi.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(3)
+  })
+
+  it('cancels a scheduled retry when the player reconnects manually', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+
+    FakeWebSocket.instances[0]?.serverClose()
+    sync.resynchronize()
+    const manualSocket = FakeWebSocket.instances[1]
+    manualSocket?.open()
+    vi.advanceTimersByTime(500)
+
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(sync.status).toBe('connected')
+  })
+
+  it('uses a conservative retry floor while the page is in the background', () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+
+    FakeWebSocket.instances[0]?.serverClose()
+    vi.advanceTimersByTime(14_999)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it('accelerates a background retry when the page becomes visible', () => {
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden')
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+
+    FakeWebSocket.instances[0]?.serverClose()
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    vi.advanceTimersByTime(249)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it('pauses retries while offline and resumes after the browser is online', () => {
+    const online = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false)
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+
+    sync.connect(roomAccess.game)
+    expect(sync.status).toBe('failed')
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    vi.advanceTimersByTime(30_000)
+    expect(FakeWebSocket.instances).toHaveLength(0)
+
+    online.mockReturnValue(true)
+    window.dispatchEvent(new Event('online'))
+    vi.advanceTimersByTime(250)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(sync.status).toBe('connecting')
+  })
+
+  it('keeps sockets and timers isolated between Pinia instances', () => {
+    const firstPinia = createPinia()
+    setActivePinia(firstPinia)
+    const firstRoom = useRoomAccessStore()
+    firstRoom.game = projection()
+    const firstSync = useGameSyncStore()
+    firstSync.connect(firstRoom.game)
+    const firstSocket = FakeWebSocket.instances[0]
+
+    const secondPinia = createPinia()
+    setActivePinia(secondPinia)
+    const secondRoom = useRoomAccessStore()
+    secondRoom.game = projection()
+    const secondSync = useGameSyncStore()
+    secondSync.connect(secondRoom.game)
+    const secondSocket = FakeWebSocket.instances[1]
+
+    firstSync.disconnect()
+    expect(firstSocket?.readyState).toBe(FakeWebSocket.CLOSED)
+    expect(secondSocket?.readyState).toBe(FakeWebSocket.CONNECTING)
+    secondSync.disconnect()
   })
 })

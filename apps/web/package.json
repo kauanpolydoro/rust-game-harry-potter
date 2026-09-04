@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ../../scripts/generate-vue-types.mjs --check && tsc --build --force && vite build",
+    "build": "node ../../scripts/check-vue-a11y.mjs && node ../../node_modules/typescript7/bin/tsc --build --force && vue-tsc --build --force && vite build",
     "dev": "vite --host 0.0.0.0",
     "lint": "oxlint --deny-warnings .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "typecheck": "node ../../scripts/generate-vue-types.mjs --check && tsc --build --force"
+    "typecheck": "node ../../scripts/check-vue-a11y.mjs && node ../../node_modules/typescript7/bin/tsc --build --force && vue-tsc --build --force"
   },
   "dependencies": {
     "@fontsource-variable/archivo-narrow": "5.3.0",
@@ -29,8 +29,8 @@
     "jsdom": "30.0.1",
     "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2001",
-    "typescript": "7.0.2",
     "vite": "8.2.2",
-    "vitest": "5.0.0"
+    "vitest": "5.0.0",
+    "vue-tsc": "3.3.11"
   }
 }

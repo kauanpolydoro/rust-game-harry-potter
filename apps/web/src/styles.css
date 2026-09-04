@@ -228,6 +228,34 @@ input {
   line-height: 1.5;
 }
 
+.realtime-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin-top: 1rem;
+  padding: 0.7rem 0.85rem;
+  border-left: 2px solid var(--brass-quiet);
+  background: rgb(255 255 255 / 3%);
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.realtime-status--connected {
+  border-left-color: var(--ready);
+}
+
+.realtime-status--failed,
+.realtime-status--reconnecting {
+  border-left-color: var(--warning);
+}
+
+.realtime-status .text-button {
+  min-height: 2.75rem;
+}
+
 .room-form {
   display: grid;
   gap: 1.1rem;

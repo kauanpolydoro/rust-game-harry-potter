@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 
 import {
+  apiError,
+  isUncertainTransportFailure,
+  requestJson,
+  transportErrorCode,
+} from '../api/http'
+import {
   isFindRoomResponse,
   isGameProjectionResponse,
   isLobbyResponse,
@@ -34,15 +40,88 @@ function lobbyActionIsPending(status: RoomAccessStatus): boolean {
 }
 
 const sessionExpectedStorage = 'hogwarts.session.expected'
+const pendingJoinStorage = 'hogwarts.room-join.pending-intent'
+const roomCodePattern = /^[23456789A-HJ-NP-Z]{8}$/
+const uuidV4Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const heroIds = new Set<HeroId>(['harry', 'hermione', 'neville', 'ron'])
+
+interface PendingJoinIntent {
+  commandType: 'join_room'
+  createdAt: string
+  idempotencyKey: string
+  input: JoinRoomRequest
+  roomCode: string
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function loadPendingJoinIntent(): PendingJoinIntent | null {
+  try {
+    const serialized = sessionStorage.getItem(pendingJoinStorage)
+    if (!serialized) {
+      return null
+    }
+    const intent: unknown = JSON.parse(serialized)
+    const input = isRecord(intent) ? intent.input : null
+    if (
+      !isRecord(intent) ||
+      Object.keys(intent).length !== 5 ||
+      intent.commandType !== 'join_room' ||
+      typeof intent.createdAt !== 'string' ||
+      Number.isNaN(Date.parse(intent.createdAt)) ||
+      typeof intent.idempotencyKey !== 'string' ||
+      !uuidV4Pattern.test(intent.idempotencyKey) ||
+      typeof intent.roomCode !== 'string' ||
+      !roomCodePattern.test(intent.roomCode) ||
+      !isRecord(input) ||
+      Object.keys(input).length !== 2 ||
+      typeof input.display_name !== 'string' ||
+      typeof input.hero_id !== 'string' ||
+      !heroIds.has(input.hero_id as HeroId)
+    ) {
+      sessionStorage.removeItem(pendingJoinStorage)
+      return null
+    }
+    return {
+      commandType: 'join_room',
+      createdAt: intent.createdAt,
+      idempotencyKey: intent.idempotencyKey,
+      input: {
+        display_name: input.display_name,
+        hero_id: input.hero_id as HeroId,
+      },
+      roomCode: intent.roomCode,
+    }
+  } catch {
+    try {
+      sessionStorage.removeItem(pendingJoinStorage)
+    } catch {
+      // Unavailable storage must not prevent a fresh join attempt.
+    }
+    return null
+  }
+}
+
+function persistPendingJoinIntent(intent: PendingJoinIntent): void {
+  try {
+    sessionStorage.setItem(pendingJoinStorage, JSON.stringify(intent))
+  } catch {
+    // Server-side idempotency still protects retries while this store remains alive.
+  }
+}
+
+function removePendingJoinIntent(): void {
+  try {
+    sessionStorage.removeItem(pendingJoinStorage)
+  } catch {
+    // Storage availability must not prevent a definitive response from being handled.
+  }
 }
 
 function apiErrorCode(value: unknown): string {
-  return isRecord(value) && isRecord(value.error) && typeof value.error.code === 'string'
-    ? value.error.code
-    : 'UNEXPECTED_RESPONSE'
+  return apiError(value)?.code ?? 'UNEXPECTED_RESPONSE'
 }
 
 function markSessionExpected(expected: boolean): void {
@@ -74,22 +153,33 @@ export const useRoomAccessStore = defineStore('roomAccess', {
     errorCode: string | null
     idempotencyKey: string | null
     pendingInput: JoinRoomRequest | null
+    pendingJoinIntent: PendingJoinIntent | null
     startIdempotencyKey: string | null
     pendingStartInput: StartGameRequest | null
     sessionExpected: boolean
-  } => ({
-    status: 'idle',
-    roomLookup: null,
-    lobby: null,
-    game: null,
-    errorCode: null,
-    idempotencyKey: null,
-    pendingInput: null,
-    startIdempotencyKey: null,
-    pendingStartInput: null,
-    sessionExpected: sessionIsExpected(),
-  }),
+  } => {
+    const pendingJoinIntent = loadPendingJoinIntent()
+    return {
+      status: 'idle',
+      roomLookup: null,
+      lobby: null,
+      game: null,
+      errorCode: null,
+      idempotencyKey: pendingJoinIntent?.idempotencyKey ?? null,
+      pendingInput: pendingJoinIntent ? { ...pendingJoinIntent.input } : null,
+      pendingJoinIntent,
+      startIdempotencyKey: null,
+      pendingStartInput: null,
+      sessionExpected: sessionIsExpected(),
+    }
+  },
   actions: {
+    clearPendingJoinIntent(): void {
+      this.idempotencyKey = null
+      this.pendingInput = null
+      this.pendingJoinIntent = null
+      removePendingJoinIntent()
+    },
     replaceGameProjection(projection: GameProjectionResponse): void {
       if (this.game && this.game.game.id !== projection.game.id) {
         return
@@ -113,8 +203,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       }
       this.roomLookup = null
       this.errorCode = null
-      this.idempotencyKey = null
-      this.pendingInput = null
+      this.clearPendingJoinIntent()
       this.status = 'idle'
     },
     async findRoom(roomCode: string): Promise<void> {
@@ -126,12 +215,11 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.errorCode = null
 
       try {
-        const response = await fetch(`/api/rooms/${encodeURIComponent(normalizedCode)}`, {
+        const { body: result, response } = await requestJson(`/api/rooms/${encodeURIComponent(normalizedCode)}`, {
           cache: 'no-store',
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         })
-        const result: unknown = await response.json()
         if (response.ok && isFindRoomResponse(result)) {
           this.roomLookup = result
           this.status = 'idle'
@@ -141,9 +229,9 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         this.roomLookup = null
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
-      } catch {
+      } catch (error) {
         this.roomLookup = null
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },
@@ -152,80 +240,111 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         return
       }
 
-      this.status = 'joining'
-      this.errorCode = null
       this.idempotencyKey ??= crypto.randomUUID()
       this.pendingInput ??= { ...input }
+      this.pendingJoinIntent ??= {
+        commandType: 'join_room',
+        createdAt: new Date().toISOString(),
+        idempotencyKey: this.idempotencyKey,
+        input: { ...this.pendingInput },
+        roomCode: this.roomLookup.room.code,
+      }
+      persistPendingJoinIntent(this.pendingJoinIntent)
+      await this.submitPendingJoin()
+    },
+    async recoverPendingJoin(): Promise<void> {
+      if (!this.pendingJoinIntent || this.lobby || this.game || this.status === 'joining') {
+        return
+      }
+      await this.submitPendingJoin()
+    },
+    async submitPendingJoin(): Promise<void> {
+      const intent = this.pendingJoinIntent
+      if (!intent) {
+        return
+      }
+
+      this.status = 'joining'
+      this.errorCode = null
 
       try {
-        const response = await fetch(
-          `/api/rooms/${encodeURIComponent(this.roomLookup.room.code)}/participants`,
+        const { body: result, response } = await requestJson(
+          `/api/rooms/${encodeURIComponent(intent.roomCode)}/participants`,
           {
-            body: JSON.stringify(this.pendingInput),
+            body: JSON.stringify(intent.input),
             cache: 'no-store',
             credentials: 'same-origin',
             headers: {
               Accept: 'application/json',
               'Content-Type': 'application/json',
-              'Idempotency-Key': this.idempotencyKey,
+              'Idempotency-Key': intent.idempotencyKey,
             },
             method: 'POST',
           },
         )
-        const result: unknown = await response.json()
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.roomLookup = null
           this.status = 'ready'
-          this.idempotencyKey = null
-          this.pendingInput = null
+          this.clearPendingJoinIntent()
           this.sessionExpected = true
           markSessionExpected(true)
           return
         }
 
-        this.errorCode = apiErrorCode(result)
+        const error = apiError(result)
+        this.errorCode = error?.code ?? 'UNEXPECTED_RESPONSE'
         this.status = 'failed'
         if (this.errorCode === 'HERO_UNAVAILABLE') {
-          const selectedHero = this.pendingInput.hero_id
-          this.roomLookup.heroes = this.roomLookup.heroes.map((hero) =>
-            hero.id === selectedHero ? { ...hero, available: false } : hero,
-          )
-          this.idempotencyKey = null
-          this.pendingInput = null
-        } else if (this.errorCode !== 'NETWORK_UNAVAILABLE') {
-          this.idempotencyKey = null
-          this.pendingInput = null
+          if (this.roomLookup) {
+            const selectedHero = intent.input.hero_id
+            this.roomLookup.heroes = this.roomLookup.heroes.map((hero) =>
+              hero.id === selectedHero ? { ...hero, available: false } : hero,
+            )
+          }
+          this.clearPendingJoinIntent()
+        } else if (!isUncertainTransportFailure(this.errorCode) && error?.retry !== 'safe_to_retry') {
+          this.clearPendingJoinIntent()
         }
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },
     async restoreSession(): Promise<void> {
-      if (!this.sessionExpected || this.lobby || this.game || this.status === 'restoring') {
+      if (
+        (!this.sessionExpected && !this.pendingJoinIntent) ||
+        this.lobby ||
+        this.game ||
+        this.status === 'restoring'
+      ) {
         return
       }
 
       this.status = 'restoring'
       this.errorCode = null
       try {
-        const response = await fetch('/api/session', {
+        const { body: result, response } = await requestJson('/api/session', {
           cache: 'no-store',
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         })
-        const result: unknown = await response.json()
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.game = null
           this.status = 'ready'
+          this.clearPendingJoinIntent()
+          this.sessionExpected = true
+          markSessionExpected(true)
           return
         }
         if (response.ok && isGameProjectionResponse(result)) {
           this.game = result
           this.lobby = null
           this.status = 'ready'
+          this.clearPendingJoinIntent()
+          this.sessionExpected = true
+          markSessionExpected(true)
           return
         }
 
@@ -235,8 +354,8 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           this.sessionExpected = false
           markSessionExpected(false)
         }
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },
@@ -248,7 +367,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.status = 'selecting_hero'
       this.errorCode = null
       try {
-        const response = await fetch('/api/session/hero', {
+        const { body: result, response } = await requestJson('/api/session/hero', {
           body: JSON.stringify({ hero_id: heroId }),
           cache: 'no-store',
           credentials: 'same-origin',
@@ -258,7 +377,6 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'PUT',
         })
-        const result: unknown = await response.json()
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.status = 'ready'
@@ -267,8 +385,8 @@ export const useRoomAccessStore = defineStore('roomAccess', {
 
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },
@@ -280,7 +398,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.status = 'setting_readiness'
       this.errorCode = null
       try {
-        const response = await fetch('/api/session/readiness', {
+        const { body: result, response } = await requestJson('/api/session/readiness', {
           body: JSON.stringify({ ready }),
           cache: 'no-store',
           credentials: 'same-origin',
@@ -290,7 +408,6 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'PUT',
         })
-        const result: unknown = await response.json()
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.status = 'ready'
@@ -299,8 +416,8 @@ export const useRoomAccessStore = defineStore('roomAccess', {
 
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },
@@ -314,7 +431,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.startIdempotencyKey ??= crypto.randomUUID()
       this.pendingStartInput ??= { ...input }
       try {
-        const response = await fetch('/api/games', {
+        const { body: result, response } = await requestJson('/api/games', {
           body: JSON.stringify(this.pendingStartInput),
           cache: 'no-store',
           credentials: 'same-origin',
@@ -325,7 +442,6 @@ export const useRoomAccessStore = defineStore('roomAccess', {
           },
           method: 'POST',
         })
-        const result: unknown = await response.json()
         if (response.ok && isGameProjectionResponse(result)) {
           this.game = result
           this.lobby = null
@@ -337,16 +453,12 @@ export const useRoomAccessStore = defineStore('roomAccess', {
 
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
-        if (
-          this.errorCode !== 'NETWORK_UNAVAILABLE' &&
-          this.errorCode !== 'INTERNAL_ERROR' &&
-          this.errorCode !== 'UNEXPECTED_RESPONSE'
-        ) {
+        if (!isUncertainTransportFailure(this.errorCode) && this.errorCode !== 'INTERNAL_ERROR') {
           this.startIdempotencyKey = null
           this.pendingStartInput = null
         }
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },
@@ -358,12 +470,11 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       this.status = 'restoring'
       this.errorCode = null
       try {
-        const response = await fetch('/api/session', {
+        const { body: result, response } = await requestJson('/api/session', {
           cache: 'no-store',
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         })
-        const result: unknown = await response.json()
         if (response.ok && isLobbyResponse(result)) {
           this.lobby = result
           this.game = null
@@ -379,8 +490,8 @@ export const useRoomAccessStore = defineStore('roomAccess', {
 
         this.errorCode = apiErrorCode(result)
         this.status = 'failed'
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'failed'
       }
     },

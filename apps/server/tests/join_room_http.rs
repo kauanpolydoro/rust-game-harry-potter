@@ -23,15 +23,8 @@ async fn test_state() -> AppState {
     state
 }
 
-fn unique_key(prefix: &str) -> String {
-    format!(
-        "{prefix}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the system clock must be after the Unix epoch")
-            .as_nanos()
-    )
+fn unique_key(_prefix: &str) -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 fn create_room_request(idempotency_key: &str) -> Request<Body> {
@@ -391,7 +384,7 @@ async fn room_lookup_reports_which_heroes_are_still_available() {
 }
 
 #[tokio::test]
-async fn retrying_the_same_join_returns_the_same_participant_and_session() {
+async fn retrying_the_same_join_returns_the_same_participant_and_session_grant() {
     let app = build_router(test_state().await);
     let (room_code, _) = create_room(&app).await;
     let idempotency_key = unique_key("retry-join");
@@ -407,6 +400,7 @@ async fn retrying_the_same_join_returns_the_same_participant_and_session() {
         .await
         .expect("the first join must receive a response");
     let retried = app
+        .clone()
         .oneshot(join_room_request(
             &room_code,
             &idempotency_key,
@@ -418,9 +412,150 @@ async fn retrying_the_same_join_returns_the_same_participant_and_session() {
 
     assert_eq!(first.status(), StatusCode::CREATED);
     assert_eq!(retried.status(), StatusCode::CREATED);
-    assert_eq!(
-        first.headers().get(header::SET_COOKIE),
-        retried.headers().get(header::SET_COOKIE)
-    );
+    let first_cookie = first
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("the first join must grant a session")
+        .to_str()
+        .expect("the first cookie must be ASCII")
+        .split(';')
+        .next()
+        .expect("the first cookie must contain a value")
+        .to_owned();
+    let retried_cookie = retried
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("the retried join must grant a session")
+        .to_str()
+        .expect("the retried cookie must be ASCII")
+        .split(';')
+        .next()
+        .expect("the retried cookie must contain a value")
+        .to_owned();
+    assert_eq!(first_cookie, retried_cookie);
     assert_eq!(response_json(first).await, response_json(retried).await);
+
+    let database_url = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must point to the integration PostgreSQL database");
+    let database = PgPoolOptions::new()
+        .connect(&database_url)
+        .await
+        .expect("the integration PostgreSQL database must be available");
+    let session_count = sqlx::query_scalar::<_, i64>(
+        r"
+        SELECT COUNT(*)
+        FROM guest_sessions
+        JOIN room_join_requests
+          ON room_join_requests.guest_session_id = guest_sessions.id
+        WHERE room_join_requests.idempotency_key = $1
+        ",
+    )
+    .bind(&idempotency_key)
+    .fetch_one(&database)
+    .await
+    .expect("the idempotent session grant must remain queryable");
+    assert_eq!(session_count, 1);
+
+    for cookie in [first_cookie, retried_cookie] {
+        let restored = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .expect("the restore request must be valid"),
+            )
+            .await
+            .expect("each granted session must receive a response");
+        assert_eq!(restored.status(), StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn a_legacy_join_retry_requires_its_existing_session() {
+    let app = build_router(test_state().await);
+    let (room_code, _) = create_room(&app).await;
+    let original_key = unique_key("legacy-join");
+    let first = app
+        .clone()
+        .oneshot(join_room_request(
+            &room_code,
+            &original_key,
+            "Luna",
+            "hermione",
+        ))
+        .await
+        .expect("the initial join must receive a response");
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let original_cookie = first
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("the initial join must grant a session")
+        .to_str()
+        .expect("the session cookie must be ASCII")
+        .split(';')
+        .next()
+        .expect("the session cookie must contain a value")
+        .to_owned();
+    let legacy_key = format!("legacy-{}", uuid::Uuid::new_v4());
+    let database_url = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must point to the integration PostgreSQL database");
+    let database = PgPoolOptions::new()
+        .connect(&database_url)
+        .await
+        .expect("the integration PostgreSQL database must be available");
+    sqlx::query("UPDATE room_join_requests SET idempotency_key = $2 WHERE idempotency_key = $1")
+        .bind(original_key)
+        .bind(&legacy_key)
+        .execute(&database)
+        .await
+        .expect("the fixture must represent a persisted legacy request");
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(join_room_request(
+            &room_code,
+            &legacy_key,
+            "Luna",
+            "hermione",
+        ))
+        .await
+        .expect("the unauthenticated retry must receive a response");
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let mut authenticated_request = join_room_request(&room_code, &legacy_key, "Luna", "hermione");
+    authenticated_request.headers_mut().insert(
+        header::COOKIE,
+        original_cookie
+            .parse()
+            .expect("the fixture cookie must be a valid header"),
+    );
+    let authenticated = app
+        .clone()
+        .oneshot(authenticated_request)
+        .await
+        .expect("the authenticated legacy retry must receive a response");
+    assert_eq!(authenticated.status(), StatusCode::CREATED);
+    let replacement_cookie = authenticated
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("the authorized retry must refresh its grant")
+        .to_str()
+        .expect("the replacement cookie must be ASCII")
+        .split(';')
+        .next()
+        .expect("the replacement cookie must contain a value")
+        .to_owned();
+    let restored = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header(header::COOKIE, replacement_cookie)
+                .body(Body::empty())
+                .expect("the restore request must be valid"),
+        )
+        .await
+        .expect("the replacement session must receive a response");
+    assert_eq!(restored.status(), StatusCode::OK);
 }

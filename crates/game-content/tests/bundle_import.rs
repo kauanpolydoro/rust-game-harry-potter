@@ -1,4 +1,10 @@
-use game_content::{CardInstanceId, CatalogId, FunctionalField, import_base_bundle};
+use std::collections::BTreeSet;
+
+use game_content::{
+    CardInstanceId, CatalogId, FunctionalField, ProvenanceSource, RuleId, SourceKind,
+    import_base_bundle, import_base_bundle_with_runtime_rules,
+    import_base_bundle_with_trusted_sources,
+};
 use serde_json::json;
 
 fn complete_bundle() -> Vec<u8> {
@@ -49,13 +55,24 @@ fn import_value(bundle: &serde_json::Value) -> Result<game_content::ContentManif
         .map_err(|failure| failure.to_string())
 }
 
+fn import_value_with_trusted_sources(
+    bundle: &serde_json::Value,
+    trusted_sources: &[ProvenanceSource],
+) -> Result<game_content::ContentManifest, String> {
+    import_base_bundle_with_trusted_sources(
+        &serde_json::to_vec(bundle).expect("fixture should serialize"),
+        trusted_sources,
+    )
+    .map_err(|failure| failure.to_string())
+}
+
 fn require_effect(bundle: &mut serde_json::Value) {
     bundle["entries"][0]["kind"] = json!("dark_arts");
     bundle["entries"][0]["required_functional_fields"] = json!(["effect"]);
 }
 
 #[test]
-fn complete_base_bundle_produces_a_versioned_manifest() {
+fn structurally_complete_but_semantically_empty_bundle_is_not_playable() {
     let manifest = import_base_bundle(&complete_bundle()).expect("bundle should be valid");
 
     assert_eq!(manifest.manifest_version, 1);
@@ -64,7 +81,7 @@ fn complete_base_bundle_produces_a_versioned_manifest() {
     assert!(manifest.digest.starts_with("blake3:"));
     assert_eq!(manifest.record_count, 171);
     assert_eq!(manifest.card_count, 252);
-    assert!(manifest.playable);
+    assert!(!manifest.playable);
     assert!(manifest.gaps.is_empty());
     assert!(serde_json::to_value(manifest).is_ok());
 }
@@ -239,7 +256,7 @@ fn candidate_source_cannot_self_validate_a_functional_definition() {
 }
 
 #[test]
-fn explicit_adaptation_provenance_can_make_a_functional_field_playable() {
+fn a_no_op_rule_cannot_satisfy_a_required_functional_effect() {
     let mut bundle = bundle_value();
     require_effect(&mut bundle);
     bundle["sources"]
@@ -262,14 +279,14 @@ fn explicit_adaptation_provenance_can_make_a_functional_field_playable() {
         }
     });
 
-    let manifest = import_value(&bundle).expect("explicit adaptation should be publishable");
+    let manifest = import_value(&bundle).expect("an explicit no-op should remain publishable");
 
-    assert!(manifest.entries[0].playable);
-    assert!(manifest.entries[0].gaps.is_empty());
+    assert!(!manifest.entries[0].playable);
+    assert_eq!(manifest.entries[0].gaps, [FunctionalField::Effect]);
 }
 
 #[test]
-fn validated_provenance_can_make_a_functional_field_playable() {
+fn a_self_declared_validated_source_cannot_make_a_functional_field_playable() {
     let mut bundle = bundle_value();
     require_effect(&mut bundle);
     bundle["sources"]
@@ -282,7 +299,14 @@ fn validated_provenance_can_make_a_functional_field_playable() {
         }));
     bundle["rules"] = json!([{
         "id": "rule:validated",
-        "effect": { "type": "no_op" }
+        "effect": {
+            "type": "apply",
+            "target": {
+                "zone": "hero_hand",
+                "cardinality": { "min": 1, "max": 1 }
+            },
+            "operation": { "type": "discard" }
+        }
     }]);
     bundle["entries"][0]["functional"] = json!({
         "effect": {
@@ -292,10 +316,112 @@ fn validated_provenance_can_make_a_functional_field_playable() {
         }
     });
 
-    let manifest = import_value(&bundle).expect("validated evidence should be publishable");
+    let manifest = import_value(&bundle).expect("untrusted evidence should remain publishable");
+
+    assert!(!manifest.entries[0].playable);
+    assert_eq!(manifest.entries[0].gaps, [FunctionalField::Effect]);
+}
+
+#[test]
+fn an_external_trust_decision_alone_cannot_publish_a_discarded_rule() {
+    let mut bundle = bundle_value();
+    require_effect(&mut bundle);
+    bundle["sources"]
+        .as_array_mut()
+        .expect("sources should be an array")
+        .push(json!({
+            "id": "validated-source",
+            "uri": "https://example.invalid/validated",
+            "kind": "validated"
+        }));
+    bundle["rules"] = json!([{
+        "id": "rule:validated",
+        "effect": {
+            "type": "apply",
+            "target": {
+                "zone": "hero_hand",
+                "cardinality": { "min": 1, "max": 1 }
+            },
+            "operation": { "type": "discard" }
+        }
+    }]);
+    bundle["entries"][0]["functional"] = json!({
+        "effect": {
+            "confidence": "validated",
+            "sources": ["validated-source"],
+            "rule": "rule:validated"
+        }
+    });
+    let trusted_sources = [ProvenanceSource {
+        id: "validated-source".to_owned(),
+        uri: "https://example.invalid/validated".to_owned(),
+        kind: SourceKind::Validated,
+    }];
+
+    let manifest = import_value_with_trusted_sources(&bundle, &trusted_sources)
+        .expect("externally trusted evidence should be publishable");
+
+    assert!(!manifest.entries[0].playable);
+    assert_eq!(manifest.entries[0].gaps, [FunctionalField::Effect]);
+    assert!(
+        !manifest.playable,
+        "the incomplete catalog shape must remain unplayable"
+    );
+}
+
+#[test]
+fn a_trusted_rule_is_playable_only_when_the_runtime_declares_it_executable() {
+    let mut bundle = bundle_value();
+    require_effect(&mut bundle);
+    bundle["sources"]
+        .as_array_mut()
+        .expect("sources should be an array")
+        .push(json!({
+            "id": "validated-source",
+            "uri": "https://example.invalid/validated",
+            "kind": "validated"
+        }));
+    bundle["rules"] = json!([{
+        "id": "rule:validated",
+        "effect": {
+            "type": "apply",
+            "target": {
+                "zone": "hero_hand",
+                "cardinality": { "min": 1, "max": 1 }
+            },
+            "operation": { "type": "discard" }
+        }
+    }]);
+    bundle["entries"][0]["functional"] = json!({
+        "effect": {
+            "confidence": "validated",
+            "sources": ["validated-source"],
+            "rule": "rule:validated"
+        }
+    });
+    let trusted_sources = [ProvenanceSource {
+        id: "validated-source".to_owned(),
+        uri: "https://example.invalid/validated".to_owned(),
+        kind: SourceKind::Validated,
+    }];
+    let executable_rules =
+        BTreeSet::from([RuleId::parse("rule:validated").expect("fixture rule ID should be valid")]);
+    let trust_only_manifest = import_value_with_trusted_sources(&bundle, &trusted_sources)
+        .expect("trusted evidence should remain publishable without runtime support");
+
+    let manifest = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &trusted_sources,
+        &executable_rules,
+    )
+    .expect("runtime-supported evidence should be publishable");
 
     assert!(manifest.entries[0].playable);
     assert!(manifest.entries[0].gaps.is_empty());
+    assert_ne!(
+        manifest.digest, trust_only_manifest.digest,
+        "runtime capability decisions belong to manifest identity"
+    );
 }
 
 #[test]

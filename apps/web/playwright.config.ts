@@ -22,7 +22,8 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'cargo run -p harry-potter-server',
+      command:
+        'cargo build --release -p harry-potter-server --example e2e_harness && ./target/release/examples/e2e_harness',
       cwd: repositoryRoot,
       env: {
         APPLICATION_ORIGIN: 'http://127.0.0.1:4173',
@@ -32,17 +33,18 @@ export default defineConfig({
           'postgres://hogwarts:local-development-only@127.0.0.1:55432/hogwarts',
         RUST_LOG: 'harry_potter_server=info',
       },
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
       url: 'http://127.0.0.1:18080/health/live',
     },
     {
-      command: 'npm run dev -- --port 4173',
+      command:
+        'npm run build && npm exec vite -- preview --host 127.0.0.1 --port 4173',
       cwd: import.meta.dirname,
       env: {
         BACKEND_PROXY_TARGET: 'http://127.0.0.1:18080',
       },
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 30_000,
       url: 'http://127.0.0.1:4173',
     },

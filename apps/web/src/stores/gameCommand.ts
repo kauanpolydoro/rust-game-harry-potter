@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 
+import { apiError, requestJson, transportErrorCode } from '../api/http'
 import {
   isExecuteGameCommandResponse,
   type ExecuteGameCommandRequest,
@@ -81,12 +82,6 @@ function removePendingIntent(): void {
   }
 }
 
-function apiErrorCode(value: unknown): string {
-  return isRecord(value) && isRecord(value.error) && typeof value.error.code === 'string'
-    ? value.error.code
-    : 'UNEXPECTED_RESPONSE'
-}
-
 export const useGameCommandStore = defineStore('gameCommand', {
   state: (): {
     status: GameCommandStatus
@@ -125,7 +120,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
       persistPendingIntent(this.pendingIntent)
 
       try {
-        const response = await fetch('/api/games/current/commands', {
+        const { body: result, response } = await requestJson('/api/games/current/commands', {
           body: JSON.stringify(request),
           cache: 'no-store',
           credentials: 'same-origin',
@@ -135,12 +130,11 @@ export const useGameCommandStore = defineStore('gameCommand', {
           },
           method: 'POST',
         })
-        const result: unknown = await response.json()
         if (response.ok && isExecuteGameCommandResponse(result)) {
           return this.accept(result.receipt, result.projection)
         }
 
-        this.errorCode = apiErrorCode(result)
+        this.errorCode = apiError(result)?.code ?? 'UNEXPECTED_RESPONSE'
         if (response.status >= 500 || this.errorCode === 'UNEXPECTED_RESPONSE') {
           this.status = 'uncertain'
         } else {
@@ -149,8 +143,8 @@ export const useGameCommandStore = defineStore('gameCommand', {
           removePendingIntent()
         }
         return null
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'uncertain'
         return null
       }
@@ -170,7 +164,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
       this.status = 'recovering'
       this.errorCode = null
       try {
-        const response = await fetch(
+        const { body: result, response } = await requestJson(
           `/api/games/current/commands/${encodeURIComponent(this.pendingIntent.commandId)}`,
           {
             cache: 'no-store',
@@ -178,12 +172,11 @@ export const useGameCommandStore = defineStore('gameCommand', {
             headers: { Accept: 'application/json' },
           },
         )
-        const result: unknown = await response.json()
         if (response.ok && isExecuteGameCommandResponse(result)) {
           return this.accept(result.receipt, result.projection)
         }
 
-        this.errorCode = apiErrorCode(result)
+        this.errorCode = apiError(result)?.code ?? 'UNEXPECTED_RESPONSE'
         if (response.status === 404 && this.errorCode === 'COMMAND_NOT_FOUND') {
           this.pendingIntent = null
           this.status = 'not_committed'
@@ -192,8 +185,8 @@ export const useGameCommandStore = defineStore('gameCommand', {
           this.status = 'uncertain'
         }
         return null
-      } catch {
-        this.errorCode = 'NETWORK_UNAVAILABLE'
+      } catch (error) {
+        this.errorCode = transportErrorCode(error)
         this.status = 'uncertain'
         return null
       }
