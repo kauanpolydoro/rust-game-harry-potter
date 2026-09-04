@@ -69,7 +69,7 @@ struct MigratedState {
 }
 
 #[tokio::test]
-async fn migration_0015_upgrades_existing_recovery_credentials() {
+async fn migration_0016_upgrades_existing_recovery_credentials() {
     let database_url = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must point to the integration PostgreSQL database");
     let admin = PgPoolOptions::new()
@@ -105,8 +105,8 @@ async fn migration_0015_upgrades_existing_recovery_credentials() {
     cleanup_result.expect("the isolated migration schema must be removed");
 
     let observation = test_result.expect("the recovery credential upgrade must succeed");
-    assert_eq!(observation.pre_upgrade_applied_version, 14);
-    assert_eq!(observation.pre_upgrade_schema_version, "14");
+    assert_eq!(observation.pre_upgrade_applied_version, 15);
+    assert_eq!(observation.pre_upgrade_schema_version, "15");
     assert_eq!(observation.room_generations, (1, 1, 0));
     assert_eq!(observation.participant_generations, vec![(1, 1), (2, 1)]);
     assert_eq!(observation.consumed_device_session_status, "revoked");
@@ -154,12 +154,12 @@ async fn migration_0015_upgrades_existing_recovery_credentials() {
         observation.rejected_lifecycle_constraint.as_deref(),
         Some("recovery_credentials_lifecycle_consistent")
     );
-    assert_eq!(observation.applied_version, 15);
-    assert_eq!(observation.schema_version, "15");
+    assert_eq!(observation.applied_version, 16);
+    assert_eq!(observation.schema_version, "16");
 }
 
 async fn exercise_upgrade(database: &PgPool) -> TestResult<UpgradeObservation> {
-    MIGRATOR.run_to(14, database).await?;
+    MIGRATOR.run_to(15, database).await?;
     let pre_upgrade_applied_version =
         sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
             .fetch_one(database)

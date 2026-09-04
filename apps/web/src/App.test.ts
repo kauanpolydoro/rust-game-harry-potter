@@ -139,12 +139,19 @@ function gameProjectionResponse() {
       status: 'in_progress',
     },
     legal_actions: ['complete_dark_arts'],
+    legal_intentions: {
+      acquire_cards: [],
+      assign_attack: [],
+      complete_dark_arts: true,
+      play_cards: [],
+    },
     participant: {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
+      hand_count: 0,
     },
     participants: [
       {
@@ -153,6 +160,7 @@ function gameProjectionResponse() {
         position: 1,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
+        hand_count: 0,
       },
       {
         display_name: 'Luna',
@@ -160,6 +168,7 @@ function gameProjectionResponse() {
         position: 2,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
+        hand_count: 0,
       },
     ],
     snapshot: {
@@ -177,6 +186,16 @@ function gameProjectionResponse() {
         sampling: 'rejection-sampling-v1',
         shuffle: 'fisher-yates-v1',
       },
+    },
+    table: {
+      active_villains: [],
+      discard_pile_count: 0,
+      draw_pile_count: 0,
+      hand: [],
+      hogwarts_deck_count: 0,
+      market: [],
+      play_area: [],
+      villain_deck_count: 0,
     },
     turn: { active_position: 1, number: 1, phase: 'dark_arts' },
   }
@@ -229,6 +248,7 @@ function completedGameProjectionResponse() {
     },
     game: { ...projection.game, expires_at: '2026-09-10T13:00:00Z' },
     legal_actions: [],
+    legal_intentions: { ...projection.legal_intentions, complete_dark_arts: false },
     participant: participants[0],
     participants,
     snapshot: {
@@ -289,6 +309,7 @@ function multiplePendingChoiceProjectionResponse() {
       {
         display_name: 'Pomona',
         hero: { id: 'neville', name: 'Neville' },
+        hand_count: 0,
         position: 3,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
@@ -322,6 +343,125 @@ function acceptedChoiceResponse(commandId: string) {
       expires_at: '2026-09-10T13:00:00Z',
       status: 'accepted',
       type: 'resolve_choice',
+    },
+  }
+}
+
+function heroActionGameProjectionResponse() {
+  const projection = completedGameProjectionResponse()
+  const participants = projection.participants.map((participant) =>
+    participant.position === 1
+      ? {
+          ...participant,
+          hand_count: 1,
+          resources: { attack: 0, health: 9, influence: 0 },
+        }
+      : participant,
+  )
+  return {
+    ...projection,
+    effects: { outcomes: [], status: 'idle' },
+    legal_actions: ['play_card'],
+    legal_intentions: {
+      acquire_cards: [],
+      assign_attack: [],
+      complete_dark_arts: false,
+      play_cards: [
+        {
+          card_id: 'instance:starter',
+          target_slots: [
+            {
+              max: 1,
+              min: 1,
+              options: [
+                { label: 'Minerva - Harry', target_id: 'hero:1' },
+                { label: 'Luna - Hermione', target_id: 'hero:2' },
+              ],
+              selector_id: 'target:hero',
+            },
+          ],
+        },
+      ],
+    },
+    participant: participants[0],
+    participants,
+    table: {
+      active_villains: [
+        {
+          attackable: false,
+          catalog_id: 'fixture:villain',
+          health: 2,
+          instance_id: 'instance:villain',
+          max_attack: 0,
+          name: 'Draco',
+        },
+      ],
+      discard_pile_count: 0,
+      draw_pile_count: 0,
+      hand: [
+        {
+          catalog_id: 'fixture:starter-card',
+          instance_id: 'instance:starter',
+          name: 'Lumos',
+        },
+      ],
+      hogwarts_deck_count: 1,
+      market: [
+        {
+          affordable: false,
+          catalog_id: 'fixture:hogwarts-card',
+          cost: 2,
+          instance_id: 'instance:market',
+          name: 'Nimbus 2000',
+        },
+      ],
+      play_area: [],
+      villain_deck_count: 0,
+    },
+  }
+}
+
+function playedCardGameProjectionResponse() {
+  const projection = heroActionGameProjectionResponse()
+  const participants = projection.participants.map((participant) =>
+    participant.position === 1
+      ? {
+          ...participant,
+          hand_count: 0,
+          resources: { attack: 2, health: 9, influence: 3 },
+        }
+      : participant,
+  )
+  return {
+    ...projection,
+    legal_actions: ['assign_attack', 'acquire_card'],
+    legal_intentions: {
+      acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
+      assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
+      complete_dark_arts: false,
+      play_cards: [],
+    },
+    participant: participants[0],
+    participants,
+    snapshot: {
+      ...projection.snapshot,
+      cursor: 2,
+      digest: `blake3:${'e'.repeat(64)}`,
+      sequence: 2,
+      state_version: 3,
+    },
+    table: {
+      ...projection.table,
+      active_villains: [
+        {
+          ...projection.table.active_villains[0],
+          attackable: true,
+          max_attack: 2,
+        },
+      ],
+      hand: [],
+      market: [{ ...projection.table.market[0], affordable: true }],
+      play_area: [projection.table.hand[0]],
     },
   }
 }
@@ -2557,6 +2697,319 @@ describe('application shell', () => {
       command_id: submittedCommandId,
       expected_state_version: 1,
       type: 'complete_dark_arts',
+    })
+  })
+
+  it('plays a targeted card from the table without mutating the official view before acceptance', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    let acceptPlay = (_response: Response): void => undefined
+    const playResponse = new Promise<Response>((resolve) => {
+      acceptPlay = resolve
+    })
+    let submittedPlayId = ''
+    const submittedBodies: Array<Record<string, unknown>> = []
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(heroActionGameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        submittedBodies.push(body)
+        if (body.type === 'play_card') {
+          submittedPlayId = String(body.command_id)
+          return playResponse
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(errorResponse('GAME_ACTION_NOT_ALLOWED')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    await fireEvent.click(within(hand).getByRole('radio', { name: 'Minerva - Harry' }))
+    void fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
+
+    expect(await within(hand).findByText('Intenção enviada')).toBeVisible()
+    expect(within(hand).getByText('Lumos')).toBeVisible()
+    expect(screen.getByText('Ataque 0 · Influência 0')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
+    expect(submittedBodies[0]).toMatchObject({
+      card_id: 'instance:starter',
+      expected_state_version: 2,
+      targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
+      type: 'play_card',
+    })
+
+    acceptPlay(
+      new Response(
+        JSON.stringify({
+          projection: playedCardGameProjectionResponse(),
+          receipt: {
+            accepted_sequence: 2,
+            accepted_state_version: 3,
+            command_id: submittedPlayId,
+            expected_state_version: 2,
+            expires_at: '2026-09-10T13:00:00Z',
+            status: 'accepted',
+            type: 'play_card',
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' }, status: 200 },
+      ),
+    )
+
+    const playArea = await screen.findByRole('region', { name: 'Área de jogo' })
+    expect(await within(playArea).findByText('Lumos')).toBeVisible()
+    expect(screen.getByText('Ataque 2 · Influência 3')).toBeVisible()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Atacar Draco com 2' }))
+    await screen.findByText('Ação não aceita')
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Adquirir Nimbus 2000 por 2 de Influência' }),
+    )
+    await waitFor(() => expect(submittedBodies).toHaveLength(3))
+    expect(submittedBodies[1]).toMatchObject({
+      amount: 2,
+      expected_state_version: 3,
+      type: 'assign_attack',
+      villain_id: 'instance:villain',
+    })
+    expect(submittedBodies[2]).toMatchObject({
+      card_id: 'instance:market',
+      expected_state_version: 3,
+      type: 'acquire_card',
+    })
+  })
+
+  it('keeps a newer realtime projection after a delayed card-play response', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = heroActionGameProjectionResponse()
+    let acceptPlay = (_response: Response): void => undefined
+    const playResponse = new Promise<Response>((resolve) => {
+      acceptPlay = resolve
+    })
+    let submittedPlayId = ''
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        submittedPlayId = body.command_id
+        return playResponse
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    const pinia = createPinia()
+    const roomAccess = useRoomAccessStore(pinia)
+    render(App, { global: { plugins: [pinia] } })
+
+    const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    await waitFor(() =>
+      expect(screen.getByText('Atualizações em tempo real conectadas.')).toBeVisible(),
+    )
+    await fireEvent.click(screen.getByText('Ver versões do Snapshot'))
+    await fireEvent.click(within(hand).getByRole('radio', { name: 'Minerva - Harry' }))
+    void fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
+    await waitFor(() => expect(submittedPlayId).not.toBe(''))
+
+    const playedProjection = playedCardGameProjectionResponse()
+    const participants = playedProjection.participants.map((participant) =>
+      participant.position === 1
+        ? {
+            ...participant,
+            resources: { ...participant.resources, attack: 1 },
+          }
+        : participant,
+    )
+    const newerProjection = {
+      ...playedProjection,
+      participant: participants[0],
+      participants,
+      snapshot: {
+        ...playedProjection.snapshot,
+        cursor: 3,
+        digest: `blake3:${'a'.repeat(64)}`,
+        sequence: 3,
+        state_version: 4,
+      },
+      table: {
+        ...playedProjection.table,
+        active_villains: [
+          {
+            ...playedProjection.table.active_villains[0],
+            health: 1,
+            max_attack: 1,
+          },
+        ],
+      },
+    }
+    const socket = SynchronizedWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('the card-play race fixture requires an open socket')
+    }
+    socket.receive({
+      cursor: 3,
+      events: [
+        {
+          actor_position: 1,
+          card_id: 'instance:starter',
+          command_id: submittedPlayId,
+          effect_stop: 'stable',
+          effects: [],
+          event_version: 3,
+          prng_counter: 0,
+          sequence: 2,
+          state_version: 3,
+          targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
+          turn: 1,
+          type: 'card_played',
+        },
+        {
+          actor_position: 1,
+          amount: 1,
+          command_id: '8cbef381-3a98-4731-b16f-8b55db5e8f63',
+          effects: [],
+          event_version: 3,
+          sequence: 3,
+          state_version: 4,
+          turn: 1,
+          type: 'attack_assigned',
+          villain_id: 'instance:villain',
+        },
+      ],
+      from_cursor: 1,
+      projection: newerProjection,
+      protocol_version: 2,
+      type: 'events',
+    })
+
+    expect(await screen.findByText('v4 · sequência 3')).toBeVisible()
+    expect(screen.getByText('Ataque 1 · Influência 3')).toBeVisible()
+    acceptPlay(
+      new Response(
+        JSON.stringify({
+          projection: playedProjection,
+          receipt: {
+            accepted_sequence: 2,
+            accepted_state_version: 3,
+            command_id: submittedPlayId,
+            expected_state_version: 2,
+            expires_at: '2026-09-10T13:00:00Z',
+            status: 'accepted',
+            type: 'play_card',
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' }, status: 200 },
+      ),
+    )
+
+    expect(await screen.findByText('Recibo aceito no estado v3, sequência 2.')).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 3, name: 'Sua fase de ação' })).toHaveFocus(),
+    )
+    expect(roomAccess.game?.snapshot).toMatchObject({ sequence: 3, state_version: 4 })
+    expect(screen.getByText('v4 · sequência 3')).toBeVisible()
+    expect(screen.queryByText('v3 · sequência 2')).not.toBeInTheDocument()
+    expect(screen.getByText('Ataque 1 · Influência 3')).toBeVisible()
+  })
+
+  it('allows an optional single target to return to an empty selection', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const game = heroActionGameProjectionResponse()
+    const playableCard = game.legal_intentions.play_cards.at(0)
+    const targetSlot = playableCard?.target_slots.at(0)
+    if (!targetSlot) {
+      throw new Error('the optional-target fixture must expose one target slot')
+    }
+    targetSlot.min = 0
+    const submittedBodies: Array<Record<string, unknown>> = []
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(game), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        submittedBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>)
+        return Promise.resolve(
+          new Response(JSON.stringify(errorResponse('GAME_ACTION_NOT_ALLOWED')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    const target = within(hand).getByRole('checkbox', { name: 'Minerva - Harry' })
+    expect(within(hand).getByRole('group', { name: 'Alvo da carta (opcional)' })).toBeVisible()
+    expect(within(hand).getByRole('button', { name: 'Jogar Lumos' })).toBeEnabled()
+
+    await fireEvent.click(target)
+    expect(target).toBeChecked()
+    await fireEvent.click(target)
+    expect(target).not.toBeChecked()
+    await fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
+
+    await waitFor(() => expect(submittedBodies).toHaveLength(1))
+    expect(submittedBodies[0]).toMatchObject({
+      card_id: 'instance:starter',
+      targets: [{ selector_id: 'target:hero', target_ids: [] }],
+      type: 'play_card',
     })
   })
 

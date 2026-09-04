@@ -11,11 +11,12 @@ mod effects;
 
 pub use effects::{
     EffectChangeCause, EffectChoiceAudience, EffectCondition, EffectContinuation, EffectCursor,
-    EffectDefinition, EffectDie, EffectEligibility, EffectEntity, EffectExecutionError,
-    EffectGameOutcome, EffectNoOpReason, EffectOperation, EffectOutcome, EffectPathSegment,
-    EffectResource, EffectResourceCost, EffectRoller, EffectRule, EffectSelector, EffectStop,
-    EffectTargetOwner, EffectTrigger, EffectWorld, EffectZone, PendingEffectChoice,
-    PendingEffectChoiceKind, QueuedEffect, effect_action_is_affordable,
+    EffectDefinition, EffectDie, EffectEligibility, EffectEntity, EffectEntityKind,
+    EffectEntityPlacement, EffectExecutionError, EffectGameOutcome, EffectNoOpReason,
+    EffectOperation, EffectOutcome, EffectPathSegment, EffectResource, EffectResourceCost,
+    EffectRoller, EffectRule, EffectSelector, EffectStop, EffectTargetBinding, EffectTargetOwner,
+    EffectTrigger, EffectWorld, EffectZone, PendingEffectChoice, PendingEffectChoiceKind,
+    QueuedEffect, effect_action_is_affordable,
 };
 
 pub const SNAPSHOT_VERSION: u16 = 2;
@@ -105,6 +106,7 @@ pub struct ContentSelection<'a> {
     pub manifest_digest: &'a str,
     pub manifest_version: u16,
     pub playable: bool,
+    pub initial_entities: &'a [EffectEntityPlacement],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -158,12 +160,57 @@ pub enum GameCommand {
         choice_id: String,
         selected_options: Vec<String>,
     },
+    PlayCard {
+        card_id: String,
+        targets: Vec<EffectTargetBinding>,
+    },
+    AssignAttack {
+        villain_id: String,
+        amount: u16,
+    },
+    AcquireCard {
+        card_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameCommandType {
     CompleteDarkArts,
     ResolveChoice,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LegalGameIntentions {
+    pub complete_dark_arts: bool,
+    pub playable_cards: Vec<LegalPlayableCard>,
+    pub attack_targets: Vec<LegalAttackTarget>,
+    pub acquisitions: Vec<LegalAcquisition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegalPlayableCard {
+    pub card_id: String,
+    pub target_slots: Vec<LegalTargetSlot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegalTargetSlot {
+    pub selector_id: String,
+    pub min: u16,
+    pub max: u16,
+    pub target_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegalAttackTarget {
+    pub villain_id: String,
+    pub max_amount: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegalAcquisition {
+    pub card_id: String,
+    pub cost: u16,
 }
 
 pub struct GameCommandInput<'a> {
@@ -203,6 +250,36 @@ pub enum GameEvent {
         effects: Vec<EffectOutcome>,
         stop: EffectStop,
         prng_counter: u64,
+    },
+    CardPlayed {
+        sequence: u64,
+        state_version: u64,
+        turn: u32,
+        actor_position: u8,
+        card_id: String,
+        targets: Vec<EffectTargetBinding>,
+        effects: Vec<EffectOutcome>,
+        stop: EffectStop,
+        prng_counter: u64,
+    },
+    AttackAssigned {
+        sequence: u64,
+        state_version: u64,
+        turn: u32,
+        actor_position: u8,
+        villain_id: String,
+        amount: u16,
+        effects: Vec<EffectOutcome>,
+    },
+    CardAcquired {
+        sequence: u64,
+        state_version: u64,
+        turn: u32,
+        actor_position: u8,
+        card_id: String,
+        cost: u16,
+        refill_card_id: Option<String>,
+        effects: Vec<EffectOutcome>,
     },
 }
 
@@ -412,6 +489,7 @@ pub enum StartGameError {
     ParticipantNotReady,
     ContentNotPlayable,
     InvalidContentIdentity,
+    InvalidInitialEntities,
 }
 
 /// Validates a lobby and creates the deterministic, entropy-free part of its
@@ -488,6 +566,22 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         })
         .collect::<Vec<_>>();
     players.sort_by_key(|player| player.position);
+    let effect_world = EffectWorld::new(
+        players
+            .iter()
+            .map(|player| {
+                EffectEntityPlacement::new(EffectEntity::hero(player.position), EffectZone::Heroes)
+            })
+            .chain(input.content.initial_entities.iter().cloned())
+            .collect(),
+    );
+    let player_positions = players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    if !effect_world.is_valid_for_positions(&player_positions) {
+        return Err(StartGameError::InvalidInitialEntities);
+    }
 
     Ok(InitialGameState {
         snapshot_version: SNAPSHOT_VERSION,
@@ -506,12 +600,7 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: 0,
-        effect_world: EffectWorld::new(
-            players
-                .iter()
-                .map(|player| EffectEntity::hero(player.position))
-                .collect(),
-        ),
+        effect_world,
         last_effects: Vec::new(),
         pending_choice: None,
         players,
@@ -646,6 +735,12 @@ pub fn decide_game_command(
     if expected_state_version != state.state_version {
         return Err(GameCommandError::StaleStateVersion);
     }
+    if !matches!(&command, GameCommand::ResolveChoice { .. })
+        && actor_position != state.active_position
+    {
+        return Err(GameCommandError::ActorNotActive);
+    }
+    let legal_intentions = legal_game_intentions(state, actor_position, effect_rules);
     match command {
         GameCommand::CompleteDarkArts => {
             decide_complete_dark_arts(state, actor_position, effect_rules, die_roller)
@@ -661,6 +756,21 @@ pub fn decide_game_command(
             effect_rules,
             die_roller,
         ),
+        GameCommand::PlayCard { card_id, targets } => decide_play_card(
+            state,
+            actor_position,
+            &legal_intentions,
+            effect_rules,
+            die_roller,
+            card_id,
+            targets,
+        ),
+        GameCommand::AssignAttack { villain_id, amount } => {
+            decide_assign_attack(state, actor_position, &legal_intentions, villain_id, amount)
+        }
+        GameCommand::AcquireCard { card_id } => {
+            decide_acquire_card(state, actor_position, &legal_intentions, card_id)
+        }
     }
 }
 
@@ -778,9 +888,9 @@ fn next_prng_counter(
 
 const fn game_command_effect_error(error: EffectExecutionError) -> GameCommandError {
     match error {
-        EffectExecutionError::InvalidChoice | EffectExecutionError::UnaffordableCost => {
-            GameCommandError::CommandNotLegal
-        }
+        EffectExecutionError::InvalidChoice
+        | EffectExecutionError::InvalidTargetSelection
+        | EffectExecutionError::UnaffordableCost => GameCommandError::CommandNotLegal,
         EffectExecutionError::InvalidDefinition
         | EffectExecutionError::InvalidRoll
         | EffectExecutionError::StepLimitExceeded => GameCommandError::EffectExecutionFailed,
@@ -802,6 +912,326 @@ fn finish_game_command(
         | GameEventError::TurnMismatch => GameCommandError::CommandNotLegal,
     })?;
     Ok(GameCommandDecision { state, event })
+}
+
+fn decide_play_card(
+    state: &InitialGameState,
+    actor_position: u8,
+    legal_intentions: &LegalGameIntentions,
+    effect_rules: &[EffectRule],
+    die_roller: &mut dyn EffectRoller,
+    card_id: String,
+    targets: Vec<EffectTargetBinding>,
+) -> Result<GameCommandDecision, GameCommandError> {
+    legal_intentions
+        .playable_cards
+        .iter()
+        .find(|playable| playable.card_id == card_id)
+        .filter(|playable| target_bindings_match_slots(&targets, &playable.target_slots))
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let (_, card) = state
+        .effect_world
+        .entity(&card_id)
+        .filter(|(zone, card)| {
+            *zone == EffectZone::HeroHand
+                && card.owner_position() == Some(actor_position)
+                && matches!(
+                    card.kind(),
+                    EffectEntityKind::HogwartsCard | EffectEntityKind::StarterCard
+                )
+        })
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let rule_id = card
+        .effect_rule_id()
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let matching_rules = effect_rules
+        .iter()
+        .filter(|rule| rule.id == rule_id && rule.trigger == EffectTrigger::Manual)
+        .collect::<Vec<_>>();
+    let [rule] = matching_rules.as_slice() else {
+        return Err(GameCommandError::CommandNotLegal);
+    };
+
+    let state_version = state
+        .state_version
+        .checked_add(1)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let sequence = state
+        .sequence
+        .checked_add(1)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let mut effect_world = state.effect_world.clone();
+    effect_world
+        .move_to_back(
+            &card_id,
+            EffectZone::HeroHand,
+            EffectZone::HeroPlayArea,
+            Some(actor_position),
+        )
+        .map_err(|_| GameCommandError::CommandNotLegal)?;
+    let resolution = effects::execute_effect_rule(
+        &mut effect_world,
+        actor_position,
+        rule,
+        &targets,
+        die_roller,
+    )
+    .map_err(map_effect_execution_error)?;
+    let prng_counter = state
+        .prng_counter
+        .checked_add(resolution.rolls_consumed)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let mut event_effects = Vec::with_capacity(resolution.outcomes.len() + 1);
+    event_effects.push(EffectOutcome::Moved {
+        rule_id: "system:play-card".to_owned(),
+        target_id: card_id.clone(),
+        target_position: Some(actor_position),
+        from: EffectZone::HeroHand,
+        to: EffectZone::HeroPlayArea,
+    });
+    event_effects.extend(resolution.outcomes);
+    let event = GameEvent::CardPlayed {
+        sequence,
+        state_version,
+        turn: state.turn,
+        actor_position,
+        card_id,
+        targets,
+        effects: event_effects,
+        stop: resolution.stop,
+        prng_counter,
+    };
+    let state = apply_game_event(state, &event).map_err(map_game_event_error)?;
+    Ok(GameCommandDecision { state, event })
+}
+
+fn decide_assign_attack(
+    state: &InitialGameState,
+    actor_position: u8,
+    legal_intentions: &LegalGameIntentions,
+    villain_id: String,
+    amount: u16,
+) -> Result<GameCommandDecision, GameCommandError> {
+    legal_intentions
+        .attack_targets
+        .iter()
+        .find(|target| target.villain_id == villain_id)
+        .filter(|target| amount > 0 && amount <= target.max_amount)
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let hero = state
+        .effect_world
+        .entities_in(EffectZone::Heroes)
+        .iter()
+        .find(|entity| entity.owner_position() == Some(actor_position))
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let available_attack = hero.resource(EffectResource::Attack);
+    let (_, villain) = state
+        .effect_world
+        .entity(&villain_id)
+        .filter(|(zone, entity)| {
+            *zone == EffectZone::ActiveVillains && entity.kind() == EffectEntityKind::Villain
+        })
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let villain_health = villain.resource(EffectResource::Health);
+    if amount > available_attack || amount > villain_health {
+        return Err(GameCommandError::CommandNotLegal);
+    }
+    let sequence = state
+        .sequence
+        .checked_add(1)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let state_version = state
+        .state_version
+        .checked_add(1)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let effects = attack_assignment_effects(hero, actor_position, villain, amount);
+    let event = GameEvent::AttackAssigned {
+        sequence,
+        state_version,
+        turn: state.turn,
+        actor_position,
+        villain_id,
+        amount,
+        effects,
+    };
+    let state = apply_game_event(state, &event).map_err(map_game_event_error)?;
+    Ok(GameCommandDecision { state, event })
+}
+
+fn decide_acquire_card(
+    state: &InitialGameState,
+    actor_position: u8,
+    legal_intentions: &LegalGameIntentions,
+    card_id: String,
+) -> Result<GameCommandDecision, GameCommandError> {
+    legal_intentions
+        .acquisitions
+        .iter()
+        .find(|acquisition| acquisition.card_id == card_id)
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let hero = state
+        .effect_world
+        .entities_in(EffectZone::Heroes)
+        .iter()
+        .find(|entity| entity.owner_position() == Some(actor_position))
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let available_influence = hero.resource(EffectResource::Influence);
+    let (_, card) = state
+        .effect_world
+        .entity(&card_id)
+        .filter(|(zone, entity)| {
+            *zone == EffectZone::Market
+                && entity.kind() == EffectEntityKind::HogwartsCard
+                && entity.owner_position().is_none()
+        })
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    let cost = card
+        .influence_cost()
+        .ok_or(GameCommandError::CommandNotLegal)?;
+    if cost > available_influence {
+        return Err(GameCommandError::CommandNotLegal);
+    }
+    let refill_card_id = state
+        .effect_world
+        .entities_in(EffectZone::HogwartsDeck)
+        .first()
+        .map(|entity| entity.id().to_owned());
+    let effects =
+        card_acquisition_effects(hero, actor_position, card, cost, refill_card_id.as_deref());
+    let sequence = state
+        .sequence
+        .checked_add(1)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let state_version = state
+        .state_version
+        .checked_add(1)
+        .ok_or(GameCommandError::VersionOverflow)?;
+    let event = GameEvent::CardAcquired {
+        sequence,
+        state_version,
+        turn: state.turn,
+        actor_position,
+        card_id,
+        cost,
+        refill_card_id,
+        effects,
+    };
+    let state = apply_game_event(state, &event).map_err(map_game_event_error)?;
+    Ok(GameCommandDecision { state, event })
+}
+
+fn attack_assignment_effects(
+    hero: &EffectEntity,
+    actor_position: u8,
+    villain: &EffectEntity,
+    amount: u16,
+) -> Vec<EffectOutcome> {
+    let available_attack = hero.resource(EffectResource::Attack);
+    let villain_health = villain.resource(EffectResource::Health);
+    vec![
+        EffectOutcome::ResourceChanged {
+            rule_id: "system:assign-attack".to_owned(),
+            target_id: hero.id().to_owned(),
+            target_position: Some(actor_position),
+            resource: EffectResource::Attack,
+            before: available_attack,
+            after: available_attack - amount,
+            cause: EffectChangeCause::Cost,
+        },
+        EffectOutcome::ResourceChanged {
+            rule_id: "system:assign-attack".to_owned(),
+            target_id: villain.id().to_owned(),
+            target_position: None,
+            resource: EffectResource::Health,
+            before: villain_health,
+            after: villain_health - amount,
+            cause: EffectChangeCause::Effect,
+        },
+    ]
+}
+
+fn card_acquisition_effects(
+    hero: &EffectEntity,
+    actor_position: u8,
+    card: &EffectEntity,
+    cost: u16,
+    refill_card_id: Option<&str>,
+) -> Vec<EffectOutcome> {
+    let available_influence = hero.resource(EffectResource::Influence);
+    let mut effects = vec![
+        EffectOutcome::ResourceChanged {
+            rule_id: "system:acquire-card".to_owned(),
+            target_id: hero.id().to_owned(),
+            target_position: Some(actor_position),
+            resource: EffectResource::Influence,
+            before: available_influence,
+            after: available_influence - cost,
+            cause: EffectChangeCause::Cost,
+        },
+        EffectOutcome::Moved {
+            rule_id: "system:acquire-card".to_owned(),
+            target_id: card.id().to_owned(),
+            target_position: Some(actor_position),
+            from: EffectZone::Market,
+            to: EffectZone::HeroDiscardPile,
+        },
+    ];
+    if let Some(refill_card_id) = refill_card_id {
+        effects.push(EffectOutcome::Moved {
+            rule_id: "system:refill-market".to_owned(),
+            target_id: refill_card_id.to_owned(),
+            target_position: None,
+            from: EffectZone::HogwartsDeck,
+            to: EffectZone::Market,
+        });
+    }
+    effects
+}
+
+fn map_effect_execution_error(error: EffectExecutionError) -> GameCommandError {
+    match error {
+        EffectExecutionError::InvalidChoice
+        | EffectExecutionError::InvalidTargetSelection
+        | EffectExecutionError::UnaffordableCost => GameCommandError::CommandNotLegal,
+        EffectExecutionError::InvalidDefinition
+        | EffectExecutionError::InvalidRoll
+        | EffectExecutionError::StepLimitExceeded => GameCommandError::EffectExecutionFailed,
+    }
+}
+
+fn map_game_event_error(error: GameEventError) -> GameCommandError {
+    match error {
+        GameEventError::VersionOverflow => GameCommandError::VersionOverflow,
+        GameEventError::ActorNotChoiceResponsible => GameCommandError::ActorNotChoiceResponsible,
+        GameEventError::ActorNotActive
+        | GameEventError::EventNotApplicable
+        | GameEventError::EffectTransitionInvalid
+        | GameEventError::SequenceMismatch
+        | GameEventError::StateVersionMismatch
+        | GameEventError::TurnMismatch => GameCommandError::CommandNotLegal,
+    }
+}
+
+fn target_bindings_match_slots(
+    bindings: &[EffectTargetBinding],
+    slots: &[LegalTargetSlot],
+) -> bool {
+    bindings.len() == slots.len()
+        && slots.iter().all(|slot| {
+            bindings
+                .iter()
+                .find(|binding| binding.selector_id == slot.selector_id)
+                .is_some_and(|binding| {
+                    let selected = binding.target_ids.iter().collect::<BTreeSet<_>>();
+                    selected.len() == binding.target_ids.len()
+                        && binding.target_ids.len() >= usize::from(slot.min)
+                        && binding.target_ids.len() <= usize::from(slot.max)
+                        && binding
+                            .target_ids
+                            .iter()
+                            .all(|target_id| slot.target_ids.contains(target_id))
+                })
+        })
 }
 
 /// Returns the commands that the current game rules permit for one actor.
@@ -840,6 +1270,155 @@ pub fn legal_game_commands(
     }
 }
 
+/// Returns the concrete hero intentions that are legal for one participant.
+///
+/// Target and stack order follows the canonical order stored by the world.
+#[must_use]
+pub fn legal_game_intentions(
+    state: &InitialGameState,
+    actor_position: u8,
+    effect_rules: &[EffectRule],
+) -> LegalGameIntentions {
+    if state.status != GameStatus::InProgress
+        || state.pending_choice.is_some()
+        || actor_position != state.active_position
+    {
+        return LegalGameIntentions::default();
+    }
+    if state.phase == GamePhase::DarkArts {
+        return LegalGameIntentions {
+            complete_dark_arts: effect_action_is_affordable(
+                &state.effect_world,
+                actor_position,
+                effect_rules,
+                EffectTrigger::DarkArtsCompleted,
+            ),
+            ..LegalGameIntentions::default()
+        };
+    }
+
+    legal_hero_action_intentions(state, actor_position, effect_rules)
+}
+
+fn legal_hero_action_intentions(
+    state: &InitialGameState,
+    actor_position: u8,
+    effect_rules: &[EffectRule],
+) -> LegalGameIntentions {
+    LegalGameIntentions {
+        complete_dark_arts: false,
+        playable_cards: legal_playable_cards(state, actor_position, effect_rules),
+        attack_targets: legal_attack_targets(state, actor_position),
+        acquisitions: legal_acquisitions(state, actor_position),
+    }
+}
+
+fn legal_playable_cards(
+    state: &InitialGameState,
+    actor_position: u8,
+    effect_rules: &[EffectRule],
+) -> Vec<LegalPlayableCard> {
+    state
+        .effect_world
+        .entities_in(EffectZone::HeroHand)
+        .iter()
+        .filter(|card| {
+            card.owner_position() == Some(actor_position)
+                && matches!(
+                    card.kind(),
+                    EffectEntityKind::HogwartsCard | EffectEntityKind::StarterCard
+                )
+        })
+        .filter_map(|card| {
+            let rule_id = card.effect_rule_id()?;
+            let mut matching = effect_rules
+                .iter()
+                .filter(|rule| rule.id == rule_id && rule.trigger == EffectTrigger::Manual);
+            let rule = matching.next()?;
+            if matching.next().is_some()
+                || !effect_action_is_affordable(
+                    &state.effect_world,
+                    actor_position,
+                    std::slice::from_ref(rule),
+                    EffectTrigger::Manual,
+                )
+            {
+                return None;
+            }
+            let mut effect_world = state.effect_world.clone();
+            effect_world
+                .move_to_back(
+                    card.id(),
+                    EffectZone::HeroHand,
+                    EffectZone::HeroPlayArea,
+                    Some(actor_position),
+                )
+                .ok()?;
+            let target_slots =
+                effects::atomic_manual_target_slots(&effect_world, actor_position, rule)?
+                    .into_iter()
+                    .map(|slot| LegalTargetSlot {
+                        selector_id: slot.selector_id,
+                        min: slot.min,
+                        max: slot.max,
+                        target_ids: slot.target_ids,
+                    })
+                    .collect();
+            Some(LegalPlayableCard {
+                card_id: card.id().to_owned(),
+                target_slots,
+            })
+        })
+        .collect()
+}
+
+fn legal_attack_targets(state: &InitialGameState, actor_position: u8) -> Vec<LegalAttackTarget> {
+    let available_attack = state
+        .effect_world
+        .hero_resource(actor_position, EffectResource::Attack)
+        .unwrap_or(0);
+    if available_attack == 0 {
+        return Vec::new();
+    }
+
+    state
+        .effect_world
+        .entities_in(EffectZone::ActiveVillains)
+        .iter()
+        .filter(|entity| entity.kind() == EffectEntityKind::Villain)
+        .filter_map(|villain| {
+            let health = villain.resource(EffectResource::Health);
+            let max_amount = available_attack.min(health);
+            (max_amount > 0).then(|| LegalAttackTarget {
+                villain_id: villain.id().to_owned(),
+                max_amount,
+            })
+        })
+        .collect()
+}
+
+fn legal_acquisitions(state: &InitialGameState, actor_position: u8) -> Vec<LegalAcquisition> {
+    let available_influence = state
+        .effect_world
+        .hero_resource(actor_position, EffectResource::Influence)
+        .unwrap_or(0);
+    state
+        .effect_world
+        .entities_in(EffectZone::Market)
+        .iter()
+        .filter(|entity| {
+            entity.kind() == EffectEntityKind::HogwartsCard && entity.owner_position().is_none()
+        })
+        .filter_map(|card| {
+            let cost = card.influence_cost()?;
+            (cost <= available_influence).then(|| LegalAcquisition {
+                card_id: card.id().to_owned(),
+                cost,
+            })
+        })
+        .collect()
+}
+
 /// Returns the participant who must make the current human decision.
 ///
 /// Automatic resolution points expose no legal command and therefore do not
@@ -857,7 +1436,13 @@ pub fn required_participant_for_decision(
         .players
         .iter()
         .map(InitialPlayer::position)
-        .find(|position| !legal_game_commands(state, *position, effect_rules).is_empty())
+        .find(|position| {
+            let intentions = legal_game_intentions(state, *position, effect_rules);
+            intentions.complete_dark_arts
+                || !intentions.playable_cards.is_empty()
+                || !intentions.attack_targets.is_empty()
+                || !intentions.acquisitions.is_empty()
+        })
 }
 
 /// Applies one official event to a game state using the same transition as a
@@ -871,52 +1456,64 @@ pub fn apply_game_event(
     state: &InitialGameState,
     event: &GameEvent,
 ) -> Result<InitialGameState, GameEventError> {
+    let metadata = event.metadata();
     match event {
         GameEvent::DarkArtsCompleted {
-            sequence,
-            state_version,
-            turn,
-            actor_position,
             effects,
             stop,
             prng_counter,
-        } => apply_dark_arts_completed(
-            state,
-            EffectEventTransition {
-                sequence: *sequence,
-                state_version: *state_version,
-                turn: *turn,
-                actor_position: *actor_position,
-                effects,
-                stop,
-                prng_counter: *prng_counter,
-            },
-        ),
+            ..
+        } => apply_dark_arts_completed(state, metadata.with_effects(effects, stop, *prng_counter)),
         GameEvent::ChoiceResolved {
-            sequence,
-            state_version,
-            turn,
-            actor_position,
             choice_id,
             choice_cause,
             selected_options,
             effects,
             stop,
             prng_counter,
+            ..
         } => apply_choice_resolved(
             state,
             choice_id,
             choice_cause,
             selected_options,
-            EffectEventTransition {
-                sequence: *sequence,
-                state_version: *state_version,
-                turn: *turn,
-                actor_position: *actor_position,
-                effects,
-                stop,
-                prng_counter: *prng_counter,
-            },
+            metadata.with_effects(effects, stop, *prng_counter),
+        ),
+        GameEvent::CardPlayed {
+            card_id,
+            targets,
+            effects,
+            stop,
+            prng_counter,
+            ..
+        } => apply_card_played_event(
+            state,
+            metadata,
+            card_id,
+            targets,
+            effects,
+            stop,
+            *prng_counter,
+        ),
+        GameEvent::AttackAssigned {
+            villain_id,
+            amount,
+            effects,
+            ..
+        } => apply_attack_assigned_event(state, metadata, villain_id, *amount, effects),
+        GameEvent::CardAcquired {
+            card_id,
+            cost,
+            refill_card_id,
+            effects,
+            ..
+        } => apply_card_acquired_event(
+            state,
+            metadata,
+            card_id,
+            *cost,
+            refill_card_id.as_deref(),
+            effects,
         ),
     }
 }
@@ -930,6 +1527,80 @@ struct EffectEventTransition<'a> {
     effects: &'a [EffectOutcome],
     stop: &'a EffectStop,
     prng_counter: u64,
+}
+
+#[derive(Clone, Copy)]
+struct GameEventMetadata {
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+}
+
+impl GameEvent {
+    const fn metadata(&self) -> GameEventMetadata {
+        match self {
+            Self::DarkArtsCompleted {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::ChoiceResolved {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::CardPlayed {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::AttackAssigned {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::CardAcquired {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            } => GameEventMetadata {
+                sequence: *sequence,
+                state_version: *state_version,
+                turn: *turn,
+                actor_position: *actor_position,
+            },
+        }
+    }
+}
+
+impl GameEventMetadata {
+    const fn with_effects<'a>(
+        self,
+        effects: &'a [EffectOutcome],
+        stop: &'a EffectStop,
+        prng_counter: u64,
+    ) -> EffectEventTransition<'a> {
+        EffectEventTransition {
+            sequence: self.sequence,
+            state_version: self.state_version,
+            turn: self.turn,
+            actor_position: self.actor_position,
+            effects,
+            stop,
+            prng_counter,
+        }
+    }
 }
 
 fn apply_dark_arts_completed(
@@ -1022,6 +1693,7 @@ fn apply_effect_event_transition(
     let mut next = state.clone();
     effects::apply_effect_outcomes(&mut next.effect_world, transition.effects)
         .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    validate_effect_world(&next)?;
     next.sequence = transition.sequence;
     next.state_version = transition.state_version;
     next.prng_counter = transition.prng_counter;
@@ -1046,6 +1718,292 @@ fn apply_effect_stop(state: &mut InitialGameState, stop: &EffectStop) {
             };
             state.pending_choice = None;
         }
+    }
+}
+
+fn apply_card_played_event(
+    state: &InitialGameState,
+    metadata: GameEventMetadata,
+    card_id: &str,
+    targets: &[EffectTargetBinding],
+    event_effects: &[EffectOutcome],
+    stop: &EffectStop,
+    prng_counter: u64,
+) -> Result<InitialGameState, GameEventError> {
+    if state.status != GameStatus::InProgress
+        || state.phase != GamePhase::HeroAction
+        || state.pending_choice.is_some()
+    {
+        return Err(GameEventError::EventNotApplicable);
+    }
+    validate_event_metadata(
+        state,
+        metadata.sequence,
+        metadata.state_version,
+        metadata.turn,
+        metadata.actor_position,
+    )?;
+    let (_, card) = state
+        .effect_world
+        .entity(card_id)
+        .filter(|(zone, card)| {
+            *zone == EffectZone::HeroHand
+                && card.owner_position() == Some(metadata.actor_position)
+                && matches!(
+                    card.kind(),
+                    EffectEntityKind::HogwartsCard | EffectEntityKind::StarterCard
+                )
+        })
+        .ok_or(GameEventError::EventNotApplicable)?;
+    let card_rule_id = card
+        .effect_rule_id()
+        .ok_or(GameEventError::EventNotApplicable)?
+        .to_owned();
+    let Some((first, resolved_effects)) = event_effects.split_first() else {
+        return Err(GameEventError::EffectTransitionInvalid);
+    };
+    let participant_positions = state
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    if first
+        != &(EffectOutcome::Moved {
+            rule_id: "system:play-card".to_owned(),
+            target_id: card_id.to_owned(),
+            target_position: Some(metadata.actor_position),
+            from: EffectZone::HeroHand,
+            to: EffectZone::HeroPlayArea,
+        })
+        || resolved_effects
+            .iter()
+            .any(|outcome| effect_outcome_rule_id(outcome) != card_rule_id)
+        || !target_bindings_are_well_formed(targets)
+        || !effects::effect_transition_is_valid(event_effects, stop, &participant_positions)
+    {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    validate_event_prng_counter(state, event_effects, prng_counter)?;
+
+    let mut next = state.clone();
+    effects::apply_effect_outcomes(&mut next.effect_world, event_effects)
+        .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    let positions = next
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    if !next.effect_world.is_valid_for_positions(&positions) {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    next.sequence = metadata.sequence;
+    next.state_version = metadata.state_version;
+    next.prng_counter = prng_counter;
+    next.last_effects = event_effects.to_vec();
+    apply_effect_stop(&mut next, stop);
+    Ok(next)
+}
+
+fn apply_attack_assigned_event(
+    state: &InitialGameState,
+    metadata: GameEventMetadata,
+    villain_id: &str,
+    amount: u16,
+    event_effects: &[EffectOutcome],
+) -> Result<InitialGameState, GameEventError> {
+    if state.status != GameStatus::InProgress
+        || state.phase != GamePhase::HeroAction
+        || state.pending_choice.is_some()
+        || amount == 0
+    {
+        return Err(GameEventError::EventNotApplicable);
+    }
+    validate_event_metadata(
+        state,
+        metadata.sequence,
+        metadata.state_version,
+        metadata.turn,
+        metadata.actor_position,
+    )?;
+    let hero = state
+        .effect_world
+        .entities_in(EffectZone::Heroes)
+        .iter()
+        .find(|entity| entity.owner_position() == Some(metadata.actor_position))
+        .ok_or(GameEventError::EventNotApplicable)?;
+    let available_attack = hero.resource(EffectResource::Attack);
+    let (_, villain) = state
+        .effect_world
+        .entity(villain_id)
+        .filter(|(zone, entity)| {
+            *zone == EffectZone::ActiveVillains && entity.kind() == EffectEntityKind::Villain
+        })
+        .ok_or(GameEventError::EventNotApplicable)?;
+    let villain_health = villain.resource(EffectResource::Health);
+    if amount > available_attack || amount > villain_health {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    let expected_effects =
+        attack_assignment_effects(hero, metadata.actor_position, villain, amount);
+    if event_effects != expected_effects {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    let mut next = state.clone();
+    effects::apply_effect_outcomes(&mut next.effect_world, event_effects)
+        .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    validate_effect_world(&next)?;
+    next.sequence = metadata.sequence;
+    next.state_version = metadata.state_version;
+    next.last_effects = event_effects.to_vec();
+    Ok(next)
+}
+
+fn apply_card_acquired_event(
+    state: &InitialGameState,
+    metadata: GameEventMetadata,
+    card_id: &str,
+    cost: u16,
+    refill_card_id: Option<&str>,
+    event_effects: &[EffectOutcome],
+) -> Result<InitialGameState, GameEventError> {
+    if state.status != GameStatus::InProgress
+        || state.phase != GamePhase::HeroAction
+        || state.pending_choice.is_some()
+    {
+        return Err(GameEventError::EventNotApplicable);
+    }
+    validate_event_metadata(
+        state,
+        metadata.sequence,
+        metadata.state_version,
+        metadata.turn,
+        metadata.actor_position,
+    )?;
+    let hero = state
+        .effect_world
+        .entities_in(EffectZone::Heroes)
+        .iter()
+        .find(|entity| entity.owner_position() == Some(metadata.actor_position))
+        .ok_or(GameEventError::EventNotApplicable)?;
+    let available_influence = hero.resource(EffectResource::Influence);
+    let (_, card) = state
+        .effect_world
+        .entity(card_id)
+        .filter(|(zone, entity)| {
+            *zone == EffectZone::Market
+                && entity.kind() == EffectEntityKind::HogwartsCard
+                && entity.owner_position().is_none()
+        })
+        .ok_or(GameEventError::EventNotApplicable)?;
+    if card.influence_cost() != Some(cost) || cost > available_influence {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    let expected_refill = state
+        .effect_world
+        .entities_in(EffectZone::HogwartsDeck)
+        .first()
+        .map(|entity| entity.id().to_owned());
+    if refill_card_id != expected_refill.as_deref() {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    let expected_effects = card_acquisition_effects(
+        hero,
+        metadata.actor_position,
+        card,
+        cost,
+        expected_refill.as_deref(),
+    );
+    if event_effects != expected_effects {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    let mut next = state.clone();
+    effects::apply_effect_outcomes(&mut next.effect_world, event_effects)
+        .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    validate_effect_world(&next)?;
+    next.sequence = metadata.sequence;
+    next.state_version = metadata.state_version;
+    next.last_effects = event_effects.to_vec();
+    Ok(next)
+}
+
+fn validate_event_metadata(
+    state: &InitialGameState,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+) -> Result<(), GameEventError> {
+    if actor_position != state.active_position {
+        return Err(GameEventError::ActorNotActive);
+    }
+    if turn != state.turn {
+        return Err(GameEventError::TurnMismatch);
+    }
+    if state.sequence.checked_add(1) != Some(sequence) {
+        return Err(GameEventError::SequenceMismatch);
+    }
+    if state.state_version.checked_add(1) != Some(state_version) {
+        return Err(GameEventError::StateVersionMismatch);
+    }
+    Ok(())
+}
+
+fn validate_event_prng_counter(
+    state: &InitialGameState,
+    effects: &[EffectOutcome],
+    prng_counter: u64,
+) -> Result<(), GameEventError> {
+    let rolled = effects
+        .iter()
+        .filter(|outcome| matches!(outcome, EffectOutcome::DieRolled { .. }))
+        .count();
+    let expected = state
+        .prng_counter
+        .checked_add(u64::try_from(rolled).map_err(|_| GameEventError::VersionOverflow)?)
+        .ok_or(GameEventError::VersionOverflow)?;
+    if prng_counter != expected {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    Ok(())
+}
+
+fn target_bindings_are_well_formed(bindings: &[EffectTargetBinding]) -> bool {
+    let selector_ids = bindings
+        .iter()
+        .map(|binding| binding.selector_id.as_str())
+        .collect::<BTreeSet<_>>();
+    selector_ids.len() == bindings.len()
+        && bindings.iter().all(|binding| {
+            !binding.selector_id.is_empty()
+                && binding
+                    .target_ids
+                    .iter()
+                    .all(|target_id| !target_id.is_empty())
+                && binding.target_ids.iter().collect::<BTreeSet<_>>().len()
+                    == binding.target_ids.len()
+        })
+}
+
+fn effect_outcome_rule_id(outcome: &EffectOutcome) -> &str {
+    match outcome {
+        EffectOutcome::DieRolled { rule_id, .. }
+        | EffectOutcome::Moved { rule_id, .. }
+        | EffectOutcome::NoOp { rule_id, .. }
+        | EffectOutcome::ResourceChanged { rule_id, .. }
+        | EffectOutcome::Terminal { rule_id, .. } => rule_id,
+    }
+}
+
+fn validate_effect_world(state: &InitialGameState) -> Result<(), GameEventError> {
+    let positions = state
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    if state.effect_world.is_valid_for_positions(&positions) {
+        Ok(())
+    } else {
+        Err(GameEventError::EffectTransitionInvalid)
     }
 }
 
@@ -1080,6 +2038,7 @@ mod tests {
         manifest_digest: "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         manifest_version: 1,
         playable: true,
+        initial_entities: &[],
     };
 
     fn valid_participants() -> Vec<LobbyParticipant> {
@@ -1495,13 +2454,16 @@ mod tests {
             content: CONTENT,
         })
         .expect("the complete lobby should start");
-        let mut entities = initial.effect_world.entities().to_vec();
-        entities.push(EffectEntity::new(
-            "x".repeat(257),
-            Some(1),
+        let mut placements = initial
+            .effect_world
+            .entities()
+            .map(|(zone, entity)| EffectEntityPlacement::new(entity.clone(), zone))
+            .collect::<Vec<_>>();
+        placements.push(EffectEntityPlacement::new(
+            EffectEntity::new("x".repeat(257), Some(1)),
             EffectZone::HeroHand,
         ));
-        initial.effect_world = EffectWorld::new(entities);
+        initial.effect_world = EffectWorld::new(placements);
 
         assert_eq!(
             restore_game_state(restore_input(&initial, SNAPSHOT_VERSION)),
@@ -1537,7 +2499,12 @@ mod tests {
                 effect_world: EffectWorld::new(
                     players
                         .iter()
-                        .map(|player| EffectEntity::hero(player.position()))
+                        .map(|player| {
+                            EffectEntityPlacement::new(
+                                EffectEntity::hero(player.position()),
+                                EffectZone::Heroes,
+                            )
+                        })
                         .collect(),
                 ),
                 last_effects: Vec::new(),
@@ -1557,6 +2524,7 @@ mod tests {
 
     fn actor_selector(zone: EffectZone) -> EffectSelector {
         EffectSelector {
+            id: None,
             zone,
             owner: EffectTargetOwner::Actor,
             min: 1,
@@ -1661,9 +2629,12 @@ mod tests {
         })
         .expect("the complete lobby should start");
         initial.effect_world = EffectWorld::new(vec![
-            EffectEntity::hero(1),
-            EffectEntity::hero(2),
-            EffectEntity::new("card:synthetic", Some(1), EffectZone::HeroHand),
+            EffectEntityPlacement::new(EffectEntity::hero(1), EffectZone::Heroes),
+            EffectEntityPlacement::new(EffectEntity::hero(2), EffectZone::Heroes),
+            EffectEntityPlacement::new(
+                EffectEntity::new("card:synthetic", Some(1)),
+                EffectZone::HeroHand,
+            ),
         ]);
         let effects = [comprehensive_effect_rule()];
 
@@ -1706,9 +2677,8 @@ mod tests {
                 .state
                 .effect_world()
                 .entities()
-                .iter()
-                .any(|entity| {
-                    entity.id() == "card:synthetic" && entity.zone() == EffectZone::HeroDiscardPile
+                .any(|(zone, entity)| {
+                    entity.id() == "card:synthetic" && zone == EffectZone::HeroDiscardPile
                 })
         );
         assert!(decision.state.last_effects().iter().any(|outcome| matches!(
@@ -1739,6 +2709,7 @@ mod tests {
             vec![],
             EffectDefinition::Apply {
                 target: EffectSelector {
+                    id: None,
                     zone: EffectZone::Heroes,
                     owner: EffectTargetOwner::Any,
                     min: 1,
@@ -1933,6 +2904,7 @@ mod tests {
                 effects: vec![
                     EffectDefinition::Apply {
                         target: EffectSelector {
+                            id: None,
                             zone: EffectZone::Heroes,
                             owner: EffectTargetOwner::Any,
                             min: 1,
@@ -2034,6 +3006,7 @@ mod tests {
             vec![],
             EffectDefinition::Apply {
                 target: EffectSelector {
+                    id: None,
                     zone: EffectZone::Heroes,
                     owner: EffectTargetOwner::Any,
                     min: 2,

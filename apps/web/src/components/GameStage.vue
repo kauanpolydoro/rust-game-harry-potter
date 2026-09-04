@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 
-import type { EffectOutcomeSummary } from '../contracts/identity-access.generated'
+import type {
+  EffectOutcomeSummary,
+  EffectTargetBinding,
+  GameProjectionResponse,
+} from '../contracts/identity-access.generated'
 import { useGameCommandStore } from '../stores/gameCommand'
 import { useGameSyncStore } from '../stores/gameSync'
 import { useRoomAccessStore } from '../stores/roomAccess'
+import GameTable from './GameTable.vue'
 import RecoveryManagement from './RecoveryManagement.vue'
 
 const props = defineProps<{
@@ -34,6 +39,13 @@ const requiredParticipant = computed(() =>
 )
 const commandIsBusy = computed(() =>
   ['submitting', 'recovering', 'resyncing'].includes(gameCommand.status),
+)
+const tableCommandsDisabled = computed(
+  () =>
+    gameSync.commandsFrozen ||
+    commandIsBusy.value ||
+    Boolean(gameCommand.pendingIntent) ||
+    gameCommand.status === 'stale',
 )
 const phaseLabel = computed(() => {
   switch (game.value?.turn.phase) {
@@ -271,6 +283,39 @@ function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
       return 'O servidor confirmou um efeito oficial.'
   }
 }
+
+async function applyOfficialProjection(
+  request: Promise<GameProjectionResponse | null>,
+): Promise<void> {
+  const projection = await request
+  if (!projection) {
+    return
+  }
+  roomAccess.advanceGameProjection(projection)
+  await nextTick()
+  document.getElementById('game-table-heading')?.focus()
+}
+
+function playCard(cardId: string, targets: EffectTargetBinding[]): void {
+  if (!game.value || tableCommandsDisabled.value) {
+    return
+  }
+  void applyOfficialProjection(gameCommand.playCard(game.value, cardId, targets))
+}
+
+function assignAttack(villainId: string, amount: number): void {
+  if (!game.value || tableCommandsDisabled.value) {
+    return
+  }
+  void applyOfficialProjection(gameCommand.assignAttack(game.value, villainId, amount))
+}
+
+function acquireCard(cardId: string): void {
+  if (!game.value || tableCommandsDisabled.value) {
+    return
+  }
+  void applyOfficialProjection(gameCommand.acquireCard(game.value, cardId))
+}
 </script>
 
 <template>
@@ -419,6 +464,16 @@ function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
           <dd>{{ formatExpiration(game.game.expires_at) }}</dd>
         </div>
       </dl>
+
+      <GameTable
+        v-if="game.turn.phase === 'hero_action'"
+        :commands-disabled="tableCommandsDisabled"
+        :game="game"
+        :pending-overlay="gameCommand.pendingOverlay"
+        @acquire-card="acquireCard"
+        @assign-attack="assignAttack"
+        @play-card="playCard"
+      />
 
       <section
         v-if="game.choice.status === 'pending'"

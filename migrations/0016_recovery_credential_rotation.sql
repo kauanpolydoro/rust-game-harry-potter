@@ -254,5 +254,5 @@ CREATE TABLE recovery_credential_regeneration_requests (
 );
 
 UPDATE application_metadata
-SET value = '15'
+SET value = '16'
 WHERE key = 'schema_version';

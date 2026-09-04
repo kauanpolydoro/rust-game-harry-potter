@@ -1309,7 +1309,9 @@ onMounted(async () => {
         <span aria-hidden="true"></span>
         {{
           game.turn.phase === 'hero_action'
-            ? 'Fase oficial concluída. As próximas ações chegam em uma etapa posterior.'
+            ? game.legal_actions.length > 0
+              ? 'Escolha uma carta, um vilão ou o mercado na mesa acima.'
+              : 'Não há outra ação legal nesta versão. O encerramento do turno virá na próxima etapa.'
             : 'Aguardando a ação do participante ativo.'
         }}
       </p>
