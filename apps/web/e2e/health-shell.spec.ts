@@ -152,30 +152,54 @@ test('a guest joins with an available hero and keeps the same position after rel
   }
 })
 
-test('two players synchronize a committed command and reconnect without reloading', async ({
+test('a player replays a missed event and falls back to Snapshot within recovery SLOs', async ({
   browser,
   page: hostPage,
 }) => {
   const guestContext = await browser.newContext()
   const guestPage = await guestContext.newPage()
   await guestPage.addInitScript(() => {
-    type BrowserSocket = { close: (code?: number, reason?: string) => void }
+    type BrowserSocket = {
+      addEventListener: (
+        type: 'message',
+        listener: (event: { data: unknown }) => void,
+      ) => void
+      close: (code?: number, reason?: string) => void
+    }
     type BrowserSocketConstructor = new (
       url: string | URL,
       protocols?: string | string[],
     ) => BrowserSocket
     const scope = globalThis as unknown as {
       WebSocket: BrowserSocketConstructor
+      __e2eForceBadDigest: boolean
+      __e2eMessages: string[]
       __e2eSockets: BrowserSocket[]
     }
     const NativeWebSocket = scope.WebSocket
+    const messages: string[] = []
     const observed: BrowserSocket[] = []
     class ObservedWebSocket extends NativeWebSocket {
       constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols)
+        let requestedUrl = url
+        if (scope.__e2eForceBadDigest) {
+          const incompatible = new URL(url)
+          incompatible.searchParams.set('digest', `blake3:${'0'.repeat(64)}`)
+          requestedUrl = incompatible
+          scope.__e2eForceBadDigest = false
+        }
+        super(requestedUrl, protocols)
         observed.push(this)
+        this.addEventListener('message', (event) => {
+          const message = JSON.parse(String(event.data)) as { type?: unknown }
+          if (typeof message.type === 'string') {
+            messages.push(message.type)
+          }
+        })
       }
     }
+    scope.__e2eForceBadDigest = false
+    scope.__e2eMessages = messages
     scope.__e2eSockets = observed
     scope.WebSocket = ObservedWebSocket
   })
@@ -206,31 +230,58 @@ test('two players synchronize a committed command and reconnect without reloadin
 
     await expect(hostPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
     await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
-    await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
-    await expect(guestPage.getByText('Ação do Herói')).toBeVisible()
 
+    await guestContext.setOffline(true)
     await guestPage.evaluate(() => {
       const sockets = (
         globalThis as unknown as {
           __e2eSockets: Array<{ close: (code?: number, reason?: string) => void }>
         }
       ).__e2eSockets
-      sockets.at(-1)?.close(1000, 'E2E reconnect')
+      sockets.at(-1)?.close(1000, 'E2E network change')
     })
-    await expect(guestPage.getByText('Reconectando atualizações em tempo real.')).toBeVisible()
+    await expect(guestPage.locator('.realtime-status')).toContainText(
+      /Reconectando|interrompidas/,
+    )
+    await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
+    await guestContext.setOffline(false)
+
+    const replayStartedAt = Date.now()
+    await expect(guestPage.getByText('Ação do Herói')).toBeVisible({ timeout: 3_000 })
+    expect(Date.now() - replayStartedAt).toBeLessThan(3_000)
     await expect
       .poll(
         () =>
-          guestPage.evaluate(
-            () =>
-              (globalThis as unknown as { __e2eSockets: Array<unknown> }).__e2eSockets.length,
+          guestPage.evaluate(() =>
+            (globalThis as unknown as { __e2eMessages: string[] }).__e2eMessages.includes('events'),
           ),
-        { timeout: 10_000 },
+        { timeout: 3_000 },
       )
-      .toBeGreaterThanOrEqual(2)
-    await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible({
-      timeout: 10_000,
+      .toBe(true)
+    await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
+
+    await guestPage.evaluate(() => {
+      const scope = globalThis as unknown as {
+        __e2eForceBadDigest: boolean
+        __e2eSockets: Array<{ close: (code?: number, reason?: string) => void }>
+      }
+      scope.__e2eForceBadDigest = true
+      scope.__e2eSockets.at(-1)?.close(1000, 'E2E incompatible digest')
     })
+    const snapshotStartedAt = Date.now()
+    await expect
+      .poll(
+        () =>
+          guestPage.evaluate(() =>
+            (globalThis as unknown as { __e2eMessages: string[] }).__e2eMessages.includes(
+              'snapshot',
+            ),
+          ),
+        { timeout: 5_000 },
+      )
+      .toBe(true)
+    expect(Date.now() - snapshotStartedAt).toBeLessThan(5_000)
+    await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
   } finally {
     await guestContext.close()
   }
@@ -259,7 +310,50 @@ test('the current interface reflows at an effective 200 percent zoom', async ({ 
 test('a stale command resynchronizes before the player can decide again', async ({ page }) => {
   let sessionRequests = 0
   let commandRequests = 0
-  await page.addInitScript(() => localStorage.setItem('hogwarts.session.expected', 'true'))
+  await page.addInitScript(() => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    class SynchronizedSocket {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+
+      readonly url: string
+      readonly requestedProtocol: string
+      protocol = ''
+      readyState = SynchronizedSocket.CONNECTING
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: ((event: { code: number }) => void) | null = null
+
+      constructor(url: string | URL, protocol: string | string[]) {
+        this.url = String(url)
+        this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+        queueMicrotask(() => {
+          this.readyState = SynchronizedSocket.OPEN
+          this.protocol = this.requestedProtocol
+          this.onopen?.()
+          const request = new URL(this.url)
+          this.onmessage?.({
+            data: JSON.stringify({
+              cursor: Number(request.searchParams.get('cursor')),
+              digest: request.searchParams.get('digest'),
+              protocol_version: 1,
+              snapshot_version: Number(request.searchParams.get('snapshot_version')),
+              type: 'synchronized',
+            }),
+          })
+        })
+      }
+
+      close(): void {
+        this.readyState = SynchronizedSocket.CLOSED
+        this.onclose?.({ code: 1000 })
+      }
+    }
+    ;(globalThis as unknown as { WebSocket: typeof SynchronizedSocket }).WebSocket =
+      SynchronizedSocket
+  })
   await page.route('**/api/session', async (route) => {
     sessionRequests += 1
     await route.fulfill({

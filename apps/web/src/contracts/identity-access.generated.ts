@@ -173,6 +173,14 @@ export interface RealtimeSnapshotMessage {
   projection: GameProjectionResponse
 }
 
+export interface RealtimeSynchronizedMessage {
+  protocol_version: 1
+  type: "synchronized"
+  cursor: number
+  snapshot_version: number
+  digest: string
+}
+
 export interface RealtimeEventBatchMessage {
   protocol_version: 1
   type: "events"
@@ -329,6 +337,10 @@ export function isRealtimeGameEvent(value: unknown): value is RealtimeGameEvent 
 
 export function isRealtimeSnapshotMessage(value: unknown): value is RealtimeSnapshotMessage {
   return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","projection"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "snapshot") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && isGameProjectionResponse(value["projection"])
+}
+
+export function isRealtimeSynchronizedMessage(value: unknown): value is RealtimeSynchronizedMessage {
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","snapshot_version","digest"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "synchronized") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && typeof value["snapshot_version"] === 'number' && Number.isInteger(value["snapshot_version"]) && value["snapshot_version"] >= 1 && typeof value["digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["digest"])
 }
 
 export function isRealtimeEventBatchMessage(value: unknown): value is RealtimeEventBatchMessage {

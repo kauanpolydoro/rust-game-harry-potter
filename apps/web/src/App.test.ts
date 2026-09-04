@@ -1,9 +1,49 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/vue'
 import { createPinia } from 'pinia'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
 import { useGameCommandStore } from './stores/gameCommand'
+
+class SynchronizedWebSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSED = 3
+
+  readonly url: string
+  readonly requestedProtocol: string
+  protocol = ''
+  readyState = SynchronizedWebSocket.CONNECTING
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: ((event: { code: number }) => void) | null = null
+
+  constructor(url: string | URL, protocol: string | string[]) {
+    this.url = String(url)
+    this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+    queueMicrotask(() => {
+      this.readyState = SynchronizedWebSocket.OPEN
+      this.protocol = this.requestedProtocol
+      this.onopen?.()
+      const request = new URL(this.url)
+      this.onmessage?.({
+        data: JSON.stringify({
+          cursor: Number(request.searchParams.get('cursor')),
+          digest: request.searchParams.get('digest'),
+          protocol_version: 1,
+          snapshot_version: Number(request.searchParams.get('snapshot_version')),
+          type: 'synchronized',
+        }),
+      })
+    })
+  }
+
+  close(): void {
+    this.readyState = SynchronizedWebSocket.CLOSED
+    this.onclose?.({ code: 1000 })
+  }
+}
 
 const availableHeroes = [
   { available: true, id: 'harry', name: 'Harry' },
@@ -200,6 +240,10 @@ function guestLobbyResponse() {
 }
 
 describe('application shell', () => {
+  beforeEach(() => {
+    vi.stubGlobal('WebSocket', SynchronizedWebSocket)
+  })
+
   afterEach(() => {
     cleanup()
     localStorage.clear()
@@ -1066,6 +1110,103 @@ describe('application shell', () => {
     expect(await screen.findByText('Atualizações automáticas interrompidas.')).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: 'Reconectar atualizações' }))
     expect(FailingWebSocket.attempts).toBe(2)
+  })
+
+  it('keeps the active command frozen until realtime convergence is proven', async () => {
+    class ControlledWebSocket {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+      static instance: ControlledWebSocket | null = null
+
+      readonly requestedProtocol: string
+      protocol = ''
+      readyState = ControlledWebSocket.CONNECTING
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: ((event: { code: number }) => void) | null = null
+
+      constructor(_url: string | URL, protocol: string | string[]) {
+        this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+        ControlledWebSocket.instance = this
+      }
+
+      open(): void {
+        this.readyState = ControlledWebSocket.OPEN
+        this.protocol = this.requestedProtocol
+        this.onopen?.()
+      }
+
+      receive(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      close(): void {
+        this.readyState = ControlledWebSocket.CLOSED
+        this.onclose?.({ code: 1000 })
+      }
+    }
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const game = gameProjectionResponse()
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(game), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+    vi.stubGlobal('fetch', request)
+    vi.stubGlobal('WebSocket', ControlledWebSocket)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    ControlledWebSocket.instance?.open()
+    expect(screen.getByRole('button', { name: 'Sincronizando partida' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Concluir Artes das Trevas' })).toBeNull()
+
+    ControlledWebSocket.instance?.receive({
+      cursor: 0,
+      digest: game.snapshot.digest,
+      protocol_version: 1,
+      snapshot_version: 1,
+      type: 'synchronized',
+    })
+    expect(await screen.findByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
+
+    const gapProjection = completedGameProjectionResponse()
+    gapProjection.snapshot.cursor = 2
+    gapProjection.snapshot.sequence = 2
+    gapProjection.snapshot.state_version = 3
+    gapProjection.snapshot.digest = `blake3:${'e'.repeat(64)}`
+    ControlledWebSocket.instance?.receive({
+      cursor: 2,
+      events: [
+        {
+          actor_position: 1,
+          event_version: 1,
+          sequence: 2,
+          state_version: 3,
+          turn: 1,
+          type: 'dark_arts_completed',
+        },
+      ],
+      from_cursor: 1,
+      projection: gapProjection,
+      protocol_version: 1,
+      type: 'events',
+    })
+
+    expect(await screen.findByRole('button', { name: 'Sincronizando partida' })).toBeDisabled()
+    expect(request).toHaveBeenCalledTimes(2)
   })
 
   it('keeps a valid browser binding recoverable when session restoration loses the network', async () => {

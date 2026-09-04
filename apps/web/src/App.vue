@@ -83,6 +83,7 @@ const canStartGame = computed(
 const canCompleteDarkArts = computed(
   () =>
     game.value?.legal_actions.includes('complete_dark_arts') === true &&
+    !gameSync.commandsFrozen &&
     !gameCommand.pendingIntent &&
     gameCommand.status !== 'submitting' &&
     gameCommand.status !== 'recovering' &&
@@ -951,6 +952,14 @@ onMounted(async () => {
         type="button"
       >
         {{ gameCommand.status === 'recovering' ? 'Consultando recibo' : 'Aguardando confirmação' }}
+      </button>
+      <button
+        v-else-if="game && game.legal_actions.includes('complete_dark_arts') && gameSync.commandsFrozen"
+        class="primary-button"
+        :disabled="true"
+        type="button"
+      >
+        Sincronizando partida
       </button>
       <button
         v-else-if="game && canCompleteDarkArts"

@@ -50,6 +50,14 @@ O gate cria um banco temporário isolado para validar migrations desde zero e o 
 
 Ele executa formatação, Clippy, testes Rust, limites de módulos, geração de contratos, lint, typecheck, testes Vue, build, Playwright e secret scan.
 
+Valide separadamente os SLOs de reconexão no perfil de referência:
+
+```bash
+make check-reconnect-profile
+```
+
+Esse perfil usa 100 partidas, 400 WebSockets, 20 Comandos por segundo, RTT simulado de 150 ms e 1% de perda para medir o p95 de replay e Snapshot.
+
 ## Endpoints de saúde
 
 - `GET /health/live` confirma que o processo HTTP responde, mesmo antes da inicialização.
