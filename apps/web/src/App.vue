@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { isUncertainTransportFailure } from './api/http'
 import GameStage from './components/GameStage.vue'
-import RecoveryCredential from './components/RecoveryCredential.vue'
+import RecoveryManagement from './components/RecoveryManagement.vue'
 import type {
   HeroId,
   PendingChoiceSummary,
@@ -15,12 +15,14 @@ import { useGameCommandStore } from './stores/gameCommand'
 import { useGameSyncStore } from './stores/gameSync'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useRoomCreationStore } from './stores/roomCreation'
+import { useSecuritySyncStore } from './stores/securitySync'
 
 const health = useHealthStore()
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
 const roomCreation = useRoomCreationStore()
+const securitySync = useSecuritySyncStore()
 const recoveryToken = ref(takeRecoveryToken())
 const entryMode = ref<'create' | 'join' | 'recover'>(
   recoveryToken.value ? 'recover' : 'create',
@@ -632,8 +634,22 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  () => Boolean(lobby.value || game.value),
+  (hasAuthenticatedSession) => {
+    if (hasAuthenticatedSession) {
+      securitySync.connect()
+    } else {
+      securitySync.disconnect()
+    }
+  },
+  { immediate: true },
+)
 
-onBeforeUnmount(() => gameSync.disconnect())
+onBeforeUnmount(() => {
+  gameSync.disconnect()
+  securitySync.disconnect()
+})
 
 onMounted(async () => {
   await Promise.all([
@@ -722,10 +738,9 @@ onMounted(async () => {
           <output aria-labelledby="room-code-label">{{ lobby.room.code }}</output>
         </div>
 
-        <RecoveryCredential
-          v-if="roomAccess.issuedRecoveryToken"
-          :token="roomAccess.issuedRecoveryToken"
-          @dismiss="roomAccess.dismissRecoveryCredential()"
+        <RecoveryManagement
+          :participant="lobby.participant"
+          :participants="lobby.participants"
         />
 
         <dl class="room-details">
@@ -1304,7 +1319,9 @@ onMounted(async () => {
           game.turn.phase === 'hero_actions'
             ? game.choice.status === 'pending'
               ? 'Aguardando a escolha oficial do participante responsável.'
-              : 'Aguardando as ações do participante ativo.'
+              : game.legal_actions.length > 0
+                ? 'Escolha uma carta, um vilão ou o mercado na mesa acima, ou encerre suas ações.'
+                : 'Aguardando as ações do participante ativo.'
             : 'O servidor está resolvendo esta fase automaticamente.'
         }}
       </p>

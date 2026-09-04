@@ -5,6 +5,19 @@ LOCK TABLE game_command_receipts IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE rooms IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE participants IN SHARE ROW EXCLUSIVE MODE;
 
+CREATE OR REPLACE FUNCTION game_event_matches_command(command_type TEXT, event_type TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+RETURN CASE command_type
+    WHEN 'end_hero_actions' THEN event_type = 'turn_completed'
+    WHEN 'resolve_choice' THEN event_type = 'choice_resolved'
+    WHEN 'play_card' THEN event_type = 'card_played'
+    WHEN 'assign_attack' THEN event_type = 'attack_assigned'
+    WHEN 'acquire_card' THEN event_type = 'card_acquired'
+    ELSE FALSE
+END;
+
 DO $$
 DECLARE
     invalid_game_id UUID;
@@ -65,6 +78,9 @@ BEGIN
                 WHEN 'dark_arts_completed' THEN 'complete_dark_arts'
                 WHEN 'choice_resolved' THEN 'resolve_choice'
                 WHEN 'turn_completed' THEN 'end_hero_actions'
+                WHEN 'card_played' THEN 'play_card'
+                WHEN 'attack_assigned' THEN 'assign_attack'
+                WHEN 'card_acquired' THEN 'acquire_card'
                 ELSE NULL
               END
     )
@@ -296,7 +312,10 @@ BEGIN
        )
        OR (
             codec_version = 3
-            AND codec_type NOT IN ('dark_arts_completed', 'choice_resolved')
+            AND codec_type NOT IN (
+                'dark_arts_completed', 'choice_resolved', 'card_played',
+                'attack_assigned', 'card_acquired'
+            )
        )
     THEN
         RETURN FALSE;
@@ -329,9 +348,12 @@ BEGIN
     END IF;
 
     IF codec_version = 3 THEN
-        IF jsonb_typeof(payload -> 'prng_counter') IS DISTINCT FROM 'number'
-           OR payload ->> 'prng_counter' !~ '^(0|[1-9][0-9]*)$'
-           OR (payload ->> 'prng_counter')::NUMERIC > 9223372036854775807
+        IF codec_type IN ('dark_arts_completed', 'choice_resolved', 'card_played')
+           AND (
+                jsonb_typeof(payload -> 'prng_counter') IS DISTINCT FROM 'number'
+                OR payload ->> 'prng_counter' !~ '^(0|[1-9][0-9]*)$'
+                OR (payload ->> 'prng_counter')::NUMERIC > 9223372036854775807
+           )
         THEN
             RETURN FALSE;
         END IF;
@@ -342,7 +364,7 @@ BEGIN
                 relational_sequence,
                 relational_state_version,
                 relational_actor_position,
-                (payload ->> 'prng_counter')::BIGINT,
+                COALESCE((payload ->> 'prng_counter')::BIGINT, 0),
                 CASE payload ->> 'effect_stop'
                     WHEN 'terminal' THEN COALESCE(
                         payload -> 'effects' -> -1 ->> 'outcome',
@@ -1112,10 +1134,20 @@ BEGIN
                 );
         WHEN 'hero_actions' THEN
             RETURN control -> 'queued_phases' = '["end_turn"]'::jsonb
-                AND jsonb_array_length(control -> 'queued_effects') = 0
-                AND control -> 'decision_point' ->> 'type' = 'player_intent'
-                AND control -> 'decision_point' ->> 'responsible_position'
-                    = control ->> 'active_position';
+                AND (
+                    (
+                        jsonb_array_length(control -> 'queued_effects') = 0
+                        AND control -> 'decision_point' ->> 'type' = 'player_intent'
+                        AND control -> 'decision_point' ->> 'responsible_position'
+                            = control ->> 'active_position'
+                    )
+                    OR (
+                        control -> 'decision_point' ->> 'type' = 'effect_choice'
+                        AND control -> 'queued_effects'
+                            = control -> 'decision_point' -> 'choice'
+                                -> 'continuation' -> 'queue'
+                    )
+                );
         WHEN 'end_turn' THEN
             RETURN jsonb_array_length(control -> 'queued_phases') = 0
                 AND jsonb_array_length(control -> 'queued_effects') = 0
@@ -1148,6 +1180,22 @@ BEGIN
             'owner_position', entity -> 'owner_position'
         );
     END IF;
+    IF entity ? 'kind' THEN
+        expected := expected || jsonb_build_object('kind', entity -> 'kind');
+    END IF;
+    IF entity ? 'catalog_id' THEN
+        expected := expected || jsonb_build_object('catalog_id', entity -> 'catalog_id');
+    END IF;
+    IF entity ? 'effect_rule_id' THEN
+        expected := expected || jsonb_build_object(
+            'effect_rule_id', entity -> 'effect_rule_id'
+        );
+    END IF;
+    IF entity ? 'influence_cost' THEN
+        expected := expected || jsonb_build_object(
+            'influence_cost', entity -> 'influence_cost'
+        );
+    END IF;
     IF entity ? 'zone_index' THEN
         expected := expected || jsonb_build_object('zone_index', entity -> 'zone_index');
     END IF;
@@ -1175,12 +1223,45 @@ BEGIN
             )
        )
        OR (zone_name = 'heroes' AND NOT entity ? 'owner_position')
+       OR (
+            entity ? 'kind'
+            AND (
+                jsonb_typeof(entity -> 'kind') IS DISTINCT FROM 'string'
+                OR entity ->> 'kind' NOT IN (
+                    'generic', 'hero', 'hogwarts_card', 'starter_card', 'villain'
+                )
+            )
+       )
+       OR (
+            entity ? 'catalog_id'
+            AND (
+                jsonb_typeof(entity -> 'catalog_id') IS DISTINCT FROM 'string'
+                OR entity ->> 'catalog_id' = ''
+                OR octet_length(entity ->> 'catalog_id') > 256
+            )
+       )
+       OR (
+            entity ? 'effect_rule_id'
+            AND (
+                jsonb_typeof(entity -> 'effect_rule_id') IS DISTINCT FROM 'string'
+                OR entity ->> 'effect_rule_id' = ''
+                OR octet_length(entity ->> 'effect_rule_id') > 256
+            )
+       )
+       OR (
+            entity ? 'influence_cost'
+            AND (
+                jsonb_typeof(entity -> 'influence_cost') IS DISTINCT FROM 'number'
+                OR entity ->> 'influence_cost' !~ '^(0|[1-9][0-9]*)$'
+                OR (entity ->> 'influence_cost')::NUMERIC > 65535
+            )
+       )
     THEN
         RETURN FALSE;
     END IF;
 
     IF zone_name IN (
-        'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
+        'active_villains', 'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
         'hero_draw_pile', 'hero_hand', 'hero_play_area', 'hogwarts_deck',
         'market', 'villain_deck'
     ) THEN
@@ -1448,7 +1529,7 @@ BEGIN
             SELECT 1
             FROM jsonb_array_elements(snapshot -> 'effects' -> 'entities') AS entity
             WHERE entity ->> 'zone' IN (
-                'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
+                'active_villains', 'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
                 'hero_draw_pile', 'hero_hand', 'hero_play_area', 'hogwarts_deck',
                 'market', 'villain_deck'
             )
@@ -1606,6 +1687,7 @@ BEGIN
             jsonb_agg(
                 jsonb_build_object(
                     'id', format('hero:%s', participant ->> 'position'),
+                    'kind', 'hero',
                     'owner_position', participant -> 'position',
                     'zone', 'heroes',
                     'resources', jsonb_build_object('health', 10)
@@ -1627,11 +1709,31 @@ BEGIN
     LOOP
         normalized := jsonb_build_object(
             'id', entity -> 'id',
+            'kind', CASE
+                WHEN jsonb_typeof(entity -> 'kind') = 'string' THEN entity ->> 'kind'
+                WHEN entity ->> 'zone' = 'heroes' THEN 'hero'
+                ELSE 'generic'
+            END,
             'zone', entity -> 'zone'
         );
         IF jsonb_typeof(entity -> 'owner_position') = 'number' THEN
             normalized := normalized || jsonb_build_object(
                 'owner_position', entity -> 'owner_position'
+            );
+        END IF;
+        IF jsonb_typeof(entity -> 'catalog_id') = 'string' THEN
+            normalized := normalized || jsonb_build_object(
+                'catalog_id', entity -> 'catalog_id'
+            );
+        END IF;
+        IF jsonb_typeof(entity -> 'effect_rule_id') = 'string' THEN
+            normalized := normalized || jsonb_build_object(
+                'effect_rule_id', entity -> 'effect_rule_id'
+            );
+        END IF;
+        IF jsonb_typeof(entity -> 'influence_cost') = 'number' THEN
+            normalized := normalized || jsonb_build_object(
+                'influence_cost', entity -> 'influence_cost'
             );
         END IF;
         IF jsonb_typeof(entity -> 'resources') = 'object'
@@ -1642,7 +1744,7 @@ BEGIN
             );
         END IF;
         IF entity ->> 'zone' IN (
-            'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
+            'active_villains', 'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
             'hero_draw_pile', 'hero_hand', 'hero_play_area', 'hogwarts_deck',
             'market', 'villain_deck'
         ) THEN
@@ -1750,6 +1852,22 @@ BEGIN
             'owner_position', entity -> 'owner_position'
         );
     END IF;
+    IF entity ? 'kind' THEN
+        expected := expected || jsonb_build_object('kind', entity -> 'kind');
+    END IF;
+    IF entity ? 'catalog_id' THEN
+        expected := expected || jsonb_build_object('catalog_id', entity -> 'catalog_id');
+    END IF;
+    IF entity ? 'effect_rule_id' THEN
+        expected := expected || jsonb_build_object(
+            'effect_rule_id', entity -> 'effect_rule_id'
+        );
+    END IF;
+    IF entity ? 'influence_cost' THEN
+        expected := expected || jsonb_build_object(
+            'influence_cost', entity -> 'influence_cost'
+        );
+    END IF;
     IF entity ? 'zone_index' THEN
         expected := expected || jsonb_build_object('zone_index', entity -> 'zone_index');
     END IF;
@@ -1794,8 +1912,44 @@ BEGIN
             )
        )
        OR (
+            entity ? 'kind'
+            AND (
+                jsonb_typeof(entity -> 'kind') IS DISTINCT FROM 'string'
+                OR entity ->> 'kind' NOT IN (
+                    'generic', 'hero', 'hogwarts_card', 'starter_card', 'villain'
+                )
+            )
+       )
+       OR (
+            entity ? 'catalog_id'
+            AND entity -> 'catalog_id' IS DISTINCT FROM 'null'::jsonb
+            AND (
+                jsonb_typeof(entity -> 'catalog_id') IS DISTINCT FROM 'string'
+                OR entity ->> 'catalog_id' = ''
+                OR octet_length(entity ->> 'catalog_id') > 256
+            )
+       )
+       OR (
+            entity ? 'effect_rule_id'
+            AND entity -> 'effect_rule_id' IS DISTINCT FROM 'null'::jsonb
+            AND (
+                jsonb_typeof(entity -> 'effect_rule_id') IS DISTINCT FROM 'string'
+                OR entity ->> 'effect_rule_id' = ''
+                OR octet_length(entity ->> 'effect_rule_id') > 256
+            )
+       )
+       OR (
+            entity ? 'influence_cost'
+            AND entity -> 'influence_cost' IS DISTINCT FROM 'null'::jsonb
+            AND (
+                jsonb_typeof(entity -> 'influence_cost') IS DISTINCT FROM 'number'
+                OR entity ->> 'influence_cost' !~ '^(0|[1-9][0-9]*)$'
+                OR (entity ->> 'influence_cost')::NUMERIC > 65535
+            )
+       )
+       OR (
             zone_name NOT IN (
-                'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
+                'active_villains', 'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
                 'hero_draw_pile', 'hero_hand', 'hero_play_area', 'hogwarts_deck',
                 'market', 'villain_deck'
             )
@@ -2088,7 +2242,7 @@ BEGIN
             SELECT 1
             FROM jsonb_array_elements(normalized_entities) AS entity
             WHERE entity ->> 'zone' IN (
-                'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
+                'active_villains', 'dark_arts_deck', 'dark_arts_discard', 'hero_discard_pile',
                 'hero_draw_pile', 'hero_hand', 'hero_play_area', 'hogwarts_deck',
                 'market', 'villain_deck'
             )
@@ -2273,9 +2427,20 @@ BEGIN
     WHERE entity.value ->> 'id' = target_id;
 
     IF NOT FOUND
-       OR target -> 'owner_position' IS DISTINCT FROM expected_owner
        OR target ->> 'zone' IS DISTINCT FROM expected_from
        OR jsonb_typeof(target -> 'zone_index') IS DISTINCT FROM 'number'
+       OR (
+            target -> 'owner_position' IS DISTINCT FROM expected_owner
+            AND NOT (
+                target -> 'owner_position' IS NULL
+                AND jsonb_typeof(expected_owner) = 'number'
+                AND expected_from IN ('hogwarts_deck', 'market')
+                AND destination IN (
+                    'hero_discard_pile', 'hero_draw_pile',
+                    'hero_hand', 'hero_play_area'
+                )
+            )
+       )
     THEN
         RETURN NULL;
     END IF;
@@ -2285,7 +2450,7 @@ BEGIN
     SELECT COUNT(*)
     INTO destination_index
     FROM jsonb_array_elements(entities) AS entity
-    WHERE entity -> 'owner_position' IS NOT DISTINCT FROM owner_value
+    WHERE entity -> 'owner_position' IS NOT DISTINCT FROM expected_owner
       AND entity ->> 'zone' = destination;
 
     SELECT jsonb_agg(
@@ -2293,7 +2458,11 @@ BEGIN
             WHEN entity.position - 1 = target_offset THEN
                 jsonb_set(
                     jsonb_set(
-                        entity.value,
+                        (entity.value - 'owner_position') ||
+                            CASE
+                                WHEN expected_owner IS NULL THEN '{}'::jsonb
+                                ELSE jsonb_build_object('owner_position', expected_owner)
+                            END,
                         '{zone}',
                         to_jsonb(destination),
                         FALSE
@@ -2913,7 +3082,8 @@ BEGIN
 
     step_count := jsonb_array_length(payload -> 'steps');
     IF step_count NOT BETWEEN 1 AND 2
-       OR payload -> 'steps' -> 0 ->> 'phase' NOT IN ('dark_arts', 'villains')
+       OR payload -> 'steps' -> 0 ->> 'phase'
+            NOT IN ('dark_arts', 'villains', 'hero_actions')
        OR (
             step_count = 2
             AND (
@@ -2939,7 +3109,7 @@ BEGIN
        AND payload -> 'control' -> 'decision_point' ->> 'type' = 'player_intent'
     THEN
         RETURN payload -> 'control' ->> 'phase' = 'hero_actions'
-            AND payload -> 'steps' -> -1 ->> 'phase' = 'villains';
+            AND payload -> 'steps' -> -1 ->> 'phase' IN ('villains', 'hero_actions');
     END IF;
 
     IF (
@@ -2957,6 +3127,30 @@ EXCEPTION
         RETURN FALSE;
 END;
 $$;
+
+CREATE FUNCTION valid_hero_action_payload_v4(
+    payload JSONB,
+    relational_event_type TEXT,
+    relational_sequence BIGINT,
+    relational_state_version BIGINT,
+    relational_actor_position SMALLINT,
+    committed_prng_counter BIGINT,
+    committed_status TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+RETURN relational_event_type IN ('card_played', 'attack_assigned', 'card_acquired')
+    AND payload ->> 'event_version' = '4'
+    AND valid_game_event_v3(
+        jsonb_set(payload, '{event_version}', '3'::jsonb, FALSE),
+        relational_event_type,
+        relational_sequence,
+        relational_state_version,
+        relational_actor_position,
+        committed_prng_counter,
+        committed_status
+    );
 
 CREATE OR REPLACE FUNCTION require_contiguous_game_event_sequence()
 RETURNS TRIGGER
@@ -3008,6 +3202,26 @@ BEGIN
     INTO next_actor_position
     FROM participants
     WHERE room_id = NEW.room_id;
+
+    IF NEW.event_version = 4
+       AND NEW.event_type IN ('card_played', 'attack_assigned', 'card_acquired')
+    THEN
+        IF actor_position IS NULL
+           OR valid_hero_action_payload_v4(
+                NEW.payload,
+                NEW.event_type,
+                NEW.sequence,
+                NEW.state_version,
+                actor_position,
+                committed_prng_counter,
+                committed_status
+           ) IS NOT TRUE
+        THEN
+            RAISE EXCEPTION 'hero action event payload must match the current codec shape'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END IF;
 
     IF NEW.event_version IN (1, 2, 3) OR NEW.event_type = 'dark_arts_completed' THEN
         RAISE EXCEPTION 'legacy game event codecs are read-only'
@@ -3086,6 +3300,7 @@ AS $$
 DECLARE
     canonical_selections JSONB;
     expected_effects JSONB;
+    expected_entities JSONB;
     expected_participants JSONB;
     expected_steps JSONB;
     old_choice JSONB;
@@ -3158,6 +3373,18 @@ BEGIN
                 events.event_type = 'choice_resolved'
                 AND receipts.command_type = 'resolve_choice'
             )
+            OR (
+                events.event_type = 'card_played'
+                AND receipts.command_type = 'play_card'
+            )
+            OR (
+                events.event_type = 'attack_assigned'
+                AND receipts.command_type = 'assign_attack'
+            )
+            OR (
+                events.event_type = 'card_acquired'
+                AND receipts.command_type = 'acquire_card'
+            )
          )
      AND receipts.expires_at = NEW.expires_at
     WHERE events.game_id = NEW.id
@@ -3185,6 +3412,98 @@ BEGIN
     INTO expected_participants
     FROM participants
     WHERE participants.room_id = NEW.room_id;
+
+    IF transition_event_type IN ('card_played', 'attack_assigned', 'card_acquired') THEN
+        expected_entities := apply_effect_steps_v4(
+            normalized_effect_entities_for_turn_v4(OLD.snapshot),
+            jsonb_build_array(jsonb_build_object(
+                'effects', transition_payload -> 'effects'
+            ))
+        );
+        SELECT COUNT(*)
+        INTO random_samples
+        FROM jsonb_array_elements(transition_payload -> 'effects') AS effect
+        WHERE effect ->> 'type' = 'die_rolled';
+
+        IF OLD.status <> 'in_progress'
+           OR OLD.snapshot -> 'turn' ->> 'phase'
+                NOT IN ('hero_action', 'hero_actions')
+           OR transition_payload ->> 'turn'
+                IS DISTINCT FROM OLD.snapshot -> 'turn' ->> 'number'
+           OR transition_payload ->> 'actor_position'
+                IS DISTINCT FROM OLD.snapshot -> 'turn' ->> 'active_position'
+           OR valid_hero_action_payload_v4(
+                transition_payload,
+                transition_event_type,
+                NEW.sequence,
+                NEW.state_version,
+                (transition_payload ->> 'actor_position')::SMALLINT,
+                NEW.prng_counter,
+                NEW.status
+           ) IS NOT TRUE
+           OR expected_entities IS NULL
+           OR NEW.snapshot -> 'effects' -> 'entities'
+                IS DISTINCT FROM expected_entities
+           OR valid_game_snapshot_v3(NEW.snapshot) IS NOT TRUE
+           OR (NEW.snapshot ->> 'snapshot_version')::NUMERIC <> NEW.snapshot_version
+           OR (NEW.snapshot ->> 'state_version')::NUMERIC <> NEW.state_version
+           OR (NEW.snapshot ->> 'sequence')::NUMERIC <> NEW.sequence
+           OR NEW.snapshot ->> 'status' IS DISTINCT FROM NEW.status
+           OR NEW.snapshot ->> 'adventure_id' IS DISTINCT FROM NEW.adventure_id
+           OR NEW.snapshot -> 'versions' ->> 'content' IS DISTINCT FROM NEW.content_version
+           OR NEW.snapshot -> 'versions' ->> 'ruleset' IS DISTINCT FROM NEW.ruleset_version
+           OR (NEW.snapshot -> 'versions' ->> 'manifest')::NUMERIC <> NEW.manifest_version
+           OR NEW.snapshot -> 'versions' ->> 'manifest_digest'
+                IS DISTINCT FROM NEW.manifest_digest
+           OR NEW.snapshot -> 'versions' ->> 'prng' IS DISTINCT FROM NEW.prng_algorithm
+           OR NEW.snapshot -> 'versions' ->> 'shuffle' IS DISTINCT FROM NEW.shuffle_algorithm
+           OR NEW.snapshot -> 'versions' ->> 'sampling'
+                IS DISTINCT FROM NEW.sampling_algorithm
+           OR NEW.snapshot -> 'participants' IS DISTINCT FROM expected_participants
+           OR NEW.snapshot -> 'turn' ->> 'number'
+                IS DISTINCT FROM OLD.snapshot -> 'turn' ->> 'number'
+           OR NEW.snapshot -> 'turn' ->> 'active_position'
+                IS DISTINCT FROM OLD.snapshot -> 'turn' ->> 'active_position'
+           OR NEW.snapshot -> 'turn' ->> 'phase' <> 'hero_actions'
+           OR NEW.snapshot -> 'prng' ->> 'algorithm' IS DISTINCT FROM NEW.prng_algorithm
+           OR (NEW.snapshot -> 'prng' ->> 'counter')::NUMERIC <> NEW.prng_counter
+           OR NEW.prng_counter <> OLD.prng_counter + random_samples
+           OR (
+                transition_event_type = 'card_played'
+                AND transition_payload ->> 'effect_stop' = 'choice'
+                AND (
+                    NEW.snapshot -> 'effects' -> 'choice'
+                        IS DISTINCT FROM transition_payload -> 'choice'
+                    OR NEW.snapshot -> 'decision_point' ->> 'type' <> 'effect_choice'
+                    OR NEW.snapshot -> 'queued_effects'
+                        IS DISTINCT FROM transition_payload -> 'choice'
+                            -> 'continuation' -> 'queue'
+                )
+           )
+           OR (
+                NOT (
+                    transition_event_type = 'card_played'
+                    AND transition_payload ->> 'effect_stop' = 'choice'
+                )
+                AND NEW.snapshot -> 'effects' ? 'choice'
+           )
+           OR (
+                OLD.snapshot_version = 3
+                AND NEW.snapshot -> 'last_turn_steps' IS DISTINCT FROM
+                    merge_turn_steps_v4(
+                        OLD.snapshot -> 'last_turn_steps',
+                        jsonb_build_array(jsonb_build_object(
+                            'phase', 'hero_actions',
+                            'effects', transition_payload -> 'effects'
+                        ))
+                    )
+           )
+        THEN
+            RAISE EXCEPTION 'hero action transition must match its event and previous state'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END IF;
 
     CASE transition_event_type
         WHEN 'turn_completed' THEN
@@ -3279,7 +3598,7 @@ BEGIN
             IF transition_command_type <> 'resolve_choice'
                OR OLD.status <> 'in_progress'
                OR OLD.snapshot -> 'turn' ->> 'phase'
-                    NOT IN ('dark_arts', 'villains')
+                    NOT IN ('dark_arts', 'villains', 'hero_actions')
                OR valid_pending_effect_choice_v4(old_choice) IS NOT TRUE
                OR transition_payload ->> 'turn'
                     IS DISTINCT FROM OLD.snapshot -> 'turn' ->> 'number'
@@ -3371,7 +3690,10 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     IF NEW.event_version <> 4
-       OR NEW.event_type NOT IN ('turn_completed', 'choice_resolved')
+       OR NEW.event_type NOT IN (
+            'turn_completed', 'choice_resolved', 'card_played',
+            'attack_assigned', 'card_acquired'
+       )
        OR NOT EXISTS (
             SELECT 1
             FROM game_command_receipts AS receipts
@@ -3384,16 +3706,7 @@ BEGIN
               AND receipts.command_id = NEW.command_id
               AND receipts.actor_participant_id = NEW.actor_participant_id
               AND receipts.accepted_state_version = NEW.state_version
-              AND (
-                    (
-                        NEW.event_type = 'turn_completed'
-                        AND receipts.command_type = 'end_hero_actions'
-                    )
-                    OR (
-                        NEW.event_type = 'choice_resolved'
-                        AND receipts.command_type = 'resolve_choice'
-                    )
-                  )
+              AND game_event_matches_command(receipts.command_type, NEW.event_type)
               AND receipts.expires_at = games.expires_at
        )
     THEN
@@ -3406,5 +3719,5 @@ END;
 $$;
 
 UPDATE application_metadata
-SET value = '15'
+SET value = '17'
 WHERE key = 'schema_version';

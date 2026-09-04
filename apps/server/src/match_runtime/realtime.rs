@@ -17,8 +17,8 @@ use game_domain::DecisionPoint;
 use super::codec::{command_domain_state, decode_persisted_event, decode_persisted_snapshot};
 use super::{
     GameProjectionResponse, PersistedDecisionPoint, PersistedEffectOutcome,
-    PersistedEndTurnOutcome, PersistedEngineControl, PersistedEventChoice, PersistedTurnStep,
-    StoredGameEvent, postgres, projection_for_participant,
+    PersistedEffectTargetBinding, PersistedEndTurnOutcome, PersistedEngineControl,
+    PersistedEventChoice, PersistedTurnStep, StoredGameEvent, postgres, projection_for_participant,
 };
 use crate::{
     AppState,
@@ -177,11 +177,25 @@ struct RealtimeLegacyGameEvent {
     choice_cause: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_options: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    targets: Option<Vec<PersistedEffectTargetBinding>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    villain_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amount: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cost: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refill_card_id: Option<String>,
     effects: Vec<PersistedEffectOutcome>,
-    effect_stop: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effect_stop: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     choice: Option<RealtimeChoiceSummary>,
-    prng_counter: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prng_counter: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     command_id: Option<String>,
 }
@@ -252,6 +266,18 @@ enum RealtimeDecisionPoint {
     Automatic,
     PlayerIntent { responsible_position: u8 },
     EffectChoice { choice: RealtimeChoiceSummary },
+}
+
+struct RealtimeEventFields {
+    event_type: &'static str,
+    card_id: Option<String>,
+    targets: Option<Vec<PersistedEffectTargetBinding>>,
+    villain_id: Option<String>,
+    amount: Option<u16>,
+    cost: Option<u16>,
+    refill_card_id: Option<String>,
+    effect_stop: Option<String>,
+    prng_counter: Option<u64>,
 }
 
 struct RealtimePosition {
@@ -1164,19 +1190,16 @@ fn realtime_event(
     participant_id: Uuid,
 ) -> Result<RealtimeGameEvent, ApiError> {
     let payload = decode_persisted_event(&stored.payload_json)?;
-    let metadata_matches = i16::try_from(payload.event_version).ok() == Some(stored.event_version)
-        && payload.event_type == stored.event_type
-        && i64::try_from(payload.sequence).ok() == Some(stored.sequence)
-        && i64::try_from(payload.state_version).ok() == Some(stored.state_version)
-        && i16::from(payload.actor_position) == stored.actor_position;
-    if !metadata_matches {
+    if !realtime_event_metadata_matches(&payload, stored) {
         return Err(ApiError::internal());
     }
     let command_id =
         (stored.actor_participant_id == participant_id).then(|| stored.command_id.to_string());
 
     match (payload.event_version, payload.event_type.as_str()) {
-        (1..=3, "dark_arts_completed") | (3, "choice_resolved") => {
+        (1..=3, "dark_arts_completed")
+        | (3, "choice_resolved")
+        | (3 | 4, "card_played" | "attack_assigned" | "card_acquired") => {
             realtime_legacy_event(stored, payload, command_id)
         }
         (4, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
@@ -1190,11 +1213,7 @@ fn realtime_legacy_event(
     payload: super::PersistedGameEvent,
     command_id: Option<String>,
 ) -> Result<RealtimeGameEvent, ApiError> {
-    let event_type = match payload.event_type.as_str() {
-        "dark_arts_completed" => "dark_arts_completed",
-        "choice_resolved" => "choice_resolved",
-        _ => return Err(ApiError::internal()),
-    };
+    let fields = realtime_event_fields(&payload, &stored.event_type)?;
     let choice = payload
         .choice
         .as_ref()
@@ -1202,7 +1221,7 @@ fn realtime_legacy_event(
         .transpose()?;
     Ok(RealtimeGameEvent::Legacy(RealtimeLegacyGameEvent {
         event_version: stored.event_version,
-        event_type,
+        event_type: fields.event_type,
         sequence: stored.sequence,
         state_version: stored.state_version,
         turn: payload.turn,
@@ -1210,10 +1229,16 @@ fn realtime_legacy_event(
         choice_id: payload.choice_id,
         choice_cause: payload.choice_cause,
         selected_options: payload.selected_options,
+        card_id: fields.card_id,
+        targets: fields.targets,
+        villain_id: fields.villain_id,
+        amount: fields.amount,
+        cost: fields.cost,
+        refill_card_id: fields.refill_card_id,
         effects: payload.effects,
-        effect_stop: payload.effect_stop,
+        effect_stop: fields.effect_stop,
         choice,
-        prng_counter: payload.prng_counter,
+        prng_counter: fields.prng_counter,
         command_id,
     }))
 }
@@ -1239,7 +1264,7 @@ fn realtime_turn_completed_event(
             end_turn,
             steps,
             control: realtime_engine_control(control),
-            prng_counter: payload.prng_counter,
+            prng_counter: payload.prng_counter.ok_or_else(ApiError::internal)?,
             command_id,
         },
     ))
@@ -1272,7 +1297,7 @@ fn realtime_choice_resolved_event(
             selected_options,
             steps,
             control: realtime_engine_control(control),
-            prng_counter: payload.prng_counter,
+            prng_counter: payload.prng_counter.ok_or_else(ApiError::internal)?,
             command_id,
         },
     ))
@@ -1361,6 +1386,109 @@ fn legacy_choice_cause(id: &str, kind: &str) -> Result<String, ApiError> {
         return Err(ApiError::internal());
     }
     Ok(cause.to_owned())
+}
+
+fn realtime_event_metadata_matches(
+    payload: &super::PersistedGameEvent,
+    stored: &StoredGameEvent,
+) -> bool {
+    i16::try_from(payload.event_version).ok() == Some(stored.event_version)
+        && payload.event_type == stored.event_type
+        && i64::try_from(payload.sequence).ok() == Some(stored.sequence)
+        && i64::try_from(payload.state_version).ok() == Some(stored.state_version)
+        && i16::from(payload.actor_position) == stored.actor_position
+}
+
+fn realtime_event_fields(
+    payload: &super::PersistedGameEvent,
+    stored_event_type: &str,
+) -> Result<RealtimeEventFields, ApiError> {
+    let event_type = realtime_event_type(payload, stored_event_type)?;
+    let (effect_stop, prng_counter) = realtime_effect_progress(payload, event_type)?;
+    Ok(match event_type {
+        "card_played" => RealtimeEventFields {
+            event_type,
+            card_id: payload.card_id.clone(),
+            targets: Some(payload.targets.clone()),
+            villain_id: None,
+            amount: None,
+            cost: None,
+            refill_card_id: None,
+            effect_stop,
+            prng_counter,
+        },
+        "attack_assigned" => RealtimeEventFields {
+            event_type,
+            card_id: None,
+            targets: None,
+            villain_id: payload.villain_id.clone(),
+            amount: payload.amount,
+            cost: None,
+            refill_card_id: None,
+            effect_stop,
+            prng_counter,
+        },
+        "card_acquired" => RealtimeEventFields {
+            event_type,
+            card_id: payload.card_id.clone(),
+            targets: None,
+            villain_id: None,
+            amount: None,
+            cost: payload.cost,
+            refill_card_id: payload.refill_card_id.clone(),
+            effect_stop,
+            prng_counter,
+        },
+        _ => RealtimeEventFields {
+            event_type,
+            card_id: None,
+            targets: None,
+            villain_id: None,
+            amount: None,
+            cost: None,
+            refill_card_id: None,
+            effect_stop,
+            prng_counter,
+        },
+    })
+}
+
+fn realtime_event_type(
+    payload: &super::PersistedGameEvent,
+    stored_event_type: &str,
+) -> Result<&'static str, ApiError> {
+    match (payload.event_version, stored_event_type) {
+        (1..=3, "dark_arts_completed") => Ok("dark_arts_completed"),
+        (3, "choice_resolved") => Ok("choice_resolved"),
+        (3 | 4, "card_played") => Ok("card_played"),
+        (3 | 4, "attack_assigned") => Ok("attack_assigned"),
+        (3 | 4, "card_acquired") => Ok("card_acquired"),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+fn realtime_effect_progress(
+    payload: &super::PersistedGameEvent,
+    event_type: &str,
+) -> Result<(Option<String>, Option<u64>), ApiError> {
+    if payload.event_version == 1 && event_type == "dark_arts_completed" {
+        return Ok((Some("stable".to_owned()), Some(0)));
+    }
+    if !matches!(
+        event_type,
+        "dark_arts_completed" | "choice_resolved" | "card_played"
+    ) {
+        return Ok((None, None));
+    }
+
+    let effect_stop = payload
+        .effect_stop
+        .as_ref()
+        .ok_or_else(ApiError::internal)?;
+    let Some(prng_counter) = payload.prng_counter else {
+        return Err(ApiError::internal());
+    };
+    Ok((Some(effect_stop.clone()), Some(prng_counter)))
 }
 
 fn events_are_contiguous(
@@ -1735,5 +1863,122 @@ mod tests {
             actor,
         );
         assert!(realtime_event(&invalid_shape, actor).is_err());
+    }
+
+    #[test]
+    fn hero_action_events_are_forwarded_without_synthetic_stop_or_prng_fields() {
+        let participant_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+            .expect("the participant ID must be valid");
+        let attack = realtime_json(
+            &stored_action_event(
+                "attack_assigned",
+                &json!({
+                    "event_version": 3,
+                    "type": "attack_assigned",
+                    "sequence": 4,
+                    "state_version": 5,
+                    "turn": 1,
+                    "actor_position": 1,
+                    "villain_id": "instance:villain:1",
+                    "amount": 2,
+                    "effects": []
+                }),
+                participant_id,
+            ),
+            participant_id,
+        );
+        assert_eq!(attack["type"], "attack_assigned");
+        assert_eq!(attack["villain_id"], "instance:villain:1");
+        assert_eq!(attack["amount"], 2);
+        assert!(attack.get("effect_stop").is_none());
+        assert!(attack.get("prng_counter").is_none());
+
+        let acquisition = realtime_json(
+            &stored_action_event(
+                "card_acquired",
+                &json!({
+                    "event_version": 3,
+                    "type": "card_acquired",
+                    "sequence": 4,
+                    "state_version": 5,
+                    "turn": 1,
+                    "actor_position": 1,
+                    "card_id": "instance:market:1",
+                    "cost": 3,
+                    "refill_card_id": null,
+                    "effects": []
+                }),
+                participant_id,
+            ),
+            participant_id,
+        );
+        assert_eq!(acquisition["type"], "card_acquired");
+        assert_eq!(acquisition["card_id"], "instance:market:1");
+        assert_eq!(acquisition["cost"], 3);
+        assert!(acquisition.get("refill_card_id").is_none());
+        assert!(acquisition.get("effect_stop").is_none());
+        assert!(acquisition.get("prng_counter").is_none());
+    }
+
+    #[test]
+    fn played_card_event_forwards_explicit_target_bindings() {
+        let participant_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+            .expect("the participant ID must be valid");
+        let played = realtime_json(
+            &stored_action_event(
+                "card_played",
+                &json!({
+                    "event_version": 3,
+                    "type": "card_played",
+                    "sequence": 4,
+                    "state_version": 5,
+                    "turn": 1,
+                    "actor_position": 1,
+                    "card_id": "instance:starter:1",
+                    "targets": [{
+                        "selector_id": "target:ally",
+                        "target_ids": ["hero:2"]
+                    }],
+                    "effects": [],
+                    "effect_stop": "stable",
+                    "choice": null,
+                    "prng_counter": 0
+                }),
+                participant_id,
+            ),
+            participant_id,
+        );
+
+        assert_eq!(played["type"], "card_played");
+        assert_eq!(played["card_id"], "instance:starter:1");
+        assert_eq!(played["targets"][0]["selector_id"], "target:ally");
+        assert_eq!(played["targets"][0]["target_ids"], json!(["hero:2"]));
+        assert_eq!(played["effect_stop"], "stable");
+        assert_eq!(played["prng_counter"], 0);
+    }
+
+    fn stored_action_event(
+        event_type: &str,
+        payload: &serde_json::Value,
+        participant_id: Uuid,
+    ) -> StoredGameEvent {
+        StoredGameEvent {
+            event_version: 3,
+            event_type: event_type.to_owned(),
+            command_id: Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+                .expect("the command ID must be valid"),
+            actor_participant_id: participant_id,
+            actor_position: 1,
+            sequence: 4,
+            state_version: 5,
+            payload_json: payload.to_string(),
+        }
+    }
+
+    fn realtime_json(stored: &StoredGameEvent, participant_id: Uuid) -> serde_json::Value {
+        let event = realtime_event(stored, participant_id)
+            .ok()
+            .expect("the persisted event must normalize");
+        serde_json::to_value(event).expect("the realtime event must serialize")
     }
 }

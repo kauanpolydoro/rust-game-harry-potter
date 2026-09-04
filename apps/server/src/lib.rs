@@ -30,6 +30,7 @@ mod http_support;
 mod identity_access;
 mod match_runtime;
 mod session;
+mod session_events;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
@@ -48,6 +49,7 @@ pub struct AppState {
     application_origin: Arc<str>,
     game_synchronization_fanout: GameSignalFanout,
     game_presence_fanout: GameSignalFanout,
+    security_event_fanout: GameSignalFanout,
     session_token_key: Arc<[u8; 32]>,
     recovery_token_key: Arc<[u8; 32]>,
     recovery_password_checks: Arc<Semaphore>,
@@ -130,6 +132,7 @@ impl AppState {
             application_origin: Arc::from(DEFAULT_APPLICATION_ORIGIN),
             game_synchronization_fanout: GameSignalFanout::default(),
             game_presence_fanout: GameSignalFanout::default(),
+            security_event_fanout: GameSignalFanout::default(),
             session_token_key: Arc::new(session_token_key),
             recovery_token_key: Arc::new(recovery_token_key),
             recovery_password_checks: Arc::new(Semaphore::new(
@@ -200,6 +203,18 @@ impl AppState {
         self.game_presence_fanout.prune(game_id);
     }
 
+    fn subscribe_to_security_events(&self, room_id: Uuid) -> broadcast::Receiver<()> {
+        self.security_event_fanout.subscribe(room_id)
+    }
+
+    fn signal_security_event(&self, room_id: Uuid) {
+        self.security_event_fanout.signal(room_id);
+    }
+
+    fn prune_security_event_channel(&self, room_id: Uuid) {
+        self.security_event_fanout.prune(room_id);
+    }
+
     fn idempotent_session_token(
         &self,
         operation: &str,
@@ -242,6 +257,26 @@ impl AppState {
             encode_hex(&hmac_sha256(
                 self.recovery_token_key.as_ref(),
                 &[b"hogwarts-recovery-token-storage-v1", token.as_bytes()],
+            ))
+        )
+    }
+
+    fn recovery_request_fingerprint(
+        &self,
+        operation: &str,
+        idempotency_key: &str,
+        values: &[&[u8]],
+    ) -> String {
+        let mut fingerprint_values = Vec::with_capacity(values.len() + 3);
+        fingerprint_values.push(b"hogwarts-recovery-request-v1".as_slice());
+        fingerprint_values.push(operation.as_bytes());
+        fingerprint_values.push(idempotency_key.as_bytes());
+        fingerprint_values.extend_from_slice(values);
+        format!(
+            "hmac-sha256:{}",
+            encode_hex(&hmac_sha256(
+                self.recovery_token_key.as_ref(),
+                &fingerprint_values,
             ))
         )
     }
@@ -308,6 +343,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(identity_access::router())
         .merge(current_session::router())
         .merge(match_runtime::router())
+        .merge(session_events::router())
         .with_state(state)
         .layer(middleware::from_fn(correlate_request))
 }

@@ -61,8 +61,16 @@ enum ErrorCode {
     SessionInvalid,
     #[serde(rename = "RECOVERY_FAILED")]
     RecoveryFailed,
+    #[serde(rename = "RECOVERY_CONFIRMATION_FAILED")]
+    RecoveryConfirmationFailed,
     #[serde(rename = "NOT_ROOM_HOST")]
     NotRoomHost,
+    #[serde(rename = "ROOM_PARTICIPANT_NOT_FOUND")]
+    RoomParticipantNotFound,
+    #[serde(rename = "HOST_ASSISTANCE_RISK_NOT_ACKNOWLEDGED")]
+    HostAssistanceRiskNotAcknowledged,
+    #[serde(rename = "RECOVERY_ASSISTANCE_NOT_REQUIRED")]
+    RecoveryAssistanceNotRequired,
     #[serde(rename = "ROOM_PARTICIPANT_COUNT_INVALID")]
     RoomParticipantCountInvalid,
     #[serde(rename = "ROOM_POSITIONS_INVALID")]
@@ -140,8 +148,16 @@ enum MessageKey {
     SessionInvalid,
     #[serde(rename = "participant.recovery.failed")]
     RecoveryFailed,
+    #[serde(rename = "room.recovery_password.confirmation_failed")]
+    RecoveryConfirmationFailed,
     #[serde(rename = "room.host.required")]
     NotRoomHost,
+    #[serde(rename = "room.participant.not_found")]
+    RoomParticipantNotFound,
+    #[serde(rename = "participant.recovery.host_assistance_risk_not_acknowledged")]
+    HostAssistanceRiskNotAcknowledged,
+    #[serde(rename = "participant.recovery.assistance_not_required")]
+    RecoveryAssistanceNotRequired,
     #[serde(rename = "room.participant_count.invalid")]
     RoomParticipantCountInvalid,
     #[serde(rename = "room.positions.invalid")]
@@ -319,6 +335,16 @@ impl ApiError {
         )
     }
 
+    pub(crate) const fn recovery_confirmation_failed() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::RecoveryConfirmationFailed,
+            ErrorCategory::Authentication,
+            RetryPolicy::AfterCorrection,
+            MessageKey::RecoveryConfirmationFailed,
+        )
+    }
+
     pub(crate) const fn recovery_unavailable() -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -336,6 +362,36 @@ impl ApiError {
             ErrorCategory::Authorization,
             RetryPolicy::AfterCorrection,
             MessageKey::NotRoomHost,
+        )
+    }
+
+    pub(crate) const fn room_participant_not_found() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RoomParticipantNotFound,
+            ErrorCategory::NotFound,
+            RetryPolicy::AfterCorrection,
+            MessageKey::RoomParticipantNotFound,
+        )
+    }
+
+    pub(crate) const fn host_assistance_risk_not_acknowledged() -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::HostAssistanceRiskNotAcknowledged,
+            ErrorCategory::Validation,
+            RetryPolicy::AfterCorrection,
+            MessageKey::HostAssistanceRiskNotAcknowledged,
+        )
+    }
+
+    pub(crate) const fn recovery_assistance_not_required() -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::RecoveryAssistanceNotRequired,
+            ErrorCategory::Validation,
+            RetryPolicy::AfterCorrection,
+            MessageKey::RecoveryAssistanceNotRequired,
         )
     }
 

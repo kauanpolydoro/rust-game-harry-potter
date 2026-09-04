@@ -6,9 +6,10 @@ use axum::{
     routing::{get, post},
 };
 use game_domain::{
-    ContentSelection, EffectDie, EffectRoller, GameEngine, GameIntentError, GameIntentInput,
-    HeroId, InitialGameState, LobbyParticipant, ParticipantRole, PlayerIntent, StartGameError,
-    StartGameInput, ValidatedGameRules,
+    ContentSelection, EffectDie, EffectRoller, GameCommand, GameCommandError, GameCommandInput,
+    GameEngine, GameIntentError, GameIntentInput, HeroId, InitialGameState, LobbyParticipant,
+    ParticipantRole, PlayerIntent, StartGameError, StartGameInput, ValidatedGameRules,
+    decide_game_command,
 };
 use rand_chacha::{
     ChaCha20Rng,
@@ -76,14 +77,36 @@ enum ExecuteGameCommandRequest {
         #[serde(deserialize_with = "bounded_choice_selection")]
         selected_options: Vec<String>,
     },
+    PlayCard {
+        command_id: String,
+        #[serde(deserialize_with = "positive_state_version")]
+        expected_state_version: u64,
+        card_id: String,
+        targets: Vec<RequestedTargetBinding>,
+    },
+    AssignAttack {
+        command_id: String,
+        #[serde(deserialize_with = "positive_state_version")]
+        expected_state_version: u64,
+        villain_id: String,
+        amount: u16,
+    },
+    AcquireCard {
+        command_id: String,
+        #[serde(deserialize_with = "positive_state_version")]
+        expected_state_version: u64,
+        card_id: String,
+    },
 }
 
 impl ExecuteGameCommandRequest {
     fn command_id(&self) -> &str {
         match self {
-            Self::EndHeroActions { command_id, .. } | Self::ResolveChoice { command_id, .. } => {
-                command_id
-            }
+            Self::EndHeroActions { command_id, .. }
+            | Self::ResolveChoice { command_id, .. }
+            | Self::PlayCard { command_id, .. }
+            | Self::AssignAttack { command_id, .. }
+            | Self::AcquireCard { command_id, .. } => command_id,
         }
     }
 
@@ -96,28 +119,71 @@ impl ExecuteGameCommandRequest {
             | Self::ResolveChoice {
                 expected_state_version,
                 ..
+            }
+            | Self::PlayCard {
+                expected_state_version,
+                ..
+            }
+            | Self::AssignAttack {
+                expected_state_version,
+                ..
+            }
+            | Self::AcquireCard {
+                expected_state_version,
+                ..
             } => *expected_state_version,
         }
     }
 
-    const fn command_type(&self) -> GameCommandType {
+    const fn command_type(&self) -> PersistedGameCommandType {
         match self {
-            Self::EndHeroActions { .. } => GameCommandType::EndHeroActions,
-            Self::ResolveChoice { .. } => GameCommandType::ResolveChoice,
+            Self::EndHeroActions { .. } => PersistedGameCommandType::EndHeroActions,
+            Self::ResolveChoice { .. } => PersistedGameCommandType::ResolveChoice,
+            Self::PlayCard { .. } => PersistedGameCommandType::PlayCard,
+            Self::AssignAttack { .. } => PersistedGameCommandType::AssignAttack,
+            Self::AcquireCard { .. } => PersistedGameCommandType::AcquireCard,
         }
     }
 
-    fn domain_intent(&self) -> PlayerIntent {
+    fn player_intent(&self) -> Option<PlayerIntent> {
         match self {
-            Self::EndHeroActions { .. } => PlayerIntent::EndHeroActions,
+            Self::EndHeroActions { .. } => Some(PlayerIntent::EndHeroActions),
             Self::ResolveChoice {
                 choice_id,
                 selected_options,
                 ..
-            } => PlayerIntent::ResolveChoice {
+            } => Some(PlayerIntent::ResolveChoice {
                 choice_id: choice_id.clone(),
                 selected_options: selected_options.clone(),
-            },
+            }),
+            Self::PlayCard { .. } | Self::AssignAttack { .. } | Self::AcquireCard { .. } => None,
+        }
+    }
+
+    fn game_command(&self) -> Option<GameCommand> {
+        match self {
+            Self::PlayCard {
+                card_id, targets, ..
+            } => Some(GameCommand::PlayCard {
+                card_id: card_id.clone(),
+                targets: targets
+                    .iter()
+                    .map(|target| game_domain::EffectTargetBinding {
+                        selector_id: target.selector_id.clone(),
+                        target_ids: target.target_ids.clone(),
+                    })
+                    .collect(),
+            }),
+            Self::AssignAttack {
+                villain_id, amount, ..
+            } => Some(GameCommand::AssignAttack {
+                villain_id: villain_id.clone(),
+                amount: *amount,
+            }),
+            Self::AcquireCard { card_id, .. } => Some(GameCommand::AcquireCard {
+                card_id: card_id.clone(),
+            }),
+            Self::EndHeroActions { .. } | Self::ResolveChoice { .. } => None,
         }
     }
 
@@ -143,6 +209,40 @@ impl ExecuteGameCommandRequest {
                 choice_id,
                 selected_options,
             }),
+            Self::PlayCard {
+                command_id,
+                expected_state_version,
+                card_id,
+                targets,
+            } => serde_json::to_vec(&CanonicalPlayCardCommandRequest {
+                command_id,
+                expected_state_version: *expected_state_version,
+                command_type: "play_card",
+                card_id,
+                targets,
+            }),
+            Self::AssignAttack {
+                command_id,
+                expected_state_version,
+                villain_id,
+                amount,
+            } => serde_json::to_vec(&CanonicalAssignAttackCommandRequest {
+                command_id,
+                expected_state_version: *expected_state_version,
+                command_type: "assign_attack",
+                villain_id,
+                amount: *amount,
+            }),
+            Self::AcquireCard {
+                command_id,
+                expected_state_version,
+                card_id,
+            } => serde_json::to_vec(&CanonicalAcquireCardCommandRequest {
+                command_id,
+                expected_state_version: *expected_state_version,
+                command_type: "acquire_card",
+                card_id,
+            }),
         }
     }
 }
@@ -163,6 +263,35 @@ struct CanonicalResolveChoiceCommandRequest<'a> {
     command_type: &'static str,
     choice_id: &'a str,
     selected_options: &'a [String],
+}
+
+#[derive(Serialize)]
+struct CanonicalPlayCardCommandRequest<'a> {
+    command_id: &'a str,
+    expected_state_version: u64,
+    #[serde(rename = "type")]
+    command_type: &'static str,
+    card_id: &'a str,
+    targets: &'a [RequestedTargetBinding],
+}
+
+#[derive(Serialize)]
+struct CanonicalAssignAttackCommandRequest<'a> {
+    command_id: &'a str,
+    expected_state_version: u64,
+    #[serde(rename = "type")]
+    command_type: &'static str,
+    villain_id: &'a str,
+    amount: u16,
+}
+
+#[derive(Serialize)]
+struct CanonicalAcquireCardCommandRequest<'a> {
+    command_id: &'a str,
+    expected_state_version: u64,
+    #[serde(rename = "type")]
+    command_type: &'static str,
+    card_id: &'a str,
 }
 
 fn positive_state_version<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -210,11 +339,21 @@ fn command_payload_digest(request: &ExecuteGameCommandRequest) -> Result<String,
     Ok(format!("blake3:{}", blake3::hash(&canonical).to_hex()))
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RequestedTargetBinding {
+    selector_id: String,
+    target_ids: Vec<String>,
+}
+
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum GameCommandType {
+enum PersistedGameCommandType {
     EndHeroActions,
     ResolveChoice,
+    PlayCard,
+    AssignAttack,
+    AcquireCard,
 }
 
 #[derive(FromRow)]
@@ -324,7 +463,7 @@ struct ExecuteGameCommandResponse {
 struct GameCommandReceipt {
     command_id: String,
     #[serde(rename = "type")]
-    command_type: GameCommandType,
+    command_type: PersistedGameCommandType,
     status: &'static str,
     expected_state_version: i64,
     accepted_state_version: i64,
@@ -413,7 +552,15 @@ impl PersistedEffects {
 struct PersistedEffectEntity {
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    catalog_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     owner_position: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    effect_rule_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    influence_cost: Option<u16>,
     zone: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     zone_index: Option<u16>,
@@ -574,6 +721,13 @@ struct PersistedEngineControl {
     decision_point: PersistedDecisionPoint,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectTargetBinding {
+    selector_id: String,
+    target_ids: Vec<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedGameEvent {
@@ -585,9 +739,21 @@ struct PersistedGameEvent {
     turn: u32,
     actor_position: u8,
     #[serde(default)]
+    card_id: Option<String>,
+    #[serde(default)]
+    targets: Vec<PersistedEffectTargetBinding>,
+    #[serde(default)]
+    villain_id: Option<String>,
+    #[serde(default)]
+    amount: Option<u16>,
+    #[serde(default)]
+    cost: Option<u16>,
+    #[serde(default)]
+    refill_card_id: Option<String>,
+    #[serde(default)]
     effects: Vec<PersistedEffectOutcome>,
-    #[serde(default = "default_effect_stop")]
-    effect_stop: String,
+    #[serde(default)]
+    effect_stop: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     choice: Option<PersistedEventChoice>,
     #[serde(default)]
@@ -603,11 +769,7 @@ struct PersistedGameEvent {
     #[serde(default)]
     control: Option<PersistedEngineControl>,
     #[serde(default)]
-    prng_counter: u64,
-}
-
-fn default_effect_stop() -> String {
-    "stable".to_owned()
+    prng_counter: Option<u64>,
 }
 
 struct ChaChaEffectRoller {
@@ -767,6 +929,11 @@ async fn initialize_persisted_game(
         .iter()
         .map(domain_participant)
         .collect::<Result<Vec<_>, _>>()?;
+    let participant_positions = participants
+        .iter()
+        .map(|participant| participant.position)
+        .collect::<Vec<_>>();
+    let initial_entities = content.initial_entities(&participant_positions);
     let state = GameEngine::new(rules)
         .start(
             StartGameInput {
@@ -779,6 +946,7 @@ async fn initialize_persisted_game(
                     manifest_digest: &content.manifest_digest,
                     manifest_version: content.manifest_version,
                     playable: content.playable,
+                    initial_entities: &initial_entities,
                 },
             },
             random,
@@ -912,20 +1080,40 @@ fn decide_player_intent(
         .content
         .effect_rules(&stored.manifest_digest)
         .ok_or_else(ApiError::internal)?;
-    let rules = ValidatedGameRules::new(effect_rules).map_err(|_| ApiError::internal())?;
+    let actor_position =
+        u8::try_from(stored.actor_position).map_err(|_| ApiError::game_action_not_allowed())?;
     let mut random = ChaChaEffectRoller::new(&stored.prng_seed, current.prng_counter())?;
-    GameEngine::new(&rules)
-        .decide(
-            GameIntentInput {
-                state: current,
-                actor_position: u8::try_from(stored.actor_position)
-                    .map_err(|_| ApiError::game_action_not_allowed())?,
-                expected_state_version: request.expected_state_version(),
-                intent: request.domain_intent(),
-            },
-            &mut random,
-        )
-        .map_err(command_error)
+    if let Some(intent) = request.player_intent() {
+        let rules = ValidatedGameRules::new(effect_rules).map_err(|_| ApiError::internal())?;
+        return GameEngine::new(&rules)
+            .decide(
+                GameIntentInput {
+                    state: current,
+                    actor_position,
+                    expected_state_version: request.expected_state_version(),
+                    intent,
+                },
+                &mut random,
+            )
+            .map_err(command_error);
+    }
+
+    let command = request
+        .game_command()
+        .ok_or_else(ApiError::game_action_not_allowed)?;
+    let decision = decide_game_command(GameCommandInput {
+        state: current,
+        actor_position,
+        expected_state_version: request.expected_state_version(),
+        command,
+        effect_rules: &effect_rules,
+        die_roller: &mut random,
+    })
+    .map_err(action_command_error)?;
+    Ok(game_domain::GameIntentDecision {
+        state: decision.state,
+        event: decision.event,
+    })
 }
 
 async fn command_result(
@@ -988,9 +1176,9 @@ fn start_error(error: StartGameError) -> ApiError {
             ApiError::invalid_participant_heroes()
         }
         StartGameError::ParticipantNotReady => ApiError::participants_not_ready(),
-        StartGameError::ContentNotPlayable | StartGameError::InvalidContentIdentity => {
-            ApiError::content_not_playable()
-        }
+        StartGameError::ContentNotPlayable
+        | StartGameError::InvalidContentIdentity
+        | StartGameError::InvalidInitialEntities => ApiError::content_not_playable(),
         StartGameError::EffectExecutionFailed => ApiError::internal(),
     }
 }
@@ -1008,17 +1196,36 @@ fn command_error(error: GameIntentError) -> ApiError {
     }
 }
 
-const fn command_type_name(command_type: GameCommandType) -> &'static str {
+fn action_command_error(error: GameCommandError) -> ApiError {
+    match error {
+        GameCommandError::ActorNotChoiceResponsible => ApiError::choice_not_assigned(),
+        GameCommandError::StaleStateVersion => ApiError::stale_state_version(),
+        GameCommandError::ActorNotActive | GameCommandError::CommandNotLegal => {
+            ApiError::game_action_not_allowed()
+        }
+        GameCommandError::EffectExecutionFailed | GameCommandError::VersionOverflow => {
+            ApiError::internal()
+        }
+    }
+}
+
+const fn command_type_name(command_type: PersistedGameCommandType) -> &'static str {
     match command_type {
-        GameCommandType::EndHeroActions => "end_hero_actions",
-        GameCommandType::ResolveChoice => "resolve_choice",
+        PersistedGameCommandType::EndHeroActions => "end_hero_actions",
+        PersistedGameCommandType::ResolveChoice => "resolve_choice",
+        PersistedGameCommandType::PlayCard => "play_card",
+        PersistedGameCommandType::AssignAttack => "assign_attack",
+        PersistedGameCommandType::AcquireCard => "acquire_card",
     }
 }
 
 fn receipt_response(receipt: StoredCommandReceipt) -> Result<GameCommandReceipt, ApiError> {
     let command_type = match receipt.command_type.as_str() {
-        "end_hero_actions" => GameCommandType::EndHeroActions,
-        "resolve_choice" => GameCommandType::ResolveChoice,
+        "end_hero_actions" => PersistedGameCommandType::EndHeroActions,
+        "resolve_choice" => PersistedGameCommandType::ResolveChoice,
+        "play_card" => PersistedGameCommandType::PlayCard,
+        "assign_attack" => PersistedGameCommandType::AssignAttack,
+        "acquire_card" => PersistedGameCommandType::AcquireCard,
         _ => return Err(ApiError::command_not_found()),
     };
     Ok(GameCommandReceipt {
@@ -1115,7 +1322,7 @@ mod tests {
     }
 
     #[test]
-    fn command_digest_bytes_are_canonical_for_both_current_commands() {
+    fn command_digest_bytes_are_canonical_for_every_current_command_type() {
         let end_turn = ExecuteGameCommandRequest::EndHeroActions {
             command_id: "00000000-0000-0000-0000-000000000001".to_owned(),
             expected_state_version: 7,
@@ -1134,6 +1341,45 @@ mod tests {
         assert_eq!(
             resolve.canonical_bytes().expect("resolve must serialize"),
             br#"{"command_id":"00000000-0000-0000-0000-000000000002","expected_state_version":8,"type":"resolve_choice","choice_id":"choice:1","selected_options":["option:2"]}"#
+        );
+
+        let play_card = ExecuteGameCommandRequest::PlayCard {
+            command_id: "00000000-0000-0000-0000-000000000003".to_owned(),
+            expected_state_version: 9,
+            card_id: "card:1".to_owned(),
+            targets: vec![RequestedTargetBinding {
+                selector_id: "target:1".to_owned(),
+                target_ids: vec!["hero:2".to_owned()],
+            }],
+        };
+        assert_eq!(
+            play_card.canonical_bytes().expect("play must serialize"),
+            br#"{"command_id":"00000000-0000-0000-0000-000000000003","expected_state_version":9,"type":"play_card","card_id":"card:1","targets":[{"selector_id":"target:1","target_ids":["hero:2"]}]}"#
+        );
+
+        let assign_attack = ExecuteGameCommandRequest::AssignAttack {
+            command_id: "00000000-0000-0000-0000-000000000004".to_owned(),
+            expected_state_version: 10,
+            villain_id: "villain:1".to_owned(),
+            amount: 2,
+        };
+        assert_eq!(
+            assign_attack
+                .canonical_bytes()
+                .expect("attack must serialize"),
+            br#"{"command_id":"00000000-0000-0000-0000-000000000004","expected_state_version":10,"type":"assign_attack","villain_id":"villain:1","amount":2}"#
+        );
+
+        let acquire_card = ExecuteGameCommandRequest::AcquireCard {
+            command_id: "00000000-0000-0000-0000-000000000005".to_owned(),
+            expected_state_version: 11,
+            card_id: "market:1".to_owned(),
+        };
+        assert_eq!(
+            acquire_card
+                .canonical_bytes()
+                .expect("acquisition must serialize"),
+            br#"{"command_id":"00000000-0000-0000-0000-000000000005","expected_state_version":11,"type":"acquire_card","card_id":"market:1"}"#
         );
     }
 }

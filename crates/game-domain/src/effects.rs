@@ -38,7 +38,8 @@ impl EffectZone {
     const fn is_card_zone(self) -> bool {
         matches!(
             self,
-            Self::DarkArtsDeck
+            Self::ActiveVillains
+                | Self::DarkArtsDeck
                 | Self::DarkArtsDiscard
                 | Self::HeroDiscardPile
                 | Self::HeroDrawPile
@@ -70,11 +71,18 @@ pub enum EffectTargetOwner {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectSelector {
+    pub id: Option<String>,
     pub zone: EffectZone,
     pub owner: EffectTargetOwner,
     pub min: u16,
     pub max: u16,
     pub eligibility: Vec<EffectEligibility>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectTargetBinding {
+    pub selector_id: String,
+    pub target_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,35 +202,109 @@ pub struct EffectRule {
     pub effect: EffectDefinition,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectEntityKind {
+    Generic,
+    Hero,
+    HogwartsCard,
+    StarterCard,
+    Villain,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectEntity {
     id: String,
+    kind: EffectEntityKind,
+    catalog_id: Option<String>,
     owner_position: Option<u8>,
-    zone: EffectZone,
-    zone_index: Option<u16>,
+    effect_rule_id: Option<String>,
+    influence_cost: Option<u16>,
     resources: BTreeMap<EffectResource, u16>,
 }
 
 impl EffectEntity {
     #[must_use]
-    pub fn new(id: impl Into<String>, owner_position: Option<u8>, zone: EffectZone) -> Self {
+    pub fn new(id: impl Into<String>, owner_position: Option<u8>) -> Self {
         Self {
             id: id.into(),
+            kind: EffectEntityKind::Generic,
+            catalog_id: None,
             owner_position,
-            zone,
-            zone_index: None,
+            effect_rule_id: None,
+            influence_cost: None,
             resources: BTreeMap::new(),
         }
     }
 
     #[must_use]
     pub fn hero(position: u8) -> Self {
-        Self::new(
-            format!("hero:{position}"),
-            Some(position),
-            EffectZone::Heroes,
-        )
+        Self {
+            kind: EffectEntityKind::Hero,
+            ..Self::new(format!("hero:{position}"), Some(position))
+        }
         .with_resource(EffectResource::Health, 10)
+    }
+
+    #[must_use]
+    pub fn card(
+        id: impl Into<String>,
+        catalog_id: impl Into<String>,
+        kind: EffectEntityKind,
+        owner_position: Option<u8>,
+        effect_rule_id: impl Into<String>,
+        influence_cost: Option<u16>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            catalog_id: Some(catalog_id.into()),
+            owner_position,
+            effect_rule_id: Some(effect_rule_id.into()),
+            influence_cost,
+            resources: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn villain(
+        id: impl Into<String>,
+        catalog_id: impl Into<String>,
+        effect_rule_id: impl Into<String>,
+        health: u16,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            kind: EffectEntityKind::Villain,
+            catalog_id: Some(catalog_id.into()),
+            owner_position: None,
+            effect_rule_id: Some(effect_rule_id.into()),
+            influence_cost: None,
+            resources: BTreeMap::from([(EffectResource::Health, health)]),
+        }
+    }
+
+    #[must_use]
+    pub fn with_kind(mut self, kind: EffectEntityKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    #[must_use]
+    pub fn with_catalog_id(mut self, catalog_id: impl Into<String>) -> Self {
+        self.catalog_id = Some(catalog_id.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_effect_rule(mut self, effect_rule_id: impl Into<String>) -> Self {
+        self.effect_rule_id = Some(effect_rule_id.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn with_influence_cost(mut self, influence_cost: u16) -> Self {
+        self.influence_cost = Some(influence_cost);
+        self
     }
 
     #[must_use]
@@ -232,14 +314,18 @@ impl EffectEntity {
     }
 
     #[must_use]
-    pub const fn with_zone_index(mut self, zone_index: u16) -> Self {
-        self.zone_index = Some(zone_index);
-        self
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
+    pub const fn kind(&self) -> EffectEntityKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn catalog_id(&self) -> Option<&str> {
+        self.catalog_id.as_deref()
     }
 
     #[must_use]
@@ -248,13 +334,13 @@ impl EffectEntity {
     }
 
     #[must_use]
-    pub const fn zone(&self) -> EffectZone {
-        self.zone
+    pub fn effect_rule_id(&self) -> Option<&str> {
+        self.effect_rule_id.as_deref()
     }
 
     #[must_use]
-    pub const fn zone_index(&self) -> Option<u16> {
-        self.zone_index
+    pub const fn influence_cost(&self) -> Option<u16> {
+        self.influence_cost
     }
 
     #[must_use]
@@ -268,63 +354,87 @@ impl EffectEntity {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectEntityPlacement {
+    entity: EffectEntity,
+    zone: EffectZone,
+}
+
+impl EffectEntityPlacement {
+    #[must_use]
+    pub const fn new(entity: EffectEntity, zone: EffectZone) -> Self {
+        Self { entity, zone }
+    }
+
+    #[must_use]
+    pub const fn entity(&self) -> &EffectEntity {
+        &self.entity
+    }
+
+    #[must_use]
+    pub const fn zone(&self) -> EffectZone {
+        self.zone
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EffectWorld {
-    entities: Vec<EffectEntity>,
+    zones: BTreeMap<EffectZone, Vec<EffectEntity>>,
 }
 
 impl EffectWorld {
     #[must_use]
-    pub fn new(mut entities: Vec<EffectEntity>) -> Self {
-        let mut next_indices = BTreeMap::<(Option<u8>, EffectZone), u16>::new();
-        for entity in &entities {
-            if entity.zone.is_card_zone()
-                && let Some(index) = entity.zone_index
-            {
-                let next = index.saturating_add(1);
-                next_indices
-                    .entry((entity.owner_position, entity.zone))
-                    .and_modify(|candidate| *candidate = (*candidate).max(next))
-                    .or_insert(next);
-            }
+    pub fn new(placements: Vec<EffectEntityPlacement>) -> Self {
+        let mut zones = BTreeMap::<EffectZone, Vec<EffectEntity>>::new();
+        for placement in placements {
+            zones
+                .entry(placement.zone)
+                .or_default()
+                .push(placement.entity);
         }
-        for entity in &mut entities {
-            if entity.zone.is_card_zone() && entity.zone_index.is_none() {
-                let next = next_indices
-                    .entry((entity.owner_position, entity.zone))
-                    .or_default();
-                entity.zone_index = Some(*next);
-                *next = next.saturating_add(1);
-            }
-        }
-        entities.sort_by(|left, right| left.id.cmp(&right.id));
-        Self { entities }
+        Self { zones }
     }
 
     #[must_use]
-    pub fn entities(&self) -> &[EffectEntity] {
-        &self.entities
+    pub fn entities_in(&self, zone: EffectZone) -> &[EffectEntity] {
+        self.zones.get(&zone).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn entities(&self) -> impl Iterator<Item = (EffectZone, &EffectEntity)> {
+        self.zones
+            .iter()
+            .flat_map(|(zone, entities)| entities.iter().map(move |entity| (*zone, entity)))
+    }
+
+    pub fn entity_ids(&self) -> impl Iterator<Item = &str> {
+        self.entities().map(|(_, entity)| entity.id())
+    }
+
+    #[must_use]
+    pub fn entity(&self, id: &str) -> Option<(EffectZone, &EffectEntity)> {
+        self.entities().find(|(_, entity)| entity.id == id)
+    }
+
+    #[must_use]
+    pub fn entity_zone(&self, id: &str) -> Option<EffectZone> {
+        self.entity(id).map(|(zone, _)| zone)
     }
 
     #[must_use]
     pub fn hero_resource(&self, position: u8, resource: EffectResource) -> Option<u16> {
-        self.entities
+        self.entities_in(EffectZone::Heroes)
             .iter()
-            .find(|entity| {
-                entity.zone == EffectZone::Heroes && entity.owner_position == Some(position)
-            })
+            .find(|entity| entity.owner_position == Some(position))
             .map(|entity| entity.resource(resource))
     }
 
     #[must_use]
     pub fn cards_in_zone(&self, owner_position: u8, zone: EffectZone) -> Vec<&str> {
-        let mut cards = self
-            .entities
+        self.entities_in(zone)
             .iter()
-            .filter(|entity| entity.owner_position == Some(owner_position) && entity.zone == zone)
-            .collect::<Vec<_>>();
-        cards.sort_by_key(|entity| entity.zone_index);
-        cards.into_iter().map(|entity| entity.id.as_str()).collect()
+            .filter(|entity| entity.owner_position == Some(owner_position))
+            .map(|entity| entity.id.as_str())
+            .collect()
     }
 
     pub(crate) fn card_ids_in_zone(&self, owner_position: u8, zone: EffectZone) -> Vec<String> {
@@ -335,10 +445,10 @@ impl EffectWorld {
     }
 
     pub(crate) fn top_card_id(&self, owner_position: u8, zone: EffectZone) -> Option<String> {
-        self.entities
+        self.entities_in(zone)
             .iter()
-            .filter(|entity| entity.owner_position == Some(owner_position) && entity.zone == zone)
-            .max_by_key(|entity| entity.zone_index)
+            .rev()
+            .find(|entity| entity.owner_position == Some(owner_position))
             .map(|entity| entity.id.clone())
     }
 
@@ -348,12 +458,12 @@ impl EffectWorld {
         expected_from: EffectZone,
         to: EffectZone,
     ) -> Result<(), EffectExecutionError> {
-        let index = self
-            .entities
-            .iter()
-            .position(|entity| entity.id == card_id)
+        let owner_position = self
+            .entity(card_id)
+            .filter(|(zone, _)| *zone == expected_from)
+            .and_then(|(_, entity)| entity.owner_position)
             .ok_or(EffectExecutionError::InvalidDefinition)?;
-        self.move_card_at_index(index, expected_from, to)
+        self.move_to_back(card_id, expected_from, to, Some(owner_position))
     }
 
     pub(crate) fn set_card_order(
@@ -372,15 +482,29 @@ impl EffectWorld {
         if current != supplied {
             return Err(EffectExecutionError::InvalidDefinition);
         }
-        for (zone_index, card_id) in bottom_to_top.iter().enumerate() {
-            let entity = self
-                .entities
-                .iter_mut()
-                .find(|entity| entity.id == *card_id)
-                .ok_or(EffectExecutionError::InvalidDefinition)?;
-            entity.zone_index = Some(
-                u16::try_from(zone_index).map_err(|_| EffectExecutionError::InvalidDefinition)?,
-            );
+        let entities = self
+            .zones
+            .get_mut(&zone)
+            .ok_or(EffectExecutionError::InvalidDefinition)?;
+        let owned_indices = entities
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entity)| {
+                (entity.owner_position == Some(owner_position)).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let ordered = bottom_to_top
+            .iter()
+            .map(|card_id| {
+                entities
+                    .iter()
+                    .find(|entity| entity.id == *card_id)
+                    .cloned()
+                    .ok_or(EffectExecutionError::InvalidDefinition)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for (index, entity) in owned_indices.into_iter().zip(ordered) {
+            entities[index] = entity;
         }
         Ok(())
     }
@@ -392,10 +516,12 @@ impl EffectWorld {
         expected_before: u16,
     ) -> Result<(), EffectExecutionError> {
         let hero = self
-            .entities
-            .iter_mut()
-            .find(|entity| {
-                entity.owner_position == Some(owner_position) && entity.zone == EffectZone::Heroes
+            .zones
+            .get_mut(&EffectZone::Heroes)
+            .and_then(|heroes| {
+                heroes
+                    .iter_mut()
+                    .find(|entity| entity.owner_position == Some(owner_position))
             })
             .ok_or(EffectExecutionError::InvalidDefinition)?;
         if hero.resource(resource) != expected_before {
@@ -405,103 +531,180 @@ impl EffectWorld {
         Ok(())
     }
 
-    fn move_card_at_index(
+    pub(crate) fn entity_mut(&mut self, id: &str) -> Option<(EffectZone, &mut EffectEntity)> {
+        self.zones.iter_mut().find_map(|(zone, entities)| {
+            entities
+                .iter_mut()
+                .find(|entity| entity.id == id)
+                .map(|entity| (*zone, entity))
+        })
+    }
+
+    pub(crate) fn move_to_back(
         &mut self,
-        index: usize,
+        id: &str,
         expected_from: EffectZone,
         to: EffectZone,
+        destination_owner: Option<u8>,
     ) -> Result<(), EffectExecutionError> {
-        let entity = self
-            .entities
-            .get(index)
+        let source = self
+            .zones
+            .get_mut(&expected_from)
             .ok_or(EffectExecutionError::InvalidDefinition)?;
-        let owner_position = entity.owner_position;
-        let from = entity.zone;
-        let from_index = entity
-            .zone_index
+        let index = source
+            .iter()
+            .position(|entity| entity.id == id)
             .ok_or(EffectExecutionError::InvalidDefinition)?;
-        if from != expected_from || from == to || !from.is_card_zone() || !to.is_card_zone() {
+        let mut entity = source.remove(index);
+        let current_owner = entity.owner_position;
+        if !owner_transition_is_valid(
+            entity.kind,
+            expected_from,
+            to,
+            current_owner,
+            destination_owner,
+        ) {
+            source.insert(index, entity);
             return Err(EffectExecutionError::InvalidDefinition);
         }
-        let destination_index = u16::try_from(
-            self.entities
-                .iter()
-                .filter(|entity| entity.owner_position == owner_position && entity.zone == to)
-                .count(),
-        )
-        .map_err(|_| EffectExecutionError::InvalidDefinition)?;
-        for (candidate_index, candidate) in self.entities.iter_mut().enumerate() {
-            if candidate_index != index
-                && candidate.owner_position == owner_position
-                && candidate.zone == from
-                && candidate.zone_index.is_some_and(|value| value > from_index)
-            {
-                candidate.zone_index = candidate.zone_index.and_then(|value| value.checked_sub(1));
-            }
+        entity.owner_position = destination_owner;
+        if !entity_is_valid_in_zone(&entity, to) {
+            entity.owner_position = current_owner;
+            source.insert(index, entity);
+            return Err(EffectExecutionError::InvalidDefinition);
         }
-        let entity = self
-            .entities
-            .get_mut(index)
-            .ok_or(EffectExecutionError::InvalidDefinition)?;
-        entity.zone = to;
-        entity.zone_index = Some(destination_index);
+        self.zones.entry(to).or_default().push(entity);
         Ok(())
     }
 
     pub(crate) fn is_valid_for_positions(&self, positions: &[u8]) -> bool {
-        let mut ids = self
-            .entities
-            .iter()
-            .map(|entity| entity.id.as_str())
-            .collect::<Vec<_>>();
+        let mut ids = self.entity_ids().collect::<Vec<_>>();
         ids.sort_unstable();
         if ids
             .iter()
             .any(|id| id.is_empty() || id.len() > MAX_CHOICE_VALUE_LENGTH)
             || ids.windows(2).any(|pair| pair[0] == pair[1])
-            || self.entities.iter().any(|entity| {
+            || self.entities().any(|(zone, entity)| {
                 entity
                     .owner_position
                     .is_some_and(|position| !positions.contains(&position))
-                    || (entity.zone.is_card_zone() && entity.zone_index.is_none())
-                    || (!entity.zone.is_card_zone() && entity.zone_index.is_some())
-                    || (entity.zone == EffectZone::Heroes && entity.owner_position.is_none())
+                    || (zone == EffectZone::Heroes && entity.owner_position.is_none())
                     || entity
                         .resources
                         .keys()
-                        .any(|resource| !entity.zone.supports_resource(*resource))
+                        .any(|resource| !zone.supports_resource(*resource))
+                    || !entity_is_valid_in_zone(entity, zone)
             })
         {
             return false;
         }
-        let mut zone_indices = BTreeMap::<(Option<u8>, EffectZone), Vec<u16>>::new();
-        for entity in &self.entities {
-            if let Some(zone_index) = entity.zone_index {
-                zone_indices
-                    .entry((entity.owner_position, entity.zone))
-                    .or_default()
-                    .push(zone_index);
-            }
-        }
-        if zone_indices.values_mut().any(|indices| {
-            indices.sort_unstable();
-            indices
-                .iter()
-                .copied()
-                .enumerate()
-                .any(|(expected, actual)| usize::from(actual) != expected)
-        }) {
-            return false;
-        }
         positions.iter().all(|position| {
-            self.entities
+            self.entities_in(EffectZone::Heroes)
                 .iter()
-                .filter(|entity| {
-                    entity.zone == EffectZone::Heroes && entity.owner_position == Some(*position)
-                })
+                .filter(|entity| entity.owner_position == Some(*position))
                 .count()
                 == 1
         })
+    }
+}
+
+fn entity_is_valid_in_zone(entity: &EffectEntity, zone: EffectZone) -> bool {
+    match entity.kind {
+        EffectEntityKind::Generic => true,
+        EffectEntityKind::Hero => {
+            zone == EffectZone::Heroes
+                && entity.owner_position.is_some()
+                && entity.catalog_id.is_none()
+                && entity.effect_rule_id.is_none()
+                && entity.influence_cost.is_none()
+        }
+        EffectEntityKind::StarterCard => {
+            matches!(
+                zone,
+                EffectZone::HeroDrawPile
+                    | EffectZone::HeroHand
+                    | EffectZone::HeroPlayArea
+                    | EffectZone::HeroDiscardPile
+            ) && entity.owner_position.is_some()
+                && entity
+                    .catalog_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+                && entity
+                    .effect_rule_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+                && entity.influence_cost.is_none()
+        }
+        EffectEntityKind::HogwartsCard => {
+            matches!(
+                zone,
+                EffectZone::HogwartsDeck
+                    | EffectZone::Market
+                    | EffectZone::HeroDrawPile
+                    | EffectZone::HeroHand
+                    | EffectZone::HeroPlayArea
+                    | EffectZone::HeroDiscardPile
+            ) && entity
+                .catalog_id
+                .as_deref()
+                .is_some_and(|id| !id.is_empty())
+                && entity
+                    .effect_rule_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+                && entity.influence_cost.is_some()
+                && (matches!(zone, EffectZone::HogwartsDeck | EffectZone::Market)
+                    == entity.owner_position.is_none())
+        }
+        EffectEntityKind::Villain => {
+            matches!(zone, EffectZone::VillainDeck | EffectZone::ActiveVillains)
+                && entity.owner_position.is_none()
+                && entity
+                    .catalog_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+                && entity
+                    .effect_rule_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+                && entity.influence_cost.is_none()
+                && entity.resources.contains_key(&EffectResource::Health)
+        }
+    }
+}
+
+fn owner_transition_is_valid(
+    kind: EffectEntityKind,
+    from: EffectZone,
+    to: EffectZone,
+    current: Option<u8>,
+    destination: Option<u8>,
+) -> bool {
+    match kind {
+        EffectEntityKind::HogwartsCard
+            if matches!(from, EffectZone::Market | EffectZone::HogwartsDeck)
+                && matches!(
+                    to,
+                    EffectZone::HeroDrawPile
+                        | EffectZone::HeroHand
+                        | EffectZone::HeroPlayArea
+                        | EffectZone::HeroDiscardPile
+                ) =>
+        {
+            current.is_none() && destination.is_some()
+        }
+        EffectEntityKind::HogwartsCard
+            if matches!(from, EffectZone::HogwartsDeck | EffectZone::Market)
+                && matches!(to, EffectZone::HogwartsDeck | EffectZone::Market) =>
+        {
+            current.is_none() && destination.is_none()
+        }
+        EffectEntityKind::StarterCard | EffectEntityKind::HogwartsCard => {
+            current.is_some() && current == destination
+        }
+        EffectEntityKind::Villain => current.is_none() && destination.is_none(),
+        EffectEntityKind::Generic | EffectEntityKind::Hero => current == destination,
     }
 }
 
@@ -624,6 +827,7 @@ pub enum EffectExecutionError {
     InvalidChoice,
     InvalidDefinition,
     InvalidRoll,
+    InvalidTargetSelection,
     StepLimitExceeded,
     UnaffordableCost,
 }
@@ -638,6 +842,8 @@ struct EffectExecutor<'a> {
     world: &'a mut EffectWorld,
     rules: &'a [EffectRule],
     roller: &'a mut dyn EffectRoller,
+    target_bindings: &'a [EffectTargetBinding],
+    require_named_target_bindings: bool,
     queue: VecDeque<QueuedEffect>,
     outcomes: Vec<EffectOutcome>,
     rolls_consumed: u64,
@@ -804,7 +1010,7 @@ impl EffectExecutor<'_> {
         if !selector_is_valid(target) || !operation_is_valid_for_zone(operation, target.zone) {
             return Err(EffectExecutionError::InvalidDefinition);
         }
-        let candidates = eligible_entity_indices(self.world, actor_position, target);
+        let candidates = eligible_entity_ids(self.world, actor_position, target);
         if target.max == 0 {
             self.outcomes.push(EffectOutcome::NoOp {
                 rule_id: cursor.rule_id.clone(),
@@ -815,26 +1021,50 @@ impl EffectExecutor<'_> {
                 rule_id: cursor.rule_id.clone(),
                 reason: EffectNoOpReason::NoEligibleTarget,
             });
+        } else if let Some(selector_id) = target.id.as_deref()
+            && let Some(binding) = self
+                .target_bindings
+                .iter()
+                .find(|binding| binding.selector_id == selector_id)
+        {
+            let selected = binding.target_ids.iter().collect::<BTreeSet<_>>();
+            if selected.len() != binding.target_ids.len()
+                || binding.target_ids.len() < usize::from(target.min)
+                || binding.target_ids.len() > usize::from(target.max)
+                || binding
+                    .target_ids
+                    .iter()
+                    .any(|selected| !candidates.iter().any(|candidate| candidate == selected))
+            {
+                return Err(EffectExecutionError::InvalidTargetSelection);
+            }
+            for entity_id in &binding.target_ids {
+                apply_operation(
+                    self.world,
+                    entity_id,
+                    &cursor.rule_id,
+                    operation,
+                    &mut self.outcomes,
+                )?;
+            }
+        } else if target.id.is_some() && self.require_named_target_bindings {
+            return Err(EffectExecutionError::InvalidTargetSelection);
         } else if candidates.len() > usize::from(target.max) {
-            let options = candidates
-                .into_iter()
-                .map(|index| self.world.entities[index].id.clone())
-                .collect();
             return Ok(Some(EffectStop::Choice(PendingEffectChoice {
                 id: self.pending_choice_id(cursor, PendingEffectChoiceKind::Target)?,
                 cause: cursor.rule_id.clone(),
                 responsible_position: actor_position,
                 kind: PendingEffectChoiceKind::Target,
-                options,
+                options: candidates,
                 min: target.min,
                 max: target.max,
                 continuation: self.continuation(cursor),
             })));
         } else {
-            for index in candidates {
+            for entity_id in candidates {
                 apply_operation(
                     self.world,
-                    index,
+                    &entity_id,
                     &cursor.rule_id,
                     operation,
                     &mut self.outcomes,
@@ -986,9 +1216,8 @@ fn effect_at_cursor<'a>(
 
 fn hero_positions(world: &EffectWorld) -> Vec<u8> {
     let mut positions = world
-        .entities
+        .entities_in(EffectZone::Heroes)
         .iter()
-        .filter(|entity| entity.zone == EffectZone::Heroes)
         .filter_map(|entity| entity.owner_position)
         .collect::<Vec<_>>();
     positions.sort_unstable();
@@ -1075,11 +1304,7 @@ pub(crate) fn resume_effects(
             });
         }
         (PendingEffectChoiceKind::Target, EffectDefinition::Apply { target, operation }) => {
-            let candidates =
-                eligible_entity_indices(&next_world, pending.responsible_position, target)
-                    .into_iter()
-                    .map(|index| next_world.entities[index].id.clone())
-                    .collect::<Vec<_>>();
+            let candidates = eligible_entity_ids(&next_world, pending.responsible_position, target);
             if candidates != pending.options {
                 return Err(EffectExecutionError::InvalidChoice);
             }
@@ -1087,14 +1312,9 @@ pub(crate) fn resume_effects(
                 if !selected_options.contains(option) {
                     continue;
                 }
-                let index = next_world
-                    .entities
-                    .iter()
-                    .position(|entity| entity.id == *option)
-                    .ok_or(EffectExecutionError::InvalidChoice)?;
                 apply_operation(
                     &mut next_world,
-                    index,
+                    option,
                     &pending.cause,
                     operation,
                     &mut outcomes,
@@ -1111,6 +1331,8 @@ pub(crate) fn resume_effects(
         world: &mut next_world,
         rules,
         roller,
+        target_bindings: &[],
+        require_named_target_bindings: false,
         queue,
         outcomes,
         rolls_consumed: 0,
@@ -1146,7 +1368,51 @@ pub(crate) fn execute_effects(
     trigger: EffectTrigger,
     roller: &mut dyn EffectRoller,
 ) -> Result<EffectResolution, EffectExecutionError> {
-    if !effect_rules_are_valid(rules) {
+    execute_effects_with_targets(world, actor_position, rules, trigger, &[], false, roller)
+}
+
+pub(crate) fn execute_effect_rule(
+    world: &mut EffectWorld,
+    actor_position: u8,
+    rule: &EffectRule,
+    target_bindings: &[EffectTargetBinding],
+    roller: &mut dyn EffectRoller,
+) -> Result<EffectResolution, EffectExecutionError> {
+    execute_effects_with_targets(
+        world,
+        actor_position,
+        std::slice::from_ref(rule),
+        EffectTrigger::Manual,
+        target_bindings,
+        true,
+        roller,
+    )
+}
+
+fn execute_effects_with_targets(
+    world: &mut EffectWorld,
+    actor_position: u8,
+    rules: &[EffectRule],
+    trigger: EffectTrigger,
+    target_bindings: &[EffectTargetBinding],
+    require_named_target_bindings: bool,
+    roller: &mut dyn EffectRoller,
+) -> Result<EffectResolution, EffectExecutionError> {
+    if !effect_rules_are_valid(rules)
+        || target_bindings.iter().any(|binding| {
+            binding.selector_id.is_empty()
+                || !binding
+                    .target_ids
+                    .iter()
+                    .all(|target_id| !target_id.is_empty())
+        })
+        || target_bindings
+            .iter()
+            .map(|binding| &binding.selector_id)
+            .collect::<BTreeSet<_>>()
+            .len()
+            != target_bindings.len()
+    {
         return Err(EffectExecutionError::InvalidDefinition);
     }
     if !effect_action_is_affordable(world, actor_position, rules, trigger) {
@@ -1170,6 +1436,8 @@ pub(crate) fn execute_effects(
         world: &mut next_world,
         rules,
         roller,
+        target_bindings,
+        require_named_target_bindings,
         queue,
         outcomes,
         rolls_consumed: 0,
@@ -1210,12 +1478,14 @@ fn pay_costs(
         .filter(|rule| rule.trigger == trigger)
         .flat_map(|rule| rule.cost.iter().map(|cost| (&rule.id, cost)))
     {
-        let hero = world
-            .entities
-            .iter_mut()
-            .find(|entity| {
-                entity.zone == EffectZone::Heroes && entity.owner_position == Some(actor_position)
-            })
+        let hero_id = world
+            .entities_in(EffectZone::Heroes)
+            .iter()
+            .find(|entity| entity.owner_position == Some(actor_position))
+            .map(|entity| entity.id.clone())
+            .ok_or(EffectExecutionError::InvalidDefinition)?;
+        let (_, hero) = world
+            .entity_mut(&hero_id)
             .ok_or(EffectExecutionError::InvalidDefinition)?;
         let before = hero.resource(cost.resource);
         let after = before
@@ -1248,20 +1518,14 @@ pub(crate) fn apply_effect_outcomes(
                 to,
                 ..
             } => {
-                let entity = world
-                    .entities
-                    .iter()
-                    .find(|entity| entity.id == *target_id)
+                let (current_zone, _) = world
+                    .entity(target_id)
                     .ok_or(EffectExecutionError::InvalidDefinition)?;
-                if entity.zone != *from
-                    || entity.owner_position != *target_position
-                    || from == to
-                    || !from.is_card_zone()
-                    || !to.is_card_zone()
+                if current_zone != *from || from == to || !from.is_card_zone() || !to.is_card_zone()
                 {
                     return Err(EffectExecutionError::InvalidDefinition);
                 }
-                world.move_card(target_id, *from, *to)?;
+                world.move_to_back(target_id, *from, *to, *target_position)?;
             }
             EffectOutcome::ResourceChanged {
                 target_id,
@@ -1271,13 +1535,11 @@ pub(crate) fn apply_effect_outcomes(
                 after,
                 ..
             } => {
-                let entity = world
-                    .entities
-                    .iter_mut()
-                    .find(|entity| entity.id == *target_id)
+                let (zone, entity) = world
+                    .entity_mut(target_id)
                     .ok_or(EffectExecutionError::InvalidDefinition)?;
                 if entity.owner_position != *target_position
-                    || !entity.zone.supports_resource(*resource)
+                    || !zone.supports_resource(*resource)
                     || entity.resource(*resource) != *before
                 {
                     return Err(EffectExecutionError::InvalidDefinition);
@@ -1462,7 +1724,8 @@ impl QueuedEffect {
 }
 
 fn selector_is_valid(selector: &EffectSelector) -> bool {
-    selector.min <= selector.max
+    selector.id.as_deref().is_none_or(|id| !id.is_empty())
+        && selector.min <= selector.max
         && selector
             .eligibility
             .iter()
@@ -1506,21 +1769,19 @@ fn combined_costs(rules: &[EffectRule], trigger: EffectTrigger) -> BTreeMap<Effe
     costs
 }
 
-fn eligible_entity_indices(
+pub(crate) fn eligible_entity_ids(
     world: &EffectWorld,
     actor_position: u8,
     selector: &EffectSelector,
-) -> Vec<usize> {
+) -> Vec<String> {
     world
-        .entities
+        .entities_in(selector.zone)
         .iter()
-        .enumerate()
-        .filter(|(_, entity)| entity.zone == selector.zone)
-        .filter(|(_, entity)| {
+        .filter(|entity| {
             selector.owner == EffectTargetOwner::Any
                 || entity.owner_position == Some(actor_position)
         })
-        .filter(|(_, entity)| {
+        .filter(|entity| {
             selector
                 .eligibility
                 .iter()
@@ -1530,46 +1791,159 @@ fn eligible_entity_indices(
                     }
                 })
         })
-        .map(|(index, _)| index)
+        .map(|entity| entity.id.clone())
         .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AtomicTargetSlot {
+    pub selector_id: String,
+    pub min: u16,
+    pub max: u16,
+    pub target_ids: Vec<String>,
+}
+
+pub(crate) fn atomic_manual_target_slots(
+    world: &EffectWorld,
+    actor_position: u8,
+    rule: &EffectRule,
+) -> Option<Vec<AtomicTargetSlot>> {
+    if rule.trigger != EffectTrigger::Manual
+        || rule.id.is_empty()
+        || rule
+            .cost
+            .iter()
+            .any(|cost| cost.amount == 0 || cost.resource == EffectResource::Control)
+    {
+        return None;
+    }
+    let mut slots = Vec::new();
+    collect_atomic_target_slots(world, actor_position, &rule.effect, &mut slots)?;
+    Some(slots)
+}
+
+fn collect_atomic_target_slots(
+    world: &EffectWorld,
+    actor_position: u8,
+    definition: &EffectDefinition,
+    slots: &mut Vec<AtomicTargetSlot>,
+) -> Option<bool> {
+    match definition {
+        EffectDefinition::Apply { target, operation } => {
+            if !selector_is_valid(target) || !operation_is_valid_for_zone(operation, target.zone) {
+                return None;
+            }
+            let target_ids = eligible_entity_ids(world, actor_position, target);
+            if target.max == 0 || target_ids.len() < usize::from(target.min) {
+                return Some(true);
+            }
+            let Some(selector_id) = target.id.as_ref() else {
+                return (target_ids.len() <= usize::from(target.max)).then_some(true);
+            };
+            let slot = AtomicTargetSlot {
+                selector_id: selector_id.clone(),
+                min: target.min,
+                max: target
+                    .max
+                    .min(u16::try_from(target_ids.len()).unwrap_or(u16::MAX)),
+                target_ids,
+            };
+            if let Some(existing) = slots
+                .iter()
+                .find(|existing| existing.selector_id == slot.selector_id)
+            {
+                (existing == &slot).then_some(true)
+            } else {
+                slots.push(slot);
+                Some(true)
+            }
+        }
+        EffectDefinition::Choice { .. } | EffectDefinition::Terminal { .. } => Some(false),
+        EffectDefinition::Condition {
+            condition,
+            then,
+            otherwise,
+        } => {
+            if !condition_is_valid(condition) {
+                return None;
+            }
+            let then_continues = collect_atomic_target_slots(world, actor_position, then, slots)?;
+            let otherwise_continues = otherwise.as_deref().map_or(Some(true), |otherwise| {
+                collect_atomic_target_slots(world, actor_position, otherwise, slots)
+            })?;
+            Some(then_continues || otherwise_continues)
+        }
+        EffectDefinition::NoOp => Some(true),
+        EffectDefinition::Repeat { times, effect } => (*times > 0)
+            .then(|| collect_atomic_target_slots(world, actor_position, effect, slots))?,
+        EffectDefinition::Roll { die, outcomes } => {
+            if outcomes.len() != usize::from(die.sides()) {
+                return None;
+            }
+            let mut any_continues = false;
+            for outcome in outcomes {
+                any_continues |=
+                    collect_atomic_target_slots(world, actor_position, outcome, slots)?;
+            }
+            Some(any_continues)
+        }
+        EffectDefinition::Sequence { effects } => {
+            if effects.is_empty() {
+                return None;
+            }
+            let mut can_continue = true;
+            for effect in effects {
+                if !can_continue {
+                    break;
+                }
+                can_continue = collect_atomic_target_slots(world, actor_position, effect, slots)?;
+            }
+            Some(can_continue)
+        }
+    }
 }
 
 fn condition_is_true(world: &EffectWorld, actor_position: u8, condition: &EffectCondition) -> bool {
     match condition {
         EffectCondition::HasEligibleTarget { target } => {
-            eligible_entity_indices(world, actor_position, target).len() >= usize::from(target.min)
+            eligible_entity_ids(world, actor_position, target).len() >= usize::from(target.min)
         }
         EffectCondition::ResourceAtLeast {
             target,
             resource,
             amount,
         } => {
-            let candidates = eligible_entity_indices(world, actor_position, target);
+            let candidates = eligible_entity_ids(world, actor_position, target);
             candidates.len() >= usize::from(target.min)
-                && candidates
-                    .into_iter()
-                    .any(|index| world.entities[index].resource(*resource) >= *amount)
+                && candidates.into_iter().any(|entity_id| {
+                    world
+                        .entity(&entity_id)
+                        .is_some_and(|(_, entity)| entity.resource(*resource) >= *amount)
+                })
         }
     }
 }
 
 fn apply_operation(
     world: &mut EffectWorld,
-    index: usize,
+    entity_id: &str,
     rule_id: &str,
     operation: &EffectOperation,
     outcomes: &mut Vec<EffectOutcome>,
 ) -> Result<(), EffectExecutionError> {
     match operation {
         EffectOperation::Discard => {
-            let (target_id, target_position, from) = {
-                let entity = world
-                    .entities
-                    .get(index)
-                    .ok_or(EffectExecutionError::InvalidDefinition)?;
-                (entity.id.clone(), entity.owner_position, entity.zone)
-            };
-            world.move_card(&target_id, from, EffectZone::HeroDiscardPile)?;
+            let (from, entity) = world
+                .entity(entity_id)
+                .ok_or(EffectExecutionError::InvalidDefinition)?;
+            let target_id = entity.id.clone();
+            let target_position = entity.owner_position;
+            world.move_to_back(
+                &target_id,
+                from,
+                EffectZone::HeroDiscardPile,
+                target_position,
+            )?;
             outcomes.push(EffectOutcome::Moved {
                 rule_id: rule_id.to_owned(),
                 target_id,
@@ -1579,9 +1953,8 @@ fn apply_operation(
             });
         }
         EffectOperation::ModifyResource { resource, amount } => {
-            let entity = world
-                .entities
-                .get_mut(index)
+            let (_, entity) = world
+                .entity_mut(entity_id)
                 .ok_or(EffectExecutionError::InvalidDefinition)?;
             let before = entity.resource(*resource);
             let after = if *amount < 0 {
@@ -1601,14 +1974,12 @@ fn apply_operation(
             });
         }
         EffectOperation::Move { to } => {
-            let (target_id, target_position, from) = {
-                let entity = world
-                    .entities
-                    .get(index)
-                    .ok_or(EffectExecutionError::InvalidDefinition)?;
-                (entity.id.clone(), entity.owner_position, entity.zone)
-            };
-            world.move_card(&target_id, from, *to)?;
+            let (from, entity) = world
+                .entity(entity_id)
+                .ok_or(EffectExecutionError::InvalidDefinition)?;
+            let target_id = entity.id.clone();
+            let target_position = entity.owner_position;
+            world.move_to_back(&target_id, from, *to, target_position)?;
             outcomes.push(EffectOutcome::Moved {
                 rule_id: rule_id.to_owned(),
                 target_id,

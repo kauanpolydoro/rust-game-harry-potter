@@ -30,6 +30,17 @@ class SynchronizedWebSocket {
       this.readyState = SynchronizedWebSocket.OPEN
       this.protocol = this.requestedProtocol
       this.onopen?.()
+      if (this.requestedProtocol === 'hogwarts.session.v1') {
+        this.onmessage?.({
+          data: JSON.stringify({
+            cursor: 0,
+            events: [],
+            protocol_version: 1,
+            type: 'security_snapshot',
+          }),
+        })
+        return
+      }
       const request = new URL(this.url)
       this.onmessage?.({
         data: JSON.stringify({
@@ -129,6 +140,12 @@ function gameProjectionResponse(): GameProjectionResponse {
       status: 'in_progress',
     },
     legal_actions: ['end_hero_actions'],
+    legal_intentions: {
+      acquire_cards: [],
+      assign_attack: [],
+      end_hero_actions: true,
+      play_cards: [],
+    },
     queued_effect_count: 0,
     queued_phases: ['end_turn'],
     participant: {
@@ -137,6 +154,7 @@ function gameProjectionResponse(): GameProjectionResponse {
       position: 1,
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
+      hand_count: 0,
     },
     participants: [
       {
@@ -145,6 +163,7 @@ function gameProjectionResponse(): GameProjectionResponse {
         position: 1,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
+        hand_count: 0,
       },
       {
         display_name: 'Luna',
@@ -152,6 +171,7 @@ function gameProjectionResponse(): GameProjectionResponse {
         position: 2,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
+        hand_count: 0,
       },
     ],
     snapshot: {
@@ -169,6 +189,16 @@ function gameProjectionResponse(): GameProjectionResponse {
         sampling: 'rejection-sampling-v1',
         shuffle: 'fisher-yates-v1',
       },
+    },
+    table: {
+      active_villains: [],
+      discard_pile_count: 0,
+      draw_pile_count: 0,
+      hand: [],
+      hogwarts_deck_count: 0,
+      market: [],
+      play_area: [],
+      villain_deck_count: 0,
     },
     turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }
@@ -222,6 +252,7 @@ function completedGameProjectionResponse(): GameProjectionResponse {
     game: { ...projection.game, expires_at: '2026-09-10T13:00:00Z' },
     legal_actions: [],
     participant: participants[0]!,
+    legal_intentions: { ...projection.legal_intentions, end_hero_actions: false },
     participants,
     snapshot: {
       ...projection.snapshot,
@@ -281,6 +312,7 @@ function multiplePendingChoiceProjectionResponse() {
       {
         display_name: 'Pomona',
         hero: { id: 'neville', name: 'Neville' },
+        hand_count: 0,
         position: 3,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
@@ -314,6 +346,125 @@ function acceptedChoiceResponse(commandId: string) {
       expires_at: '2026-09-10T13:00:00Z',
       status: 'accepted',
       type: 'resolve_choice',
+    },
+  }
+}
+
+function heroActionGameProjectionResponse() {
+  const projection = completedGameProjectionResponse()
+  const participants = projection.participants.map((participant) =>
+    participant.position === 1
+      ? {
+          ...participant,
+          hand_count: 1,
+          resources: { attack: 0, health: 9, influence: 0 },
+        }
+      : participant,
+  )
+  return {
+    ...projection,
+    effects: { outcomes: [], status: 'idle' },
+    legal_actions: ['end_hero_actions', 'play_card'],
+    legal_intentions: {
+      acquire_cards: [],
+      assign_attack: [],
+      end_hero_actions: true,
+      play_cards: [
+        {
+          card_id: 'instance:starter',
+          target_slots: [
+            {
+              max: 1,
+              min: 1,
+              options: [
+                { label: 'Minerva - Harry', target_id: 'hero:1' },
+                { label: 'Luna - Hermione', target_id: 'hero:2' },
+              ],
+              selector_id: 'target:hero',
+            },
+          ],
+        },
+      ],
+    },
+    participant: participants[0],
+    participants,
+    table: {
+      active_villains: [
+        {
+          attackable: false,
+          catalog_id: 'fixture:villain',
+          health: 2,
+          instance_id: 'instance:villain',
+          max_attack: 0,
+          name: 'Draco',
+        },
+      ],
+      discard_pile_count: 0,
+      draw_pile_count: 0,
+      hand: [
+        {
+          catalog_id: 'fixture:starter-card',
+          instance_id: 'instance:starter',
+          name: 'Lumos',
+        },
+      ],
+      hogwarts_deck_count: 1,
+      market: [
+        {
+          affordable: false,
+          catalog_id: 'fixture:hogwarts-card',
+          cost: 2,
+          instance_id: 'instance:market',
+          name: 'Nimbus 2000',
+        },
+      ],
+      play_area: [],
+      villain_deck_count: 0,
+    },
+  }
+}
+
+function playedCardGameProjectionResponse() {
+  const projection = heroActionGameProjectionResponse()
+  const participants = projection.participants.map((participant) =>
+    participant.position === 1
+      ? {
+          ...participant,
+          hand_count: 0,
+          resources: { attack: 2, health: 9, influence: 3 },
+        }
+      : participant,
+  )
+  return {
+    ...projection,
+    legal_actions: ['end_hero_actions', 'assign_attack', 'acquire_card'],
+    legal_intentions: {
+      acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
+      assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
+      end_hero_actions: true,
+      play_cards: [],
+    },
+    participant: participants[0],
+    participants,
+    snapshot: {
+      ...projection.snapshot,
+      cursor: 2,
+      digest: `blake3:${'e'.repeat(64)}`,
+      sequence: 2,
+      state_version: 3,
+    },
+    table: {
+      ...projection.table,
+      active_villains: [
+        {
+          ...projection.table.active_villains[0],
+          attackable: true,
+          max_attack: 2,
+        },
+      ],
+      hand: [],
+      market: [{ ...projection.table.market[0], affordable: true }],
+      play_area: [projection.table.hand[0]],
     },
   }
 }
@@ -1857,7 +2008,11 @@ describe('application shell', () => {
       level: 3,
       name: 'Escolha oficial pendente',
     })
-    const firstSocket = ChoiceResyncWebSocket.instances[0]
+    const gameSockets = () =>
+      ChoiceResyncWebSocket.instances.filter(
+        (candidate) => candidate.requestedProtocol === 'hogwarts.realtime.v2',
+      )
+    const firstSocket = gameSockets()[0]
     if (!firstSocket) {
       throw new Error('the rejected choice fixture requires an initial socket')
     }
@@ -1883,8 +2038,8 @@ describe('application shell', () => {
     ).toBeVisible()
     expect(choiceHeading).toBeVisible()
     expect(screen.getByText('rule:functional')).toBeVisible()
-    await waitFor(() => expect(ChoiceResyncWebSocket.instances).toHaveLength(2))
-    const resyncSocket = ChoiceResyncWebSocket.instances[1]
+    await waitFor(() => expect(gameSockets()).toHaveLength(2))
+    const resyncSocket = gameSockets()[1]
     expect(resyncSocket?.url).toContain('snapshot_version=0')
     expect(screen.getByRole('radio', { name: 'Minerva' })).toBeChecked()
     expect(screen.getByRole('radio', { name: 'Minerva' })).toBeDisabled()
@@ -1990,7 +2145,11 @@ describe('application shell', () => {
     })
     const gameHeading = screen.getByRole('heading', { level: 2, name: 'Partida em andamento' })
     await waitFor(() => expect(gameHeading).toHaveFocus())
-    const firstSocket = OfflineJourneyWebSocket.instances[0]
+    const gameSockets = () =>
+      OfflineJourneyWebSocket.instances.filter(
+        (candidate) => candidate.requestedProtocol === 'hogwarts.realtime.v2',
+      )
+    const firstSocket = gameSockets()[0]
     firstSocket?.open()
     firstSocket?.receive({
       cursor: projection.snapshot.cursor,
@@ -2020,8 +2179,8 @@ describe('application shell', () => {
 
     browserIsOnline = true
     window.dispatchEvent(new Event('online'))
-    await waitFor(() => expect(OfflineJourneyWebSocket.instances).toHaveLength(2))
-    const secondSocket = OfflineJourneyWebSocket.instances[1]
+    await waitFor(() => expect(gameSockets()).toHaveLength(2))
+    const secondSocket = gameSockets()[1]
     expect(secondSocket?.url).toContain(`cursor=${projection.snapshot.cursor}`)
     expect(secondSocket?.url).toContain(
       `snapshot_version=${projection.snapshot.snapshot_version}`,
@@ -2227,7 +2386,10 @@ describe('application shell', () => {
     expect(
       await screen.findByRole('button', { name: 'Encerrar ações do Herói' }),
     ).toBeEnabled()
-    const socket = SynchronizedWebSocket.instances[0]
+    expect(screen.getByText('Gerenciar recuperação')).toBeVisible()
+    const socket = SynchronizedWebSocket.instances.find(
+      (candidate) => candidate.requestedProtocol === 'hogwarts.realtime.v2',
+    )
     socket?.receive({
       blocked: true,
       game_id: gameProjectionResponse().game.id,
@@ -2379,6 +2541,10 @@ describe('application shell', () => {
     expect(screen.getAllByText('Luna')[0]).toBeVisible()
     expect(screen.getAllByText('Posição 2')[0]).toBeVisible()
     expect(screen.getAllByText('Hermione')[0]).toBeVisible()
+    await fireEvent.click(screen.getByText('Gerenciar recuperação'))
+    expect(screen.getByRole('button', { name: 'Gerar novo link para mim' })).toBeVisible()
+    expect(screen.queryByLabelText('Senha atual da sala')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ajudar participante sem acesso')).not.toBeInTheDocument()
     expect(request).toHaveBeenNthCalledWith(
       2,
       '/api/session',
@@ -2388,10 +2554,12 @@ describe('application shell', () => {
 
   it('shows realtime connection failure and offers an explicit retry', async () => {
     class FailingWebSocket {
-      static attempts = 0
+      static attemptedProtocols: string[] = []
 
-      constructor() {
-        FailingWebSocket.attempts += 1
+      constructor(_url: string | URL, protocol: string | string[]) {
+        FailingWebSocket.attemptedProtocols.push(
+          Array.isArray(protocol) ? (protocol[0] ?? '') : protocol,
+        )
         throw new Error('socket unavailable')
       }
     }
@@ -2419,7 +2587,11 @@ describe('application shell', () => {
 
     expect(await screen.findByText('Atualizações automáticas interrompidas.')).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: 'Reconectar atualizações' }))
-    expect(FailingWebSocket.attempts).toBe(2)
+    expect(
+      FailingWebSocket.attemptedProtocols.filter(
+        (protocol) => protocol === 'hogwarts.realtime.v2',
+      ),
+    ).toHaveLength(2)
   })
 
   it('keeps the active command frozen until realtime convergence is proven', async () => {
@@ -2427,7 +2599,7 @@ describe('application shell', () => {
       static readonly CONNECTING = 0
       static readonly OPEN = 1
       static readonly CLOSED = 3
-      static instance: ControlledWebSocket | null = null
+      static instances: ControlledWebSocket[] = []
 
       readonly requestedProtocol: string
       protocol = ''
@@ -2439,7 +2611,7 @@ describe('application shell', () => {
 
       constructor(_url: string | URL, protocol: string | string[]) {
         this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
-        ControlledWebSocket.instance = this
+        ControlledWebSocket.instances.push(this)
       }
 
       open(): void {
@@ -2479,11 +2651,14 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
-    ControlledWebSocket.instance?.open()
+    const gameSocket = ControlledWebSocket.instances.find(
+      (socket) => socket.requestedProtocol === 'hogwarts.realtime.v2',
+    )
+    gameSocket?.open()
     expect(screen.getByRole('button', { name: 'Sincronizando partida' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Encerrar ações do Herói' })).toBeNull()
 
-    ControlledWebSocket.instance?.receive({
+    gameSocket?.receive({
       cursor: 0,
       digest: game.snapshot.digest,
       protocol_version: 2,
@@ -2499,7 +2674,7 @@ describe('application shell', () => {
     gapProjection.snapshot.digest = `blake3:${'e'.repeat(64)}`
     gapProjection.turn = { active_position: 1, number: 3, phase: 'hero_actions' }
     gapProjection.legal_actions = ['end_hero_actions']
-    ControlledWebSocket.instance?.receive({
+    gameSocket?.receive({
       cursor: 2,
       events: [
         {
@@ -2652,6 +2827,319 @@ describe('application shell', () => {
       command_id: submittedCommandId,
       expected_state_version: 1,
       type: 'end_hero_actions',
+    })
+  })
+
+  it('plays a targeted card from the table without mutating the official view before acceptance', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    let acceptPlay = (_response: Response): void => undefined
+    const playResponse = new Promise<Response>((resolve) => {
+      acceptPlay = resolve
+    })
+    let submittedPlayId = ''
+    const submittedBodies: Array<Record<string, unknown>> = []
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(heroActionGameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        submittedBodies.push(body)
+        if (body.type === 'play_card') {
+          submittedPlayId = String(body.command_id)
+          return playResponse
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(errorResponse('GAME_ACTION_NOT_ALLOWED')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    await fireEvent.click(within(hand).getByRole('radio', { name: 'Minerva - Harry' }))
+    void fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
+
+    expect(await within(hand).findByText('Intenção enviada')).toBeVisible()
+    expect(within(hand).getByText('Lumos')).toBeVisible()
+    expect(screen.getByText('Ataque 0 · Influência 0')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
+    expect(submittedBodies[0]).toMatchObject({
+      card_id: 'instance:starter',
+      expected_state_version: 2,
+      targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
+      type: 'play_card',
+    })
+
+    acceptPlay(
+      new Response(
+        JSON.stringify({
+          projection: playedCardGameProjectionResponse(),
+          receipt: {
+            accepted_sequence: 2,
+            accepted_state_version: 3,
+            command_id: submittedPlayId,
+            expected_state_version: 2,
+            expires_at: '2026-09-10T13:00:00Z',
+            status: 'accepted',
+            type: 'play_card',
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' }, status: 200 },
+      ),
+    )
+
+    const playArea = await screen.findByRole('region', { name: 'Área de jogo' })
+    expect(await within(playArea).findByText('Lumos')).toBeVisible()
+    expect(screen.getByText('Ataque 2 · Influência 3')).toBeVisible()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Atacar Draco com 2' }))
+    await screen.findByText('Ação não aceita')
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Adquirir Nimbus 2000 por 2 de Influência' }),
+    )
+    await waitFor(() => expect(submittedBodies).toHaveLength(3))
+    expect(submittedBodies[1]).toMatchObject({
+      amount: 2,
+      expected_state_version: 3,
+      type: 'assign_attack',
+      villain_id: 'instance:villain',
+    })
+    expect(submittedBodies[2]).toMatchObject({
+      card_id: 'instance:market',
+      expected_state_version: 3,
+      type: 'acquire_card',
+    })
+  })
+
+  it('keeps a newer realtime projection after a delayed card-play response', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = heroActionGameProjectionResponse()
+    let acceptPlay = (_response: Response): void => undefined
+    const playResponse = new Promise<Response>((resolve) => {
+      acceptPlay = resolve
+    })
+    let submittedPlayId = ''
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        submittedPlayId = body.command_id
+        return playResponse
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    const pinia = createPinia()
+    const roomAccess = useRoomAccessStore(pinia)
+    render(App, { global: { plugins: [pinia] } })
+
+    const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    await waitFor(() =>
+      expect(screen.getByText('Atualizações em tempo real conectadas.')).toBeVisible(),
+    )
+    await fireEvent.click(screen.getByText('Ver versões do Snapshot'))
+    await fireEvent.click(within(hand).getByRole('radio', { name: 'Minerva - Harry' }))
+    void fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
+    await waitFor(() => expect(submittedPlayId).not.toBe(''))
+
+    const playedProjection = playedCardGameProjectionResponse()
+    const participants = playedProjection.participants.map((participant) =>
+      participant.position === 1
+        ? {
+            ...participant,
+            resources: { ...participant.resources, attack: 1 },
+          }
+        : participant,
+    )
+    const newerProjection = {
+      ...playedProjection,
+      participant: participants[0],
+      participants,
+      snapshot: {
+        ...playedProjection.snapshot,
+        cursor: 3,
+        digest: `blake3:${'a'.repeat(64)}`,
+        sequence: 3,
+        state_version: 4,
+      },
+      table: {
+        ...playedProjection.table,
+        active_villains: [
+          {
+            ...playedProjection.table.active_villains[0],
+            health: 1,
+            max_attack: 1,
+          },
+        ],
+      },
+    }
+    const socket = SynchronizedWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('the card-play race fixture requires an open socket')
+    }
+    socket.receive({
+      cursor: 3,
+      events: [
+        {
+          actor_position: 1,
+          card_id: 'instance:starter',
+          command_id: submittedPlayId,
+          effect_stop: 'stable',
+          effects: [],
+          event_version: 4,
+          prng_counter: 0,
+          sequence: 2,
+          state_version: 3,
+          targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
+          turn: 1,
+          type: 'card_played',
+        },
+        {
+          actor_position: 1,
+          amount: 1,
+          command_id: '8cbef381-3a98-4731-b16f-8b55db5e8f63',
+          effects: [],
+          event_version: 4,
+          sequence: 3,
+          state_version: 4,
+          turn: 1,
+          type: 'attack_assigned',
+          villain_id: 'instance:villain',
+        },
+      ],
+      from_cursor: 1,
+      projection: newerProjection,
+      protocol_version: 2,
+      type: 'events',
+    })
+
+    expect(await screen.findByText('v4 · sequência 3')).toBeVisible()
+    expect(screen.getByText('Ataque 1 · Influência 3')).toBeVisible()
+    acceptPlay(
+      new Response(
+        JSON.stringify({
+          projection: playedProjection,
+          receipt: {
+            accepted_sequence: 2,
+            accepted_state_version: 3,
+            command_id: submittedPlayId,
+            expected_state_version: 2,
+            expires_at: '2026-09-10T13:00:00Z',
+            status: 'accepted',
+            type: 'play_card',
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' }, status: 200 },
+      ),
+    )
+
+    expect(await screen.findByText('Recibo aceito no estado v3, sequência 2.')).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 3, name: 'Sua fase de ação' })).toHaveFocus(),
+    )
+    expect(roomAccess.game?.snapshot).toMatchObject({ sequence: 3, state_version: 4 })
+    expect(screen.getByText('v4 · sequência 3')).toBeVisible()
+    expect(screen.queryByText('v3 · sequência 2')).not.toBeInTheDocument()
+    expect(screen.getByText('Ataque 1 · Influência 3')).toBeVisible()
+  })
+
+  it('allows an optional single target to return to an empty selection', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const game = heroActionGameProjectionResponse()
+    const playableCard = game.legal_intentions.play_cards.at(0)
+    const targetSlot = playableCard?.target_slots.at(0)
+    if (!targetSlot) {
+      throw new Error('the optional-target fixture must expose one target slot')
+    }
+    targetSlot.min = 0
+    const submittedBodies: Array<Record<string, unknown>> = []
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(game), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        submittedBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>)
+        return Promise.resolve(
+          new Response(JSON.stringify(errorResponse('GAME_ACTION_NOT_ALLOWED')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    const target = within(hand).getByRole('checkbox', { name: 'Minerva - Harry' })
+    expect(within(hand).getByRole('group', { name: 'Alvo da carta (opcional)' })).toBeVisible()
+    expect(within(hand).getByRole('button', { name: 'Jogar Lumos' })).toBeEnabled()
+
+    await fireEvent.click(target)
+    expect(target).toBeChecked()
+    await fireEvent.click(target)
+    expect(target).not.toBeChecked()
+    await fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
+
+    await waitFor(() => expect(submittedBodies).toHaveLength(1))
+    expect(submittedBodies[0]).toMatchObject({
+      card_id: 'instance:starter',
+      targets: [{ selector_id: 'target:hero', target_ids: [] }],
+      type: 'play_card',
     })
   })
 
@@ -2835,5 +3323,287 @@ describe('application shell', () => {
     expect(screen.getByText('Ações do Herói')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Encerrar ações do Herói' })).toBeEnabled()
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+  })
+
+  it('prefers direct recovery renewal and makes host-assisted impersonation risk explicit', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const credentialResponse = (delivery: 'direct' | 'host_assisted') => ({
+      delivery,
+      participant: {
+        display_name: delivery === 'direct' ? 'Minerva' : 'Luna',
+        position: delivery === 'direct' ? 1 : 2,
+      },
+      recovery_generation: 2,
+      recovery_token: (delivery === 'direct' ? 'd' : 'e').repeat(64),
+      ...(delivery === 'host_assisted'
+        ? {
+            risk_message_key: 'participant.recovery.host_assisted_impersonation_risk',
+          }
+        : {}),
+      security_event: {
+        actor_position: 1,
+        cursor: delivery === 'direct' ? 9 : 3,
+        delivery,
+        event_version: 1,
+        occurred_at: '2026-09-04T18:00:00Z',
+        recovery_generation: 2,
+        target_position: delivery === 'direct' ? 1 : 2,
+        type: 'recovery_credential_regenerated',
+      },
+    })
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(readyHostLobbyResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session/recovery-credential') {
+        return Promise.resolve(
+          new Response(JSON.stringify(credentialResponse('direct')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session/recovery-password') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              password_generation: 2,
+              security_event: {
+                actor_position: 1,
+                cursor: 2,
+                event_version: 1,
+                occurred_at: '2026-09-04T18:01:00Z',
+                password_generation: 2,
+                type: 'recovery_password_rotated',
+              },
+            }),
+            { headers: { 'Content-Type': 'application/json' }, status: 200 },
+          ),
+        )
+      }
+      if (url === '/api/rooms/current/participants/2/recovery-credential') {
+        return Promise.resolve(
+          new Response(JSON.stringify(credentialResponse('host_assisted')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+
+    await fireEvent.click(screen.getByText('Gerenciar recuperação'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Gerar novo link para mim' }))
+    expect(await screen.findByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${'d'.repeat(64)}`,
+    )
+    const directCredentialHeading = screen.getByRole('heading', {
+      level: 3,
+      name: 'Novo link emitido para Minerva.',
+    })
+    await waitFor(() => expect(directCredentialHeading).toHaveFocus())
+    expect(
+      screen.getByText('Novo link confirmado. As cópias anteriores não funcionam mais.'),
+    ).toHaveAttribute('role', 'status')
+
+    const securitySocket = SynchronizedWebSocket.instances.find(
+      (socket) => socket.requestedProtocol === 'hogwarts.session.v1',
+    )
+    securitySocket?.receive({
+      cursor: 9,
+      events: [credentialResponse('direct').security_event],
+      protocol_version: 1,
+      type: 'security_snapshot',
+    })
+    expect(screen.getByLabelText('Link de recuperação')).toBeVisible()
+    securitySocket?.receive({
+      cursor: 1,
+      events: [
+        {
+          actor_position: 1,
+          cursor: 1,
+          event_version: 1,
+          occurred_at: '2026-09-04T18:01:00Z',
+          password_generation: 2,
+          type: 'recovery_password_rotated',
+        },
+      ],
+      protocol_version: 1,
+      type: 'security_snapshot',
+    })
+    expect(
+      await screen.findByText('A senha de recuperação foi alterada. Suas sessões continuam ativas.'),
+    ).toHaveAttribute('role', 'status')
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Link de recuperação')).not.toBeInTheDocument(),
+    )
+
+    await fireEvent.update(
+      screen.getByLabelText('Senha atual da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.update(
+      screen.getByLabelText('Nova senha de recuperação'),
+      'a newer uncommon recovery phrase',
+    )
+    const rotatePassword = screen.getByRole('button', { name: 'Alterar senha da sala' })
+    expect(rotatePassword).toBeDisabled()
+    await fireEvent.update(
+      screen.getByLabelText('Confirmar nova senha'),
+      'a different uncommon recovery phrase',
+    )
+    expect(screen.getByText('As novas senhas não coincidem.')).toHaveAttribute('role', 'alert')
+    expect(rotatePassword).toBeDisabled()
+    await fireEvent.update(
+      screen.getByLabelText('Confirmar nova senha'),
+      'a newer uncommon recovery phrase',
+    )
+    expect(screen.queryByText('As novas senhas não coincidem.')).not.toBeInTheDocument()
+    const showNewPasswords = screen.getByRole('button', { name: 'Mostrar novas senhas' })
+    expect(showNewPasswords).toHaveAttribute(
+      'aria-controls',
+      'new-room-recovery-password new-room-recovery-password-confirmation',
+    )
+    await fireEvent.click(showNewPasswords)
+    expect(screen.getByLabelText('Nova senha de recuperação')).toHaveAttribute('type', 'text')
+    expect(screen.getByLabelText('Confirmar nova senha')).toHaveAttribute('type', 'text')
+    await fireEvent.click(screen.getByRole('button', { name: 'Ocultar novas senhas' }))
+    expect(rotatePassword).toBeEnabled()
+    await fireEvent.click(rotatePassword)
+    expect(await screen.findByText('Senha da sala alterada.')).toBeVisible()
+    await Promise.resolve()
+    expect(screen.getByText('Senha da sala alterada.')).toBeVisible()
+
+    await fireEvent.click(screen.getByText('Ajudar participante sem acesso'))
+    expect(
+      screen.getByText(
+        'Quem receber o novo link e souber a senha da sala poderá assumir a participação escolhida.',
+      ),
+    ).toBeVisible()
+    const assistedParticipant = screen.getByLabelText('Participante sem acesso')
+    await fireEvent.update(assistedParticipant, '2')
+    expect(assistedParticipant).toHaveValue('2')
+    await fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Entendo que o link permite personificar este participante',
+      }),
+    )
+    const assistedButton = screen.getByRole('button', { name: 'Gerar link com assistência' })
+    expect(assistedButton).toBeEnabled()
+    await fireEvent.click(assistedButton)
+    await waitFor(() =>
+      expect(request.mock.calls.some(([url]) =>
+        String(url) === '/api/rooms/current/participants/2/recovery-credential'
+      )).toBe(true),
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+        `${window.location.origin}${window.location.pathname}#recovery=${'e'.repeat(64)}`,
+      ),
+    )
+    const assistedCredentialHeading = screen.getByRole('heading', {
+      level: 3,
+      name: 'Novo link emitido para Luna.',
+    })
+    expect(assistedCredentialHeading).toBeVisible()
+    await waitFor(() => expect(assistedCredentialHeading).toHaveFocus())
+  })
+
+  it('preserves the host link while an assisted link is delivered and prevents overwrites', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const hostToken = 'c'.repeat(64)
+    const assistedToken = 'e'.repeat(64)
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(readyHostLobbyResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/rooms/current/participants/2/recovery-credential') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              delivery: 'host_assisted',
+              participant: { display_name: 'Luna', position: 2 },
+              recovery_generation: 2,
+              recovery_token: assistedToken,
+              risk_message_key: 'participant.recovery.host_assisted_impersonation_risk',
+              security_event: {
+                actor_position: 1,
+                cursor: 1,
+                delivery: 'host_assisted',
+                event_version: 1,
+                occurred_at: '2026-09-04T18:00:00Z',
+                recovery_generation: 2,
+                target_position: 2,
+                type: 'recovery_credential_regenerated',
+              },
+            }),
+            { headers: { 'Content-Type': 'application/json' }, status: 200 },
+          ),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+    const pinia = createPinia()
+    useRoomAccessStore(pinia).issuedRecoveryToken = hostToken
+
+    render(App, { global: { plugins: [pinia] } })
+    await screen.findByRole('heading', { level: 2, name: 'Sala pronta' })
+    expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${hostToken}`,
+    )
+
+    await fireEvent.click(screen.getByText('Gerenciar recuperação'))
+    await fireEvent.click(screen.getByText('Ajudar participante sem acesso'))
+    await fireEvent.update(screen.getByLabelText('Participante sem acesso'), '2')
+    await fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Entendo que o link permite personificar este participante',
+      }),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Gerar link com assistência' }))
+    await waitFor(() =>
+      expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+        `${window.location.origin}${window.location.pathname}#recovery=${assistedToken}`,
+      ),
+    )
+    expect(screen.getByRole('button', { name: 'Gerar novo link para mim' })).toBeDisabled()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Já guardei o link' }))
+    expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${hostToken}`,
+    )
   })
 })

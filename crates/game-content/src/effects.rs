@@ -117,6 +117,9 @@ pub enum Condition {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Selector {
+    /// Stable binding key for a manually selected target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub zone: Zone,
     #[serde(default)]
     pub owner: TargetOwner,

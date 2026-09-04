@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CatalogId, ContentGap, ContentManifest, ContentSet, Effect, EffectRule, EntryKind,
-    FunctionalConfidence, FunctionalField, FunctionalProvenance, ImportFailure, ManifestEntry,
-    ProvenanceSource, RuleId, SourceKind,
+    FunctionalConfidence, FunctionalField, FunctionalProvenance, GameSetup, GameSetupEntity,
+    GameSetupOwner, ImportFailure, ManifestEntry, ProvenanceSource, RuleId, SourceKind, Zone,
 };
 
 const BASE_RECORD_COUNT: usize = 171;
 const BASE_CARD_COUNT: u32 = 252;
 const BUNDLE_SCHEMA_VERSION: u16 = 2;
-const MANIFEST_VERSION: u16 = 2;
+const MANIFEST_VERSION: u16 = 3;
 const REQUIRED_BASE_ENTRY_KINDS: [EntryKind; 12] = [
     EntryKind::Adventure,
     EntryKind::Catalog,
@@ -135,6 +135,12 @@ pub fn import_base_bundle_with_runtime_rules(
             kind: source.kind,
         })
         .collect();
+    let game_setups = bundle
+        .game_setups
+        .iter()
+        .filter(|setup| setup.is_proven(&source_kinds))
+        .map(CandidateGameSetup::to_manifest_setup)
+        .collect();
     let digest_input = ManifestDigestInput {
         manifest_version: MANIFEST_VERSION,
         bundle: &bundle,
@@ -162,6 +168,7 @@ pub fn import_base_bundle_with_runtime_rules(
             .filter(|rule| runtime_rules.contains(&rule.id))
             .cloned()
             .collect(),
+        game_setups,
         sources,
     })
 }
@@ -188,6 +195,8 @@ struct CandidateBundle {
     locale: String,
     sources: Vec<Source>,
     rules: Vec<EffectRule>,
+    #[serde(default)]
+    game_setups: Vec<CandidateGameSetup>,
     entries: Vec<CandidateEntry>,
 }
 
@@ -202,6 +211,11 @@ impl CandidateBundle {
                 .then(left.order.cmp(&right.order))
                 .then(left.id.cmp(&right.id))
         });
+        self.game_setups
+            .sort_by(|left, right| left.adventure_id.cmp(&right.adventure_id));
+        for setup in &mut self.game_setups {
+            setup.sources.sort();
+        }
         for entry in &mut self.entries {
             for source_ids in entry.provenance.values_mut() {
                 source_ids.sort();
@@ -251,6 +265,48 @@ impl CandidateBundle {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct CandidateGameSetup {
+    adventure_id: CatalogId,
+    confidence: FunctionalConfidence,
+    sources: Vec<String>,
+    entities: Vec<CandidateGameSetupEntity>,
+}
+
+impl CandidateGameSetup {
+    fn is_proven(&self, source_kinds: &BTreeMap<String, SourceKind>) -> bool {
+        has_trusted_provenance(self.confidence, &self.sources, source_kinds)
+    }
+
+    fn to_manifest_setup(&self) -> GameSetup {
+        GameSetup {
+            adventure_id: self.adventure_id.clone(),
+            confidence: self.confidence,
+            sources: self.sources.clone(),
+            entities: self
+                .entities
+                .iter()
+                .map(|entity| GameSetupEntity {
+                    catalog_id: entity.catalog_id.clone(),
+                    copies: entity.copies,
+                    zone: entity.zone,
+                    owner: entity.owner,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CandidateGameSetupEntity {
+    catalog_id: CatalogId,
+    copies: u16,
+    zone: Zone,
+    owner: GameSetupOwner,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Source {
     id: String,
     uri: String,
@@ -294,6 +350,7 @@ impl CandidateEntry {
                         confidence: definition.confidence,
                         sources: definition.sources.clone(),
                         rule_id: definition.rule.clone(),
+                        value: definition.value,
                     },
                 )
             })
@@ -321,7 +378,7 @@ impl CandidateEntry {
     ) -> bool {
         self.functional
             .get(&field)
-            .is_some_and(|definition| definition.is_proven(source_kinds, substantive_rules))
+            .is_some_and(|definition| definition.is_proven(field, source_kinds, substantive_rules))
     }
 }
 
@@ -331,30 +388,52 @@ struct FunctionalDefinition {
     confidence: FunctionalConfidence,
     sources: Vec<String>,
     rule: Option<RuleId>,
+    #[serde(default)]
+    value: Option<u16>,
 }
 
 impl FunctionalDefinition {
     fn is_proven(
         &self,
+        field: FunctionalField,
         source_kinds: &BTreeMap<String, SourceKind>,
         substantive_rules: &BTreeSet<RuleId>,
     ) -> bool {
-        let expected_source_kind = match self.confidence {
-            FunctionalConfidence::Adaptation => Some(SourceKind::Adaptation),
-            FunctionalConfidence::Official => Some(SourceKind::Official),
-            FunctionalConfidence::Validated => Some(SourceKind::Validated),
-            FunctionalConfidence::Candidate | FunctionalConfidence::Unknown => None,
+        let supported_definition = match field {
+            FunctionalField::Cost | FunctionalField::Health => {
+                self.value.is_some()
+                    || self
+                        .rule
+                        .as_ref()
+                        .is_some_and(|rule| substantive_rules.contains(rule))
+            }
+            _ => self
+                .rule
+                .as_ref()
+                .is_some_and(|rule| substantive_rules.contains(rule)),
         };
 
-        self.rule
-            .as_ref()
-            .is_some_and(|rule| substantive_rules.contains(rule))
-            && expected_source_kind.is_some_and(|expected| {
-                self.sources
-                    .iter()
-                    .any(|source_id| source_kinds.get(source_id) == Some(&expected))
-            })
+        supported_definition && has_trusted_provenance(self.confidence, &self.sources, source_kinds)
     }
+}
+
+fn has_trusted_provenance(
+    confidence: FunctionalConfidence,
+    sources: &[String],
+    source_kinds: &BTreeMap<String, SourceKind>,
+) -> bool {
+    let expected_source_kind = match confidence {
+        FunctionalConfidence::Adaptation => Some(SourceKind::Adaptation),
+        FunctionalConfidence::Official => Some(SourceKind::Official),
+        FunctionalConfidence::Validated => Some(SourceKind::Validated),
+        FunctionalConfidence::Candidate | FunctionalConfidence::Unknown => None,
+    };
+
+    expected_source_kind.is_some_and(|expected| {
+        sources
+            .iter()
+            .any(|source_id| source_kinds.get(source_id) == Some(&expected))
+    })
 }
 
 impl Effect {

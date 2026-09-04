@@ -61,6 +61,170 @@
         }
       }
     },
+    "RotateRecoveryPasswordRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_recovery_password", "new_recovery_password"],
+      "properties": {
+        "current_recovery_password": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "new_recovery_password": { "type": "string", "minLength": 12, "maxLength": 128 }
+      }
+    },
+    "RegenerateOwnRecoveryCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "RegenerateAssistedRecoveryCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_assistance_risk_acknowledged"],
+      "properties": {
+        "host_assistance_risk_acknowledged": { "type": "boolean", "enum": [true] }
+      }
+    },
+    "RecoveryParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "position"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "position": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "RecoveryPasswordRotatedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "password_generation",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["recovery_password_rotated"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "password_generation": { "type": "integer", "minimum": 2 },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RecoveryCredentialRegeneratedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "target_position",
+        "delivery",
+        "recovery_generation",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["recovery_credential_regenerated"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "delivery": { "type": "string", "enum": ["direct", "host_assisted"] },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RotateRecoveryPasswordResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["password_generation", "security_event"],
+      "properties": {
+        "password_generation": { "type": "integer", "minimum": 2 },
+        "security_event": { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" }
+      }
+    },
+    "DirectRecoveryCredentialResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "participant",
+        "recovery_generation",
+        "recovery_token",
+        "security_event"
+      ],
+      "properties": {
+        "delivery": { "type": "string", "enum": ["direct"] },
+        "participant": { "$ref": "#/$defs/RecoveryParticipant" },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "security_event": { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+      }
+    },
+    "AssistedRecoveryCredentialResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "participant",
+        "recovery_generation",
+        "recovery_token",
+        "risk_message_key",
+        "security_event"
+      ],
+      "properties": {
+        "delivery": { "type": "string", "enum": ["host_assisted"] },
+        "participant": { "$ref": "#/$defs/RecoveryParticipant" },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "risk_message_key": {
+          "type": "string",
+          "enum": ["participant.recovery.host_assisted_impersonation_risk"]
+        },
+        "security_event": { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+      }
+    },
+    "SecuritySnapshotMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "cursor", "events"],
+      "properties": {
+        "protocol_version": { "type": "integer", "enum": [1] },
+        "type": { "type": "string", "enum": ["security_snapshot"] },
+        "cursor": { "type": "integer", "minimum": 0 },
+        "events": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" },
+              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+            ]
+          }
+        }
+      }
+    },
+    "SecurityEventsMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "from_cursor", "cursor", "events"],
+      "properties": {
+        "protocol_version": { "type": "integer", "enum": [1] },
+        "type": { "type": "string", "enum": ["security_events"] },
+        "from_cursor": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "integer", "minimum": 0 },
+        "events": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" },
+              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+            ]
+          }
+        }
+      }
+    },
     "RecoverySessionSummary": {
       "type": "object",
       "additionalProperties": false,
@@ -122,6 +286,19 @@
         "ruleset_version": { "type": "string", "minLength": 1 }
       }
     },
+    "EffectTargetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector_id", "target_ids"],
+      "properties": {
+        "selector_id": { "type": "string", "minLength": 1 },
+        "target_ids": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "EndHeroActionsCommandRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -159,7 +336,46 @@
     "ExecuteGameCommandRequest": {
       "oneOf": [
         { "$ref": "#/$defs/EndHeroActionsCommandRequest" },
-        { "$ref": "#/$defs/ResolveChoiceCommandRequest" }
+        { "$ref": "#/$defs/ResolveChoiceCommandRequest" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command_id", "expected_state_version", "type", "card_id", "targets"],
+          "properties": {
+            "command_id": { "type": "string", "format": "uuid" },
+            "expected_state_version": { "type": "integer", "minimum": 1 },
+            "type": { "type": "string", "enum": ["play_card"] },
+            "card_id": { "type": "string", "minLength": 1 },
+            "targets": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": { "$ref": "#/$defs/EffectTargetBinding" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command_id", "expected_state_version", "type", "villain_id", "amount"],
+          "properties": {
+            "command_id": { "type": "string", "format": "uuid" },
+            "expected_state_version": { "type": "integer", "minimum": 1 },
+            "type": { "type": "string", "enum": ["assign_attack"] },
+            "villain_id": { "type": "string", "minLength": 1 },
+            "amount": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command_id", "expected_state_version", "type", "card_id"],
+          "properties": {
+            "command_id": { "type": "string", "format": "uuid" },
+            "expected_state_version": { "type": "integer", "minimum": 1 },
+            "type": { "type": "string", "enum": ["acquire_card"] },
+            "card_id": { "type": "string", "minLength": 1 }
+          }
+        }
       ]
     },
     "RoomSummary": {
@@ -543,6 +759,143 @@
         "influence": { "type": "integer", "minimum": 0, "maximum": 65535 }
       }
     },
+    "TargetOptionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_id", "label"],
+      "properties": {
+        "target_id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 }
+      }
+    },
+    "LegalTargetSlotSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector_id", "min", "max", "options"],
+      "properties": {
+        "selector_id": { "type": "string", "minLength": 1 },
+        "min": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "max": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "options": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/TargetOptionSummary" }
+        }
+      }
+    },
+    "LegalPlayCardSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_id", "target_slots"],
+      "properties": {
+        "card_id": { "type": "string", "minLength": 1 },
+        "target_slots": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/LegalTargetSlotSummary" }
+        }
+      }
+    },
+    "LegalAttackSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["villain_id", "max_amount"],
+      "properties": {
+        "villain_id": { "type": "string", "minLength": 1 },
+        "max_amount": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "LegalAcquisitionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_id", "cost"],
+      "properties": {
+        "card_id": { "type": "string", "minLength": 1 },
+        "cost": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
+    },
+    "LegalIntentionsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["end_hero_actions", "play_cards", "assign_attack", "acquire_cards"],
+      "properties": {
+        "end_hero_actions": { "type": "boolean" },
+        "play_cards": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/LegalPlayCardSummary" }
+        },
+        "assign_attack": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/LegalAttackSummary" }
+        },
+        "acquire_cards": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/LegalAcquisitionSummary" }
+        }
+      }
+    },
+    "CardSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "catalog_id", "name"],
+      "properties": {
+        "instance_id": { "type": "string", "minLength": 1 },
+        "catalog_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "MarketCardSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "catalog_id", "name", "cost", "affordable"],
+      "properties": {
+        "instance_id": { "type": "string", "minLength": 1 },
+        "catalog_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "cost": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "affordable": { "type": "boolean" }
+      }
+    },
+    "VillainSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "catalog_id", "name", "health", "attackable", "max_attack"],
+      "properties": {
+        "instance_id": { "type": "string", "minLength": 1 },
+        "catalog_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "health": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "attackable": { "type": "boolean" },
+        "max_attack": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
+    },
+    "TableSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hand",
+        "play_area",
+        "draw_pile_count",
+        "discard_pile_count",
+        "market",
+        "hogwarts_deck_count",
+        "active_villains",
+        "villain_deck_count"
+      ],
+      "properties": {
+        "hand": { "type": "array", "items": { "$ref": "#/$defs/CardSummary" } },
+        "play_area": { "type": "array", "items": { "$ref": "#/$defs/CardSummary" } },
+        "draw_pile_count": { "type": "integer", "minimum": 0 },
+        "discard_pile_count": { "type": "integer", "minimum": 0 },
+        "market": { "type": "array", "items": { "$ref": "#/$defs/MarketCardSummary" } },
+        "hogwarts_deck_count": { "type": "integer", "minimum": 0 },
+        "active_villains": { "type": "array", "items": { "$ref": "#/$defs/VillainSummary" } },
+        "villain_deck_count": { "type": "integer", "minimum": 0 }
+      }
+    },
     "EffectOutcomeSummary": {
       "oneOf": [
         {
@@ -826,13 +1179,14 @@
     "GameParticipant": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "role", "position", "hero", "resources"],
+      "required": ["display_name", "role", "position", "hero", "resources", "hand_count"],
       "properties": {
         "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
         "role": { "type": "string", "enum": ["host", "guest"] },
         "position": { "type": "integer", "minimum": 1, "maximum": 4 },
         "hero": { "$ref": "#/$defs/HeroSummary" },
-        "resources": { "$ref": "#/$defs/GameResources" }
+        "resources": { "$ref": "#/$defs/GameResources" },
+        "hand_count": { "type": "integer", "minimum": 0 }
       }
     },
     "GameProjectionResponse": {
@@ -845,6 +1199,8 @@
         "participant",
         "participants",
         "legal_actions",
+        "legal_intentions",
+        "table",
         "choice",
         "queued_phases",
         "queued_effect_count",
@@ -864,9 +1220,17 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["end_hero_actions", "resolve_choice"]
+            "enum": [
+              "end_hero_actions",
+              "resolve_choice",
+              "play_card",
+              "assign_attack",
+              "acquire_card"
+            ]
           }
         },
+        "legal_intentions": { "$ref": "#/$defs/LegalIntentionsSummary" },
+        "table": { "$ref": "#/$defs/TableSummary" },
         "choice": { "$ref": "#/$defs/ChoiceSummary" },
         "queued_phases": {
           "type": "array",
@@ -1746,17 +2110,74 @@
     },
     "RealtimeGameEvent": {
       "oneOf": [
+        { "$ref": "#/$defs/DarkArtsCompletedRealtimeGameEvent" },
+        { "$ref": "#/$defs/ChoiceResolvedRealtimeGameEvent" },
+        { "$ref": "#/$defs/LegacyChoiceResolvedRealtimeGameEvent" },
+        { "$ref": "#/$defs/TurnCompletedRealtimeGameEvent" },
         {
-          "$ref": "#/$defs/DarkArtsCompletedRealtimeGameEvent"
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_version", "type", "sequence", "state_version", "turn", "actor_position", "card_id", "targets", "effects", "effect_stop", "prng_counter"],
+          "properties": {
+            "event_version": { "type": "integer", "enum": [4] },
+            "type": { "type": "string", "enum": ["card_played"] },
+            "sequence": { "type": "integer", "minimum": 1 },
+            "state_version": { "type": "integer", "minimum": 2 },
+            "turn": { "type": "integer", "minimum": 1 },
+            "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+            "card_id": { "type": "string", "minLength": 1 },
+            "targets": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectTargetBinding" } },
+            "effects": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectOutcomeSummary" } },
+            "effect_stop": { "type": "string", "enum": ["stable", "choice", "terminal"] },
+            "choice": { "$ref": "#/$defs/PendingChoiceSummary" },
+            "prng_counter": { "type": "integer", "minimum": 0 },
+            "command_id": { "type": "string", "format": "uuid" }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": ["effect_stop"],
+                "properties": { "effect_stop": { "const": "choice" } }
+              },
+              "then": { "required": ["choice"] },
+              "else": { "not": { "required": ["choice"] } }
+            }
+          ]
         },
         {
-          "$ref": "#/$defs/LegacyChoiceResolvedRealtimeGameEvent"
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_version", "type", "sequence", "state_version", "turn", "actor_position", "villain_id", "amount", "effects"],
+          "properties": {
+            "event_version": { "type": "integer", "enum": [4] },
+            "type": { "type": "string", "enum": ["attack_assigned"] },
+            "sequence": { "type": "integer", "minimum": 1 },
+            "state_version": { "type": "integer", "minimum": 2 },
+            "turn": { "type": "integer", "minimum": 1 },
+            "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+            "villain_id": { "type": "string", "minLength": 1 },
+            "amount": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "effects": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectOutcomeSummary" } },
+            "command_id": { "type": "string", "format": "uuid" }
+          }
         },
         {
-          "$ref": "#/$defs/TurnCompletedRealtimeGameEvent"
-        },
-        {
-          "$ref": "#/$defs/ChoiceResolvedRealtimeGameEvent"
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_version", "type", "sequence", "state_version", "turn", "actor_position", "card_id", "cost", "effects"],
+          "properties": {
+            "event_version": { "type": "integer", "enum": [4] },
+            "type": { "type": "string", "enum": ["card_acquired"] },
+            "sequence": { "type": "integer", "minimum": 1 },
+            "state_version": { "type": "integer", "minimum": 2 },
+            "turn": { "type": "integer", "minimum": 1 },
+            "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+            "card_id": { "type": "string", "minLength": 1 },
+            "cost": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "refill_card_id": { "type": "string", "minLength": 1 },
+            "effects": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/EffectOutcomeSummary" } },
+            "command_id": { "type": "string", "format": "uuid" }
+          }
         }
       ]
     },
@@ -1863,7 +2284,13 @@
         "command_id": { "type": "string", "format": "uuid" },
         "type": {
           "type": "string",
-          "enum": ["end_hero_actions", "resolve_choice"]
+          "enum": [
+            "end_hero_actions",
+            "resolve_choice",
+            "play_card",
+            "assign_attack",
+            "acquire_card"
+          ]
         },
         "status": { "type": "string", "enum": ["accepted"] },
         "expected_state_version": { "type": "integer", "minimum": 1 },

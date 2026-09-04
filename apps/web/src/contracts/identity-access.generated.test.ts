@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  isAssistedRecoveryCredentialResponse,
   isDecisionPointSummary,
+  isDirectRecoveryCredentialResponse,
   isEffectOutcomeSummary,
   isEffectPathSegmentSummary,
   isEndTurnOutcomeSummary,
   isErrorResponse,
   isExecuteGameCommandRequest,
   isGameProjectionResponse,
+  isRegenerateAssistedRecoveryCredentialRequest,
   isRealtimeGameEvent,
   isRealtimePresenceMessage,
+  isRotateRecoveryPasswordResponse,
+  isSecurityEventsMessage,
   isRecoveredLobbyResponse,
   isRecoveryReplacementRequiredResponse,
 } from './identity-access.generated'
@@ -25,6 +30,12 @@ function projection() {
       status: 'in_progress',
     },
     legal_actions: ['end_hero_actions'],
+    legal_intentions: {
+      acquire_cards: [],
+      assign_attack: [],
+      end_hero_actions: true,
+      play_cards: [],
+    },
     queued_effect_count: 0,
     queued_phases: ['end_turn'],
     participant: {
@@ -33,6 +44,7 @@ function projection() {
       position: 1,
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
+      hand_count: 0,
     },
     participants: [
       {
@@ -41,6 +53,7 @@ function projection() {
         position: 1,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
+        hand_count: 0,
       },
     ],
     snapshot: {
@@ -58,6 +71,16 @@ function projection() {
         sampling: 'rejection-sampling-v1',
         shuffle: 'fisher-yates-v1',
       },
+    },
+    table: {
+      active_villains: [],
+      discard_pile_count: 0,
+      draw_pile_count: 0,
+      hand: [],
+      hogwarts_deck_count: 0,
+      market: [],
+      play_area: [],
+      villain_deck_count: 0,
     },
     turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }
@@ -108,6 +131,13 @@ describe('generated identity contract guards', () => {
       state_version: 3,
       turn: 1,
       type: 'choice_resolved',
+    }
+    const cardEvent = {
+      ...darkArtsEvent,
+      card_id: 'instance:starter:1',
+      event_version: 4,
+      targets: [],
+      type: 'card_played',
     }
 
     expect(isExecuteGameCommandRequest(command)).toBe(true)
@@ -253,6 +283,16 @@ describe('generated identity contract guards', () => {
         event_version: 2,
       }),
     ).toBe(true)
+    expect(isRealtimeGameEvent(cardEvent)).toBe(true)
+    expect(isRealtimeGameEvent({ ...cardEvent, effect_stop: 'choice' })).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...cardEvent,
+        choice,
+        effect_stop: 'choice',
+      }),
+    ).toBe(true)
+    expect(isRealtimeGameEvent({ ...cardEvent, choice })).toBe(false)
   })
 
   it('validates every field in the public error envelope', () => {
@@ -289,6 +329,62 @@ describe('generated identity contract guards', () => {
     ).toBe(false)
   })
 
+  it('validates each command shape without accepting fields from another command', () => {
+    const common = {
+      command_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+      expected_state_version: 2,
+    }
+
+    expect(isExecuteGameCommandRequest({ ...common, type: 'end_hero_actions' })).toBe(true)
+    expect(
+      isExecuteGameCommandRequest({
+        ...common,
+        card_id: 'instance:00000001',
+        targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
+        type: 'play_card',
+      }),
+    ).toBe(true)
+    expect(
+      isExecuteGameCommandRequest({
+        ...common,
+        amount: 1,
+        type: 'assign_attack',
+        villain_id: 'instance:00000002',
+      }),
+    ).toBe(true)
+    expect(
+      isExecuteGameCommandRequest({
+        ...common,
+        card_id: 'instance:00000003',
+        type: 'acquire_card',
+      }),
+    ).toBe(true)
+    expect(isExecuteGameCommandRequest({ ...common, type: 'play_card' })).toBe(false)
+    expect(
+      isExecuteGameCommandRequest({
+        ...common,
+        card_id: 'instance:00000003',
+        type: 'end_hero_actions',
+      }),
+    ).toBe(false)
+  })
+
+  it('accepts the command-specific realtime event shapes', () => {
+    expect(
+      isRealtimeGameEvent({
+        actor_position: 1,
+        amount: 1,
+        effects: [],
+        event_version: 4,
+        sequence: 2,
+        state_version: 3,
+        turn: 1,
+        type: 'attack_assigned',
+        villain_id: 'instance:00000002',
+      }),
+    ).toBe(true)
+  })
+
   it('validates ephemeral presence without accepting official state fields', () => {
     const presence = {
       blocked: true,
@@ -308,6 +404,79 @@ describe('generated identity contract guards', () => {
       isRealtimePresenceMessage({
         ...presence,
         participants: [{ position: 1, status: 'unknown' }],
+      }),
+    ).toBe(false)
+  })
+
+  it('keeps recovery management responses and security notices strictly secretless', () => {
+    const regeneratedEvent = {
+      actor_position: 1,
+      cursor: 2,
+      delivery: 'host_assisted',
+      event_version: 1,
+      occurred_at: '2026-09-04T18:00:00Z',
+      recovery_generation: 2,
+      target_position: 2,
+      type: 'recovery_credential_regenerated',
+    }
+    const assisted = {
+      delivery: 'host_assisted',
+      participant: { display_name: 'Luna', position: 2 },
+      recovery_generation: 2,
+      recovery_token: 'a'.repeat(64),
+      risk_message_key: 'participant.recovery.host_assisted_impersonation_risk',
+      security_event: regeneratedEvent,
+    }
+    const direct = {
+      delivery: 'direct',
+      participant: { display_name: 'Minerva', position: 1 },
+      recovery_generation: 2,
+      recovery_token: 'b'.repeat(64),
+      security_event: { ...regeneratedEvent, actor_position: 1, delivery: 'direct', target_position: 1 },
+    }
+    const passwordEvent = {
+      actor_position: 1,
+      cursor: 1,
+      event_version: 1,
+      occurred_at: '2026-09-04T17:59:00Z',
+      password_generation: 2,
+      type: 'recovery_password_rotated',
+    }
+
+    expect(isAssistedRecoveryCredentialResponse(assisted)).toBe(true)
+    expect(isDirectRecoveryCredentialResponse(direct)).toBe(true)
+    expect(
+      isRotateRecoveryPasswordResponse({
+        password_generation: 2,
+        security_event: passwordEvent,
+      }),
+    ).toBe(true)
+    expect(
+      isSecurityEventsMessage({
+        cursor: 2,
+        events: [passwordEvent, regeneratedEvent],
+        from_cursor: 0,
+        protocol_version: 1,
+        type: 'security_events',
+      }),
+    ).toBe(true)
+    expect(
+      isSecurityEventsMessage({
+        cursor: 2,
+        events: [{ ...passwordEvent, recovery_token: 'secret' }],
+        from_cursor: 0,
+        protocol_version: 1,
+        type: 'security_events',
+      }),
+    ).toBe(false)
+    expect(
+      isRegenerateAssistedRecoveryCredentialRequest({
+        host_assistance_risk_acknowledged: true,
+      }),
+    ).toBe(true)
+    expect(
+      isRegenerateAssistedRecoveryCredentialRequest({
+        host_assistance_risk_acknowledged: false,
       }),
     ).toBe(false)
   })

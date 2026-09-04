@@ -62,12 +62,19 @@ function projection(cursor = 0): GameProjectionResponse {
     legal_actions: activePosition === 1 ? ['end_hero_actions'] : [],
     queued_effect_count: 0,
     queued_phases: ['end_turn'],
+    legal_intentions: {
+      acquire_cards: [],
+      assign_attack: [],
+      end_hero_actions: activePosition === 1,
+      play_cards: [],
+    },
     participant: {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
+      hand_count: 0,
     },
     participants: [
       {
@@ -76,6 +83,7 @@ function projection(cursor = 0): GameProjectionResponse {
         position: 1,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
+        hand_count: 0,
       },
       {
         display_name: 'Luna',
@@ -83,6 +91,7 @@ function projection(cursor = 0): GameProjectionResponse {
         position: 2,
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
+        hand_count: 0,
       },
     ],
     snapshot: {
@@ -100,6 +109,16 @@ function projection(cursor = 0): GameProjectionResponse {
         sampling: 'rejection-sampling-v1',
         shuffle: 'fisher-yates-v1',
       },
+    },
+    table: {
+      active_villains: [],
+      discard_pile_count: 0,
+      draw_pile_count: 0,
+      hand: [],
+      hogwarts_deck_count: 0,
+      market: [],
+      play_area: [],
+      villain_deck_count: 0,
     },
     turn: {
       active_position: activePosition,

@@ -33,6 +33,79 @@ export interface RecoverParticipationRequest {
   replace_session_id?: string
 }
 
+export interface RotateRecoveryPasswordRequest {
+  current_recovery_password: string
+  new_recovery_password: string
+}
+
+export type RegenerateOwnRecoveryCredentialRequest = Record<string, never>
+
+export interface RegenerateAssistedRecoveryCredentialRequest {
+  host_assistance_risk_acknowledged: true
+}
+
+export interface RecoveryParticipant {
+  display_name: string
+  position: number
+}
+
+export interface RecoveryPasswordRotatedSecurityEvent {
+  event_version: 1
+  cursor: number
+  type: "recovery_password_rotated"
+  actor_position: number
+  password_generation: number
+  occurred_at: string
+}
+
+export interface RecoveryCredentialRegeneratedSecurityEvent {
+  event_version: 1
+  cursor: number
+  type: "recovery_credential_regenerated"
+  actor_position: number
+  target_position: number
+  delivery: "direct" | "host_assisted"
+  recovery_generation: number
+  occurred_at: string
+}
+
+export interface RotateRecoveryPasswordResponse {
+  password_generation: number
+  security_event: RecoveryPasswordRotatedSecurityEvent
+}
+
+export interface DirectRecoveryCredentialResponse {
+  delivery: "direct"
+  participant: RecoveryParticipant
+  recovery_generation: number
+  recovery_token: string
+  security_event: RecoveryCredentialRegeneratedSecurityEvent
+}
+
+export interface AssistedRecoveryCredentialResponse {
+  delivery: "host_assisted"
+  participant: RecoveryParticipant
+  recovery_generation: number
+  recovery_token: string
+  risk_message_key: "participant.recovery.host_assisted_impersonation_risk"
+  security_event: RecoveryCredentialRegeneratedSecurityEvent
+}
+
+export interface SecuritySnapshotMessage {
+  protocol_version: 1
+  type: "security_snapshot"
+  cursor: number
+  events: Array<RecoveryPasswordRotatedSecurityEvent | RecoveryCredentialRegeneratedSecurityEvent>
+}
+
+export interface SecurityEventsMessage {
+  protocol_version: 1
+  type: "security_events"
+  from_cursor: number
+  cursor: number
+  events: Array<RecoveryPasswordRotatedSecurityEvent | RecoveryCredentialRegeneratedSecurityEvent>
+}
+
 export interface RecoverySessionSummary {
   id: string
   label: "Sessão 1" | "Sessão 2"
@@ -62,6 +135,11 @@ export interface StartGameRequest {
   ruleset_version: string
 }
 
+export interface EffectTargetBinding {
+  selector_id: string
+  target_ids: Array<string>
+}
+
 export interface EndHeroActionsCommandRequest {
   command_id: string
   expected_state_version: number
@@ -79,6 +157,26 @@ export interface ResolveChoiceCommandRequest {
 export type ExecuteGameCommandRequest =
   | EndHeroActionsCommandRequest
   | ResolveChoiceCommandRequest
+  | {
+    command_id: string
+    expected_state_version: number
+    type: "play_card"
+    card_id: string
+    targets: Array<EffectTargetBinding>
+  }
+  | {
+    command_id: string
+    expected_state_version: number
+    type: "assign_attack"
+    villain_id: string
+    amount: number
+  }
+  | {
+    command_id: string
+    expected_state_version: number
+    type: "acquire_card"
+    card_id: string
+  }
 
 export interface RoomSummary {
   code: string
@@ -244,6 +342,74 @@ export interface GameResources {
   influence: number
 }
 
+export interface TargetOptionSummary {
+  target_id: string
+  label: string
+}
+
+export interface LegalTargetSlotSummary {
+  selector_id: string
+  min: number
+  max: number
+  options: Array<TargetOptionSummary>
+}
+
+export interface LegalPlayCardSummary {
+  card_id: string
+  target_slots: Array<LegalTargetSlotSummary>
+}
+
+export interface LegalAttackSummary {
+  villain_id: string
+  max_amount: number
+}
+
+export interface LegalAcquisitionSummary {
+  card_id: string
+  cost: number
+}
+
+export interface LegalIntentionsSummary {
+  end_hero_actions: boolean
+  play_cards: Array<LegalPlayCardSummary>
+  assign_attack: Array<LegalAttackSummary>
+  acquire_cards: Array<LegalAcquisitionSummary>
+}
+
+export interface CardSummary {
+  instance_id: string
+  catalog_id: string
+  name: string
+}
+
+export interface MarketCardSummary {
+  instance_id: string
+  catalog_id: string
+  name: string
+  cost: number
+  affordable: boolean
+}
+
+export interface VillainSummary {
+  instance_id: string
+  catalog_id: string
+  name: string
+  health: number
+  attackable: boolean
+  max_attack: number
+}
+
+export interface TableSummary {
+  hand: Array<CardSummary>
+  play_area: Array<CardSummary>
+  draw_pile_count: number
+  discard_pile_count: number
+  market: Array<MarketCardSummary>
+  hogwarts_deck_count: number
+  active_villains: Array<VillainSummary>
+  villain_deck_count: number
+}
+
 export type EffectOutcomeSummary =
   | {
     type: "die_rolled"
@@ -364,6 +530,7 @@ export interface GameParticipant {
   position: number
   hero: HeroSummary
   resources: GameResources
+  hand_count: number
 }
 
 export interface GameProjectionResponse {
@@ -372,7 +539,9 @@ export interface GameProjectionResponse {
   turn: TurnSummary
   participant: GameParticipant
   participants: Array<GameParticipant>
-  legal_actions: Array<"end_hero_actions" | "resolve_choice">
+  legal_actions: Array<"end_hero_actions" | "resolve_choice" | "play_card" | "assign_attack" | "acquire_card">
+  legal_intentions: LegalIntentionsSummary
+  table: TableSummary
   choice: ChoiceSummary
   queued_phases: Array<"dark_arts" | "villains" | "hero_actions" | "end_turn">
   queued_effect_count: number
@@ -534,9 +703,49 @@ export interface ChoiceResolvedRealtimeGameEvent {
 
 export type RealtimeGameEvent =
   | DarkArtsCompletedRealtimeGameEvent
+  | ChoiceResolvedRealtimeGameEvent
   | LegacyChoiceResolvedRealtimeGameEvent
   | TurnCompletedRealtimeGameEvent
-  | ChoiceResolvedRealtimeGameEvent
+  | {
+    event_version: 4
+    type: "card_played"
+    sequence: number
+    state_version: number
+    turn: number
+    actor_position: number
+    card_id: string
+    targets: Array<EffectTargetBinding>
+    effects: Array<EffectOutcomeSummary>
+    effect_stop: "stable" | "choice" | "terminal"
+    choice?: PendingChoiceSummary
+    prng_counter: number
+    command_id?: string
+  }
+  | {
+    event_version: 4
+    type: "attack_assigned"
+    sequence: number
+    state_version: number
+    turn: number
+    actor_position: number
+    villain_id: string
+    amount: number
+    effects: Array<EffectOutcomeSummary>
+    command_id?: string
+  }
+  | {
+    event_version: 4
+    type: "card_acquired"
+    sequence: number
+    state_version: number
+    turn: number
+    actor_position: number
+    card_id: string
+    cost: number
+    refill_card_id?: string
+    effects: Array<EffectOutcomeSummary>
+    command_id?: string
+  }
 
 export interface RealtimeSnapshotMessage {
   protocol_version: 2
@@ -578,7 +787,7 @@ export interface RealtimeEventBatchMessage {
 
 export interface GameCommandReceipt {
   command_id: string
-  type: "end_hero_actions" | "resolve_choice"
+  type: "end_hero_actions" | "resolve_choice" | "play_card" | "assign_attack" | "acquire_card"
   status: "accepted"
   expected_state_version: number
   accepted_state_version: number
@@ -662,6 +871,50 @@ export function isRecoverParticipationRequest(value: unknown): value is RecoverP
   return isRecord(value) && Object.keys(value).every((key) => ["recovery_token","recovery_password","recovery_attempt_id","replace_session_id"].includes(key)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["recovery_password"] === 'string' && [...value["recovery_password"]].length >= 1 && [...value["recovery_password"]].length <= 128 && typeof value["recovery_attempt_id"] === 'string' && isUuid(value["recovery_attempt_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["recovery_attempt_id"]) && (!Object.hasOwn(value, "replace_session_id") || (typeof value["replace_session_id"] === 'string' && isUuid(value["replace_session_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["replace_session_id"])))
 }
 
+export function isRotateRecoveryPasswordRequest(value: unknown): value is RotateRecoveryPasswordRequest {
+  return isRecord(value) && Object.keys(value).every((key) => ["current_recovery_password","new_recovery_password"].includes(key)) && typeof value["current_recovery_password"] === 'string' && [...value["current_recovery_password"]].length >= 1 && [...value["current_recovery_password"]].length <= 128 && typeof value["new_recovery_password"] === 'string' && [...value["new_recovery_password"]].length >= 12 && [...value["new_recovery_password"]].length <= 128
+}
+
+export function isRegenerateOwnRecoveryCredentialRequest(value: unknown): value is RegenerateOwnRecoveryCredentialRequest {
+  return isRecord(value) && Object.keys(value).length === 0
+}
+
+export function isRegenerateAssistedRecoveryCredentialRequest(value: unknown): value is RegenerateAssistedRecoveryCredentialRequest {
+  return isRecord(value) && Object.keys(value).every((key) => ["host_assistance_risk_acknowledged"].includes(key)) && typeof value["host_assistance_risk_acknowledged"] === 'boolean' && (value["host_assistance_risk_acknowledged"] === true)
+}
+
+export function isRecoveryParticipant(value: unknown): value is RecoveryParticipant {
+  return isRecord(value) && Object.keys(value).every((key) => ["display_name","position"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4
+}
+
+export function isRecoveryPasswordRotatedSecurityEvent(value: unknown): value is RecoveryPasswordRotatedSecurityEvent {
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","cursor","type","actor_position","password_generation","occurred_at"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1) && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "recovery_password_rotated") && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["password_generation"] === 'number' && Number.isInteger(value["password_generation"]) && value["password_generation"] >= 2 && typeof value["occurred_at"] === 'string' && isRfc3339DateTime(value["occurred_at"])
+}
+
+export function isRecoveryCredentialRegeneratedSecurityEvent(value: unknown): value is RecoveryCredentialRegeneratedSecurityEvent {
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","cursor","type","actor_position","target_position","delivery","recovery_generation","occurred_at"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1) && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "recovery_credential_regenerated") && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["target_position"] === 'number' && Number.isInteger(value["target_position"]) && value["target_position"] >= 1 && value["target_position"] <= 4 && typeof value["delivery"] === 'string' && (value["delivery"] === "direct" || value["delivery"] === "host_assisted") && typeof value["recovery_generation"] === 'number' && Number.isInteger(value["recovery_generation"]) && value["recovery_generation"] >= 2 && typeof value["occurred_at"] === 'string' && isRfc3339DateTime(value["occurred_at"])
+}
+
+export function isRotateRecoveryPasswordResponse(value: unknown): value is RotateRecoveryPasswordResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["password_generation","security_event"].includes(key)) && typeof value["password_generation"] === 'number' && Number.isInteger(value["password_generation"]) && value["password_generation"] >= 2 && isRecoveryPasswordRotatedSecurityEvent(value["security_event"])
+}
+
+export function isDirectRecoveryCredentialResponse(value: unknown): value is DirectRecoveryCredentialResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["delivery","participant","recovery_generation","recovery_token","security_event"].includes(key)) && typeof value["delivery"] === 'string' && (value["delivery"] === "direct") && isRecoveryParticipant(value["participant"]) && typeof value["recovery_generation"] === 'number' && Number.isInteger(value["recovery_generation"]) && value["recovery_generation"] >= 2 && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && isRecoveryCredentialRegeneratedSecurityEvent(value["security_event"])
+}
+
+export function isAssistedRecoveryCredentialResponse(value: unknown): value is AssistedRecoveryCredentialResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["delivery","participant","recovery_generation","recovery_token","risk_message_key","security_event"].includes(key)) && typeof value["delivery"] === 'string' && (value["delivery"] === "host_assisted") && isRecoveryParticipant(value["participant"]) && typeof value["recovery_generation"] === 'number' && Number.isInteger(value["recovery_generation"]) && value["recovery_generation"] >= 2 && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["risk_message_key"] === 'string' && (value["risk_message_key"] === "participant.recovery.host_assisted_impersonation_risk") && isRecoveryCredentialRegeneratedSecurityEvent(value["security_event"])
+}
+
+export function isSecuritySnapshotMessage(value: unknown): value is SecuritySnapshotMessage {
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","events"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "security_snapshot") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && Array.isArray(value["events"]) && value["events"].every((entry) => [(isRecoveryPasswordRotatedSecurityEvent(entry)),(isRecoveryCredentialRegeneratedSecurityEvent(entry))].filter(Boolean).length === 1)
+}
+
+export function isSecurityEventsMessage(value: unknown): value is SecurityEventsMessage {
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","from_cursor","cursor","events"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "security_events") && typeof value["from_cursor"] === 'number' && Number.isInteger(value["from_cursor"]) && value["from_cursor"] >= 0 && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && Array.isArray(value["events"]) && value["events"].every((entry) => [(isRecoveryPasswordRotatedSecurityEvent(entry)),(isRecoveryCredentialRegeneratedSecurityEvent(entry))].filter(Boolean).length === 1)
+}
+
 export function isRecoverySessionSummary(value: unknown): value is RecoverySessionSummary {
   return isRecord(value) && Object.keys(value).every((key) => ["id","label","created_at"].includes(key)) && typeof value["id"] === 'string' && isUuid(value["id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["id"]) && typeof value["label"] === 'string' && (value["label"] === "Sessão 1" || value["label"] === "Sessão 2") && typeof value["created_at"] === 'string' && isRfc3339DateTime(value["created_at"])
 }
@@ -682,6 +935,10 @@ export function isStartGameRequest(value: unknown): value is StartGameRequest {
   return isRecord(value) && Object.keys(value).every((key) => ["adventure_id","manifest_digest","ruleset_version"].includes(key)) && typeof value["adventure_id"] === 'string' && [...value["adventure_id"]].length >= 1 && typeof value["manifest_digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["manifest_digest"]) && typeof value["ruleset_version"] === 'string' && [...value["ruleset_version"]].length >= 1
 }
 
+export function isEffectTargetBinding(value: unknown): value is EffectTargetBinding {
+  return isRecord(value) && Object.keys(value).every((key) => ["selector_id","target_ids"].includes(key)) && typeof value["selector_id"] === 'string' && [...value["selector_id"]].length >= 1 && Array.isArray(value["target_ids"]) && value["target_ids"].every((entry) => typeof entry === 'string' && [...entry].length >= 1) && value["target_ids"].length <= 4096
+}
+
 export function isEndHeroActionsCommandRequest(value: unknown): value is EndHeroActionsCommandRequest {
   return isRecord(value) && Object.keys(value).every((key) => ["command_id","expected_state_version","type"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "end_hero_actions")
 }
@@ -691,7 +948,7 @@ export function isResolveChoiceCommandRequest(value: unknown): value is ResolveC
 }
 
 export function isExecuteGameCommandRequest(value: unknown): value is ExecuteGameCommandRequest {
-  return [(isEndHeroActionsCommandRequest(value)),(isResolveChoiceCommandRequest(value))].filter(Boolean).length === 1
+  return [(isEndHeroActionsCommandRequest(value)),(isResolveChoiceCommandRequest(value)),(isRecord(value) && Object.keys(value).every((key) => ["command_id","expected_state_version","type","card_id","targets"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "play_card") && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && Array.isArray(value["targets"]) && value["targets"].every((entry) => isEffectTargetBinding(entry)) && value["targets"].length <= 4096),(isRecord(value) && Object.keys(value).every((key) => ["command_id","expected_state_version","type","villain_id","amount"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "assign_attack") && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1 && typeof value["amount"] === 'number' && Number.isInteger(value["amount"]) && value["amount"] >= 1 && value["amount"] <= 65535),(isRecord(value) && Object.keys(value).every((key) => ["command_id","expected_state_version","type","card_id"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["type"] === 'string' && (value["type"] === "acquire_card") && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1)].filter(Boolean).length === 1
 }
 
 export function isRoomSummary(value: unknown): value is RoomSummary {
@@ -778,6 +1035,46 @@ export function isGameResources(value: unknown): value is GameResources {
   return isRecord(value) && Object.keys(value).every((key) => ["health","attack","influence"].includes(key)) && typeof value["health"] === 'number' && Number.isInteger(value["health"]) && value["health"] >= 0 && value["health"] <= 65535 && typeof value["attack"] === 'number' && Number.isInteger(value["attack"]) && value["attack"] >= 0 && value["attack"] <= 65535 && typeof value["influence"] === 'number' && Number.isInteger(value["influence"]) && value["influence"] >= 0 && value["influence"] <= 65535
 }
 
+export function isTargetOptionSummary(value: unknown): value is TargetOptionSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["target_id","label"].includes(key)) && typeof value["target_id"] === 'string' && [...value["target_id"]].length >= 1 && typeof value["label"] === 'string' && [...value["label"]].length >= 1
+}
+
+export function isLegalTargetSlotSummary(value: unknown): value is LegalTargetSlotSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["selector_id","min","max","options"].includes(key)) && typeof value["selector_id"] === 'string' && [...value["selector_id"]].length >= 1 && typeof value["min"] === 'number' && Number.isInteger(value["min"]) && value["min"] >= 0 && value["min"] <= 65535 && typeof value["max"] === 'number' && Number.isInteger(value["max"]) && value["max"] >= 0 && value["max"] <= 65535 && Array.isArray(value["options"]) && value["options"].every((entry) => isTargetOptionSummary(entry)) && value["options"].length <= 4096
+}
+
+export function isLegalPlayCardSummary(value: unknown): value is LegalPlayCardSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["card_id","target_slots"].includes(key)) && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && Array.isArray(value["target_slots"]) && value["target_slots"].every((entry) => isLegalTargetSlotSummary(entry)) && value["target_slots"].length <= 4096
+}
+
+export function isLegalAttackSummary(value: unknown): value is LegalAttackSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["villain_id","max_amount"].includes(key)) && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1 && typeof value["max_amount"] === 'number' && Number.isInteger(value["max_amount"]) && value["max_amount"] >= 1 && value["max_amount"] <= 65535
+}
+
+export function isLegalAcquisitionSummary(value: unknown): value is LegalAcquisitionSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["card_id","cost"].includes(key)) && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["cost"] === 'number' && Number.isInteger(value["cost"]) && value["cost"] >= 0 && value["cost"] <= 65535
+}
+
+export function isLegalIntentionsSummary(value: unknown): value is LegalIntentionsSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["end_hero_actions","play_cards","assign_attack","acquire_cards"].includes(key)) && typeof value["end_hero_actions"] === 'boolean' && Array.isArray(value["play_cards"]) && value["play_cards"].every((entry) => isLegalPlayCardSummary(entry)) && value["play_cards"].length <= 4096 && Array.isArray(value["assign_attack"]) && value["assign_attack"].every((entry) => isLegalAttackSummary(entry)) && value["assign_attack"].length <= 4096 && Array.isArray(value["acquire_cards"]) && value["acquire_cards"].every((entry) => isLegalAcquisitionSummary(entry)) && value["acquire_cards"].length <= 4096
+}
+
+export function isCardSummary(value: unknown): value is CardSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["instance_id","catalog_id","name"].includes(key)) && typeof value["instance_id"] === 'string' && [...value["instance_id"]].length >= 1 && typeof value["catalog_id"] === 'string' && [...value["catalog_id"]].length >= 1 && typeof value["name"] === 'string' && [...value["name"]].length >= 1
+}
+
+export function isMarketCardSummary(value: unknown): value is MarketCardSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["instance_id","catalog_id","name","cost","affordable"].includes(key)) && typeof value["instance_id"] === 'string' && [...value["instance_id"]].length >= 1 && typeof value["catalog_id"] === 'string' && [...value["catalog_id"]].length >= 1 && typeof value["name"] === 'string' && [...value["name"]].length >= 1 && typeof value["cost"] === 'number' && Number.isInteger(value["cost"]) && value["cost"] >= 0 && value["cost"] <= 65535 && typeof value["affordable"] === 'boolean'
+}
+
+export function isVillainSummary(value: unknown): value is VillainSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["instance_id","catalog_id","name","health","attackable","max_attack"].includes(key)) && typeof value["instance_id"] === 'string' && [...value["instance_id"]].length >= 1 && typeof value["catalog_id"] === 'string' && [...value["catalog_id"]].length >= 1 && typeof value["name"] === 'string' && [...value["name"]].length >= 1 && typeof value["health"] === 'number' && Number.isInteger(value["health"]) && value["health"] >= 0 && value["health"] <= 65535 && typeof value["attackable"] === 'boolean' && typeof value["max_attack"] === 'number' && Number.isInteger(value["max_attack"]) && value["max_attack"] >= 0 && value["max_attack"] <= 65535
+}
+
+export function isTableSummary(value: unknown): value is TableSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["hand","play_area","draw_pile_count","discard_pile_count","market","hogwarts_deck_count","active_villains","villain_deck_count"].includes(key)) && Array.isArray(value["hand"]) && value["hand"].every((entry) => isCardSummary(entry)) && Array.isArray(value["play_area"]) && value["play_area"].every((entry) => isCardSummary(entry)) && typeof value["draw_pile_count"] === 'number' && Number.isInteger(value["draw_pile_count"]) && value["draw_pile_count"] >= 0 && typeof value["discard_pile_count"] === 'number' && Number.isInteger(value["discard_pile_count"]) && value["discard_pile_count"] >= 0 && Array.isArray(value["market"]) && value["market"].every((entry) => isMarketCardSummary(entry)) && typeof value["hogwarts_deck_count"] === 'number' && Number.isInteger(value["hogwarts_deck_count"]) && value["hogwarts_deck_count"] >= 0 && Array.isArray(value["active_villains"]) && value["active_villains"].every((entry) => isVillainSummary(entry)) && typeof value["villain_deck_count"] === 'number' && Number.isInteger(value["villain_deck_count"]) && value["villain_deck_count"] >= 0
+}
+
 export function isEffectOutcomeSummary(value: unknown): value is EffectOutcomeSummary {
   return [(isRecord(value) && Object.keys(value).every((key) => ["type","rule_id","die","result"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "die_rolled") && typeof value["rule_id"] === 'string' && [...value["rule_id"]].length >= 1 && typeof value["die"] === 'string' && (value["die"] === "d4" || value["die"] === "d6" || value["die"] === "d8") && typeof value["result"] === 'number' && Number.isInteger(value["result"]) && value["result"] >= 1 && value["result"] <= 8),(isRecord(value) && Object.keys(value).every((key) => ["type","rule_id","target_id","target_position","from","to"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "moved") && typeof value["rule_id"] === 'string' && [...value["rule_id"]].length >= 1 && typeof value["target_id"] === 'string' && [...value["target_id"]].length >= 1 && (!Object.hasOwn(value, "target_position") || (typeof value["target_position"] === 'number' && Number.isInteger(value["target_position"]) && value["target_position"] >= 1 && value["target_position"] <= 4)) && typeof value["from"] === 'string' && [...value["from"]].length >= 1 && typeof value["to"] === 'string' && [...value["to"]].length >= 1),(isRecord(value) && Object.keys(value).every((key) => ["type","rule_id","reason"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "no_op") && typeof value["rule_id"] === 'string' && [...value["rule_id"]].length >= 1 && typeof value["reason"] === 'string' && (value["reason"] === "explicit" || value["reason"] === "no_eligible_target" || value["reason"] === "zero_cardinality")),(isRecord(value) && Object.keys(value).every((key) => ["type","rule_id","target_id","target_position","resource","before","after","cause"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "resource_changed") && typeof value["rule_id"] === 'string' && [...value["rule_id"]].length >= 1 && typeof value["target_id"] === 'string' && [...value["target_id"]].length >= 1 && (!Object.hasOwn(value, "target_position") || (typeof value["target_position"] === 'number' && Number.isInteger(value["target_position"]) && value["target_position"] >= 1 && value["target_position"] <= 4)) && typeof value["resource"] === 'string' && (value["resource"] === "attack" || value["resource"] === "control" || value["resource"] === "health" || value["resource"] === "influence") && typeof value["before"] === 'number' && Number.isInteger(value["before"]) && value["before"] >= 0 && value["before"] <= 65535 && typeof value["after"] === 'number' && Number.isInteger(value["after"]) && value["after"] >= 0 && value["after"] <= 65535 && typeof value["cause"] === 'string' && (value["cause"] === "cost" || value["cause"] === "effect")),(isRecord(value) && Object.keys(value).every((key) => ["type","rule_id","outcome"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "terminal") && typeof value["rule_id"] === 'string' && [...value["rule_id"]].length >= 1 && typeof value["outcome"] === 'string' && (value["outcome"] === "lost" || value["outcome"] === "won"))].filter(Boolean).length === 1
 }
@@ -811,11 +1108,11 @@ export function isTurnSummary(value: unknown): value is TurnSummary {
 }
 
 export function isGameParticipant(value: unknown): value is GameParticipant {
-  return isRecord(value) && Object.keys(value).every((key) => ["display_name","role","position","hero","resources"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["role"] === 'string' && (value["role"] === "host" || value["role"] === "guest") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && isHeroSummary(value["hero"]) && isGameResources(value["resources"])
+  return isRecord(value) && Object.keys(value).every((key) => ["display_name","role","position","hero","resources","hand_count"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["role"] === 'string' && (value["role"] === "host" || value["role"] === "guest") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && isHeroSummary(value["hero"]) && isGameResources(value["resources"]) && typeof value["hand_count"] === 'number' && Number.isInteger(value["hand_count"]) && value["hand_count"] >= 0
 }
 
 export function isGameProjectionResponse(value: unknown): value is GameProjectionResponse {
-  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions","choice","queued_phases","queued_effect_count","effects"].includes(key)) && isGameSummary(value["game"]) && isSnapshotSummary(value["snapshot"]) && isTurnSummary(value["turn"]) && isGameParticipant(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isGameParticipant(entry)) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string' && (entry === "end_hero_actions" || entry === "resolve_choice")) && hasUniqueItems(value["legal_actions"]) && isChoiceSummary(value["choice"]) && Array.isArray(value["queued_phases"]) && value["queued_phases"].every((entry) => typeof entry === 'string' && (entry === "dark_arts" || entry === "villains" || entry === "hero_actions" || entry === "end_turn")) && value["queued_phases"].length <= 3 && hasUniqueItems(value["queued_phases"]) && typeof value["queued_effect_count"] === 'number' && Number.isInteger(value["queued_effect_count"]) && value["queued_effect_count"] >= 0 && value["queued_effect_count"] <= 4096 && isEffectResolutionSummary(value["effects"])
+  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions","legal_intentions","table","choice","queued_phases","queued_effect_count","effects"].includes(key)) && isGameSummary(value["game"]) && isSnapshotSummary(value["snapshot"]) && isTurnSummary(value["turn"]) && isGameParticipant(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isGameParticipant(entry)) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string' && (entry === "end_hero_actions" || entry === "resolve_choice" || entry === "play_card" || entry === "assign_attack" || entry === "acquire_card")) && hasUniqueItems(value["legal_actions"]) && isLegalIntentionsSummary(value["legal_intentions"]) && isTableSummary(value["table"]) && isChoiceSummary(value["choice"]) && Array.isArray(value["queued_phases"]) && value["queued_phases"].every((entry) => typeof entry === 'string' && (entry === "dark_arts" || entry === "villains" || entry === "hero_actions" || entry === "end_turn")) && value["queued_phases"].length <= 3 && hasUniqueItems(value["queued_phases"]) && typeof value["queued_effect_count"] === 'number' && Number.isInteger(value["queued_effect_count"]) && value["queued_effect_count"] >= 0 && value["queued_effect_count"] <= 4096 && isEffectResolutionSummary(value["effects"])
 }
 
 export function isChoiceResolutionStepSummary(value: unknown): value is ChoiceResolutionStepSummary {
@@ -839,7 +1136,7 @@ export function isChoiceResolvedRealtimeGameEvent(value: unknown): value is Choi
 }
 
 export function isRealtimeGameEvent(value: unknown): value is RealtimeGameEvent {
-  return [(isDarkArtsCompletedRealtimeGameEvent(value)),(isLegacyChoiceResolvedRealtimeGameEvent(value)),(isTurnCompletedRealtimeGameEvent(value)),(isChoiceResolvedRealtimeGameEvent(value))].filter(Boolean).length === 1
+  return [(isDarkArtsCompletedRealtimeGameEvent(value)),(isChoiceResolvedRealtimeGameEvent(value)),(isLegacyChoiceResolvedRealtimeGameEvent(value)),(isTurnCompletedRealtimeGameEvent(value)),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","card_id","targets","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "card_played") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && Array.isArray(value["targets"]) && value["targets"].every((entry) => isEffectTargetBinding(entry)) && value["targets"].length <= 4096 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isPendingChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))) && ((isRecord(value) && value["effect_stop"] === "choice") ? (isRecord(value) && Object.hasOwn(value, "choice")) : (!(isRecord(value) && Object.hasOwn(value, "choice"))))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","villain_id","amount","effects","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "attack_assigned") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["villain_id"] === 'string' && [...value["villain_id"]].length >= 1 && typeof value["amount"] === 'number' && Number.isInteger(value["amount"]) && value["amount"] >= 1 && value["amount"] <= 65535 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))),(isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","card_id","cost","refill_card_id","effects","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 4) && typeof value["type"] === 'string' && (value["type"] === "card_acquired") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && typeof value["card_id"] === 'string' && [...value["card_id"]].length >= 1 && typeof value["cost"] === 'number' && Number.isInteger(value["cost"]) && value["cost"] >= 0 && value["cost"] <= 65535 && (!Object.hasOwn(value, "refill_card_id") || (typeof value["refill_card_id"] === 'string' && [...value["refill_card_id"]].length >= 1)) && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"]))))].filter(Boolean).length === 1
 }
 
 export function isRealtimeSnapshotMessage(value: unknown): value is RealtimeSnapshotMessage {
@@ -863,7 +1160,7 @@ export function isRealtimeEventBatchMessage(value: unknown): value is RealtimeEv
 }
 
 export function isGameCommandReceipt(value: unknown): value is GameCommandReceipt {
-  return isRecord(value) && Object.keys(value).every((key) => ["command_id","type","status","expected_state_version","accepted_state_version","accepted_sequence","expires_at"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["type"] === 'string' && (value["type"] === "end_hero_actions" || value["type"] === "resolve_choice") && typeof value["status"] === 'string' && (value["status"] === "accepted") && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["accepted_state_version"] === 'number' && Number.isInteger(value["accepted_state_version"]) && value["accepted_state_version"] >= 2 && typeof value["accepted_sequence"] === 'number' && Number.isInteger(value["accepted_sequence"]) && value["accepted_sequence"] >= 1 && typeof value["expires_at"] === 'string' && isRfc3339DateTime(value["expires_at"])
+  return isRecord(value) && Object.keys(value).every((key) => ["command_id","type","status","expected_state_version","accepted_state_version","accepted_sequence","expires_at"].includes(key)) && typeof value["command_id"] === 'string' && isUuid(value["command_id"]) && typeof value["type"] === 'string' && (value["type"] === "end_hero_actions" || value["type"] === "resolve_choice" || value["type"] === "play_card" || value["type"] === "assign_attack" || value["type"] === "acquire_card") && typeof value["status"] === 'string' && (value["status"] === "accepted") && typeof value["expected_state_version"] === 'number' && Number.isInteger(value["expected_state_version"]) && value["expected_state_version"] >= 1 && typeof value["accepted_state_version"] === 'number' && Number.isInteger(value["accepted_state_version"]) && value["accepted_state_version"] >= 2 && typeof value["accepted_sequence"] === 'number' && Number.isInteger(value["accepted_sequence"]) && value["accepted_sequence"] >= 1 && typeof value["expires_at"] === 'string' && isRfc3339DateTime(value["expires_at"])
 }
 
 export function isExecuteGameCommandResponse(value: unknown): value is ExecuteGameCommandResponse {

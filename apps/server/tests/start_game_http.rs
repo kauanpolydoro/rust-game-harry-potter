@@ -10,7 +10,6 @@ use harry_potter_server::{AppState, build_router, initialize};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{
-    collections::BTreeSet,
     fmt::Write as _,
     sync::Arc,
     time::{Duration, Instant},
@@ -166,6 +165,10 @@ fn functional_effect_rule() -> Value {
 }
 
 fn playable_manifest_variant(effect_override: Option<Value>) -> ContentManifest {
+    import_playable_candidate(&playable_candidate(effect_override), &["rule:functional"])
+}
+
+fn playable_candidate(effect_override: Option<Value>) -> Value {
     let entries = (0..171).map(playable_fixture_entry).collect::<Vec<_>>();
     let mut candidate = json!({
         "schema_version": 2,
@@ -183,10 +186,216 @@ fn playable_manifest_variant(effect_override: Option<Value>) -> ContentManifest 
     if let Some(effect) = effect_override {
         candidate["rules"][0]["effect"] = effect;
     }
-    import_playable_candidate(&candidate)
+    candidate
 }
 
-fn import_playable_candidate(candidate: &Value) -> ContentManifest {
+fn gameplay_manifest() -> ContentManifest {
+    let mut candidate = playable_candidate(None);
+    candidate["rules"] = gameplay_rules();
+    configure_gameplay_entries(&mut candidate);
+    candidate["game_setups"] = gameplay_setups();
+
+    import_playable_candidate(
+        &candidate,
+        &[
+            "rule:functional",
+            "rule:starter-resources",
+            "rule:card-effect",
+        ],
+    )
+}
+
+fn optional_target_manifest() -> ContentManifest {
+    let mut candidate = playable_candidate(None);
+    candidate["rules"] = gameplay_rules();
+    candidate["rules"][1] = json!({
+        "id": "rule:optional-card",
+        "trigger": "manual",
+        "order": 0,
+        "effect": {
+            "type": "apply",
+            "target": {
+                "id": "target:optional-hero",
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": { "min": 0, "max": 1 }
+            },
+            "operation": {
+                "type": "modify_resource",
+                "resource": "health",
+                "amount": 1
+            }
+        }
+    });
+    configure_gameplay_entries(&mut candidate);
+    candidate["entries"][9]["functional"]["effect"] = proven_rule("rule:optional-card");
+    candidate["game_setups"] = gameplay_setups();
+
+    import_playable_candidate(
+        &candidate,
+        &["rule:functional", "rule:optional-card", "rule:card-effect"],
+    )
+}
+
+fn proven_rule(rule: &str) -> Value {
+    json!({
+        "confidence": "adaptation",
+        "sources": ["fixture-source"],
+        "rule": rule
+    })
+}
+
+fn proven_value(value: u16) -> Value {
+    json!({
+        "confidence": "adaptation",
+        "sources": ["fixture-source"],
+        "value": value
+    })
+}
+
+fn gameplay_rules() -> Value {
+    json!([
+        {
+            "id": "rule:functional",
+            "trigger": "dark_arts_completed",
+            "order": 0,
+            "effect": {
+                "type": "apply",
+                "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": { "min": 1, "max": 1 }
+                },
+                "operation": {
+                    "type": "modify_resource",
+                    "resource": "health",
+                    "amount": -1
+                }
+            }
+        },
+        {
+            "id": "rule:starter-resources",
+            "trigger": "manual",
+            "order": 0,
+            "effect": {
+                "type": "sequence",
+                "effects": [
+                    {
+                        "type": "apply",
+                        "target": {
+                            "id": "target:hero",
+                            "zone": "heroes",
+                            "owner": "any",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "operation": {
+                            "type": "modify_resource",
+                            "resource": "attack",
+                            "amount": 2
+                        }
+                    },
+                    {
+                        "type": "apply",
+                        "target": {
+                            "id": "target:hero",
+                            "zone": "heroes",
+                            "owner": "any",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "operation": {
+                            "type": "modify_resource",
+                            "resource": "influence",
+                            "amount": 3
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "rule:card-effect",
+            "trigger": "manual",
+            "order": 1,
+            "effect": {
+                "type": "apply",
+                "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": { "min": 1, "max": 1 }
+                },
+                "operation": {
+                    "type": "modify_resource",
+                    "resource": "health",
+                    "amount": 1
+                }
+            }
+        }
+    ])
+}
+
+fn configure_gameplay_entries(candidate: &mut Value) {
+    candidate["entries"][4]["functional"]["cost"] = proven_value(2);
+    candidate["entries"][4]["functional"]["effect"] = proven_rule("rule:card-effect");
+    candidate["entries"][9]["copies"] = json!(4);
+    candidate["entries"][9]["functional"]["effect"] = proven_rule("rule:starter-resources");
+    candidate["entries"][11]["functional"]["effect"] = proven_rule("rule:card-effect");
+    candidate["entries"][11]["functional"]["health"] = proven_value(2);
+    for (index, id, name, cost) in [
+        (12, "fixture:market-second", "Market Second", 1),
+        (13, "fixture:deck-first", "Deck First", 4),
+    ] {
+        candidate["entries"][index]["id"] = json!(id);
+        candidate["entries"][index]["kind"] = json!("hogwarts_card");
+        candidate["entries"][index]["copies"] = json!(1);
+        candidate["entries"][index]["names"] = json!({ "en": name });
+        candidate["entries"][index]["required_functional_fields"] = json!(["cost", "effect"]);
+        candidate["entries"][index]["functional"] = json!({
+            "cost": proven_value(cost),
+            "effect": proven_rule("rule:card-effect")
+        });
+    }
+}
+
+fn gameplay_setups() -> Value {
+    json!([{
+        "adventure_id": "adventure:001",
+        "confidence": "adaptation",
+        "sources": ["fixture-source"],
+        "entities": [
+            {
+                "catalog_id": "fixture:starter-card",
+                "copies": 1,
+                "zone": "hero_hand",
+                "owner": "each_participant"
+            },
+            {
+                "catalog_id": "fixture:hogwarts-card",
+                "copies": 1,
+                "zone": "market",
+                "owner": "none"
+            },
+            {
+                "catalog_id": "fixture:market-second",
+                "copies": 1,
+                "zone": "market",
+                "owner": "none"
+            },
+            {
+                "catalog_id": "fixture:deck-first",
+                "copies": 1,
+                "zone": "hogwarts_deck",
+                "owner": "none"
+            },
+            {
+                "catalog_id": "fixture:villain",
+                "copies": 1,
+                "zone": "active_villains",
+                "owner": "none"
+            }
+        ]
+    }])
+}
+
+fn import_playable_candidate(candidate: &Value, executable_rule_ids: &[&str]) -> ContentManifest {
     let bundle = serde_json::to_vec(candidate).expect("the playable fixture must serialize");
 
     import_base_bundle_with_runtime_rules(
@@ -196,9 +405,10 @@ fn import_playable_candidate(candidate: &Value) -> ContentManifest {
             uri: "https://example.invalid/fixture".to_owned(),
             kind: SourceKind::Adaptation,
         }],
-        &BTreeSet::from([
-            RuleId::parse("rule:functional").expect("fixture rule ID should be valid")
-        ]),
+        &executable_rule_ids
+            .iter()
+            .map(|rule_id| RuleId::parse(rule_id).expect("fixture rule ID should be valid"))
+            .collect(),
     )
     .expect("the playable fixture must import")
 }
@@ -1083,8 +1293,10 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
         ))
         .await
         .expect("game start must receive a response");
-    assert_eq!(response.status(), StatusCode::CREATED);
-    response_json(response).await
+    let status = response.status();
+    let body = response_json(response).await;
+    assert_eq!(status, StatusCode::CREATED, "response body: {body}");
+    body
 }
 
 async fn authoritative_command_state(room: &ReadyRoom) -> (i64, i64, i64, i64, String) {
@@ -1212,6 +1424,79 @@ async fn ready_room_with_manifest(manifest: ContentManifest) -> ReadyRoom {
         guest_recovery_token,
         manifest,
     }
+}
+
+#[tokio::test]
+async fn routine_recovery_rotation_and_regeneration_do_not_renew_game_retention() {
+    let room = ready_room().await;
+    start_ready_game(&room, "recovery-management-retention").await;
+    let before = sqlx::query_as::<_, (i64, i64, String, String, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            games.last_game_action_at::text,
+            games.expires_at::text,
+            (SELECT COUNT(*) FROM game_events WHERE game_events.game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the initial retention state must be queryable");
+
+    let rotated = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PUT",
+            "/api/session/recovery-password",
+            &json!({
+                "current_recovery_password": "a long uncommon passphrase",
+                "new_recovery_password": "a newer uncommon recovery phrase"
+            }),
+            Some(&room.host_cookie),
+            Some(&unique_key("retention-rotation")),
+        ))
+        .await
+        .expect("password rotation must receive a response");
+    assert_eq!(rotated.status(), StatusCode::OK);
+
+    let regenerated = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recovery-credential",
+            &json!({}),
+            Some(&room.guest_cookie),
+            Some(&unique_key("retention-regeneration")),
+        ))
+        .await
+        .expect("recovery credential regeneration must receive a response");
+    assert_eq!(regenerated.status(), StatusCode::OK);
+
+    let after = sqlx::query_as::<_, (i64, i64, String, String, i64)>(
+        r"
+        SELECT
+            games.state_version,
+            games.sequence,
+            games.last_game_action_at::text,
+            games.expires_at::text,
+            (SELECT COUNT(*) FROM game_events WHERE game_events.game_id = games.id)
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the final retention state must be queryable");
+    assert_eq!(after, before);
 }
 
 fn assert_initial_synchronization_projection(projection: &Value) {
@@ -2048,6 +2333,459 @@ fn assert_initial_each_hero_choice(started: &Value) -> String {
         .as_str()
         .expect("the global choice ID must be present")
         .to_owned()
+}
+
+struct GameplayInstances {
+    host_card: String,
+    guest_card: String,
+    market_card: String,
+    second_market_card: String,
+    villain: String,
+}
+
+fn projected_instance_id(projection: &Value, pointer: &str, expectation: &str) -> String {
+    projection
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("{expectation}"))
+        .to_owned()
+}
+
+async fn inspect_initial_gameplay(room: &ReadyRoom, initial: &Value) -> GameplayInstances {
+    let host_card_id = projected_instance_id(
+        initial,
+        "/table/hand/0/instance_id",
+        "the host starter instance must be projected",
+    );
+    let market_card_id = projected_instance_id(
+        initial,
+        "/table/market/0/instance_id",
+        "the first market instance must be projected",
+    );
+    let second_market_card_id = projected_instance_id(
+        initial,
+        "/table/market/1/instance_id",
+        "the second market instance must be projected",
+    );
+    let villain_id = projected_instance_id(
+        initial,
+        "/table/active_villains/0/instance_id",
+        "the active villain instance must be projected",
+    );
+    assert_eq!(initial["participant"]["hand_count"], 1);
+    assert_eq!(initial["table"]["hogwarts_deck_count"], 1);
+    assert_eq!(initial["table"]["market"][0]["affordable"], false);
+    assert_eq!(initial["table"]["active_villains"][0]["attackable"], false);
+
+    let guest_response = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header(header::COOKIE, &room.guest_cookie)
+                .body(Body::empty())
+                .expect("the guest session request must be valid"),
+        )
+        .await
+        .expect("the guest projection must receive a response");
+    assert_eq!(guest_response.status(), StatusCode::OK);
+    let guest = response_json(guest_response).await;
+    let guest_card_id = projected_instance_id(
+        &guest,
+        "/table/hand/0/instance_id",
+        "the guest starter instance must be projected",
+    );
+    assert_ne!(guest_card_id, host_card_id);
+    assert!(!guest.to_string().contains(&host_card_id));
+
+    GameplayInstances {
+        host_card: host_card_id,
+        guest_card: guest_card_id,
+        market_card: market_card_id,
+        second_market_card: second_market_card_id,
+        villain: villain_id,
+    }
+}
+
+fn assert_gameplay_hero_actions(initial: &Value, instances: &GameplayInstances) {
+    assert_eq!(initial["turn"]["phase"], "hero_actions");
+    assert_eq!(
+        initial["participant"]["resources"],
+        json!({ "health": 9, "attack": 0, "influence": 0 })
+    );
+    assert_eq!(
+        initial["legal_intentions"]["play_cards"][0]["card_id"],
+        instances.host_card
+    );
+}
+
+async fn assert_foreign_card_is_rejected(room: &ReadyRoom, instances: &GameplayInstances) {
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": uuid::Uuid::new_v4().to_string(),
+                "expected_state_version": 1,
+                "type": "play_card",
+                "card_id": instances.guest_card,
+                "targets": [{
+                    "selector_id": "target:hero",
+                    "target_ids": ["hero:1"]
+                }]
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the foreign-card command must receive a response");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "GAME_ACTION_NOT_ALLOWED"
+    );
+    assert_eq!(current_official_state(room).await.0, 1);
+}
+
+async fn play_gameplay_starter_card(room: &ReadyRoom, instances: &GameplayInstances) {
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": uuid::Uuid::new_v4().to_string(),
+                "expected_state_version": 1,
+                "type": "play_card",
+                "card_id": instances.host_card,
+                "targets": [{
+                    "selector_id": "target:hero",
+                    "target_ids": ["hero:1"]
+                }]
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the play-card command must receive a response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let played = response_json(response).await;
+    assert_eq!(
+        played["projection"]["participant"]["resources"],
+        json!({ "health": 9, "attack": 2, "influence": 3 })
+    );
+    assert_eq!(played["projection"]["table"]["hand"], json!([]));
+    assert_eq!(
+        played["projection"]["table"]["play_area"][0]["instance_id"],
+        instances.host_card
+    );
+    assert_eq!(
+        played["projection"]["legal_intentions"]["assign_attack"][0],
+        json!({ "villain_id": instances.villain, "max_amount": 2 })
+    );
+}
+
+async fn assign_all_gameplay_attack(room: &ReadyRoom, instances: &GameplayInstances) {
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": uuid::Uuid::new_v4().to_string(),
+                "expected_state_version": 2,
+                "type": "assign_attack",
+                "villain_id": instances.villain,
+                "amount": 2
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the attack command must receive a response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let attacked = response_json(response).await;
+    assert_eq!(
+        attacked["projection"]["participant"]["resources"]["attack"],
+        0
+    );
+    assert_eq!(
+        attacked["projection"]["table"]["active_villains"][0]["instance_id"],
+        instances.villain
+    );
+    assert_eq!(
+        attacked["projection"]["table"]["active_villains"][0]["health"],
+        0
+    );
+    assert_eq!(
+        attacked["projection"]["table"]["active_villains"][0]["attackable"],
+        false
+    );
+}
+
+async fn acquire_card_and_assert_replay(room: &ReadyRoom, instances: &GameplayInstances) -> String {
+    let acquire_body = json!({
+        "command_id": uuid::Uuid::new_v4().to_string(),
+        "expected_state_version": 3,
+        "type": "acquire_card",
+        "card_id": instances.market_card
+    });
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &acquire_body,
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the acquisition command must receive a response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let acquired = response_json(response).await;
+    assert_eq!(acquired["projection"]["snapshot"]["state_version"], 4);
+    assert_eq!(
+        acquired["projection"]["participant"]["resources"]["influence"],
+        1
+    );
+    assert_eq!(acquired["projection"]["table"]["discard_pile_count"], 1);
+    assert_eq!(acquired["projection"]["table"]["hogwarts_deck_count"], 0);
+    assert_eq!(
+        acquired["projection"]["table"]["market"][0]["instance_id"],
+        instances.second_market_card
+    );
+    let refill_card_id = projected_instance_id(
+        &acquired["projection"],
+        "/table/market/1/instance_id",
+        "the refill instance must be projected",
+    );
+
+    let replay_response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &acquire_body,
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the idempotent acquisition replay must receive a response");
+    assert_eq!(replay_response.status(), StatusCode::OK);
+    let replayed = response_json(replay_response).await;
+    assert_eq!(replayed["receipt"], acquired["receipt"]);
+    assert_eq!(
+        replayed["projection"]["snapshot"],
+        acquired["projection"]["snapshot"]
+    );
+
+    refill_card_id
+}
+
+fn instance_ids_in_zone(entities: &[Value], zone: &str) -> Vec<String> {
+    entities
+        .iter()
+        .filter(|entity| entity["zone"] == zone)
+        .map(|entity| {
+            entity["id"]
+                .as_str()
+                .expect("every persisted entity must have an ID")
+                .to_owned()
+        })
+        .collect()
+}
+
+async fn assert_persisted_gameplay_state(
+    room: &ReadyRoom,
+    instances: &GameplayInstances,
+    refill_card_id: &str,
+) {
+    let stored = sqlx::query_as::<_, (i64, i64, String)>(
+        r"
+        SELECT games.state_version, games.sequence, games.snapshot::text
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the final game state must be persisted");
+    assert_eq!((stored.0, stored.1), (4, 3));
+    let snapshot: Value = serde_json::from_str(&stored.2).expect("the Snapshot must be JSON");
+    let entities = snapshot["effects"]["entities"]
+        .as_array()
+        .expect("the persisted entities must be an array");
+    assert_eq!(
+        instance_ids_in_zone(entities, "hero_hand"),
+        vec![instances.guest_card.clone()]
+    );
+    assert_eq!(
+        instance_ids_in_zone(entities, "hero_play_area"),
+        vec![instances.host_card.clone()]
+    );
+    assert_eq!(
+        instance_ids_in_zone(entities, "hero_discard_pile"),
+        vec![instances.market_card.clone()]
+    );
+    assert_eq!(
+        instance_ids_in_zone(entities, "market"),
+        vec![
+            instances.second_market_card.clone(),
+            refill_card_id.to_owned()
+        ]
+    );
+    assert!(instance_ids_in_zone(entities, "hogwarts_deck").is_empty());
+    assert_eq!(
+        instance_ids_in_zone(entities, "active_villains"),
+        vec![instances.villain.clone()]
+    );
+}
+
+async fn assert_gameplay_command_history(
+    room: &ReadyRoom,
+    instances: &GameplayInstances,
+    refill_card_id: &str,
+) {
+    let events = sqlx::query_as::<_, (String, String)>(
+        r"
+        SELECT event_type, payload::text
+        FROM game_events
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ORDER BY sequence
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_all(&room.database)
+    .await
+    .expect("the hero-action events must be persisted in order");
+    assert_eq!(
+        events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec!["card_played", "attack_assigned", "card_acquired"]
+    );
+    let acquisition_event: Value =
+        serde_json::from_str(&events[2].1).expect("the acquisition event must be JSON");
+    assert_eq!(acquisition_event["event_version"], 4);
+    assert_eq!(acquisition_event["card_id"], instances.market_card);
+    assert_eq!(acquisition_event["cost"], 2);
+    assert_eq!(acquisition_event["refill_card_id"], refill_card_id);
+
+    let command_types = sqlx::query_scalar::<_, String>(
+        r"
+        SELECT receipts.command_type
+        FROM game_events AS events
+        JOIN game_command_receipts AS receipts
+          ON receipts.game_id = events.game_id
+         AND receipts.command_id = events.command_id
+        WHERE events.game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ORDER BY events.sequence
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_all(&room.database)
+    .await
+    .expect("each accepted command must have one receipt");
+    assert_eq!(
+        command_types,
+        vec!["play_card", "assign_attack", "acquire_card"]
+    );
+}
+
+#[tokio::test]
+async fn hero_actions_move_exact_instances_spend_resources_refill_and_replay_idempotently() {
+    let room = ready_room_with_manifest(gameplay_manifest()).await;
+    let initial = start_ready_game(&room, "hero-actions-start").await;
+    let instances = inspect_initial_gameplay(&room, &initial).await;
+
+    assert_gameplay_hero_actions(&initial, &instances);
+    assert_foreign_card_is_rejected(&room, &instances).await;
+    play_gameplay_starter_card(&room, &instances).await;
+    assign_all_gameplay_attack(&room, &instances).await;
+    let refill_card_id = acquire_card_and_assert_replay(&room, &instances).await;
+    assert_persisted_gameplay_state(&room, &instances, &refill_card_id).await;
+    assert_gameplay_command_history(&room, &instances, &refill_card_id).await;
+}
+
+#[tokio::test]
+async fn optional_named_card_target_can_be_empty_and_survive_receipt_recovery() {
+    let room = ready_room_with_manifest(optional_target_manifest()).await;
+    let initial = start_ready_game(&room, "optional-target-start").await;
+    let instances = inspect_initial_gameplay(&room, &initial).await;
+    assert_gameplay_hero_actions(&initial, &instances);
+
+    let command_id = uuid::Uuid::new_v4();
+    let response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/games/current/commands",
+            &json!({
+                "command_id": command_id.to_string(),
+                "expected_state_version": 1,
+                "type": "play_card",
+                "card_id": instances.host_card,
+                "targets": [{
+                    "selector_id": "target:optional-hero",
+                    "target_ids": []
+                }]
+            }),
+            Some(&room.host_cookie),
+            None,
+        ))
+        .await
+        .expect("the optional-target card command must receive a response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let accepted = response_json(response).await;
+    assert_eq!(accepted["receipt"]["status"], "accepted");
+    assert_eq!(accepted["projection"]["snapshot"]["state_version"], 2);
+    assert_eq!(accepted["projection"]["table"]["hand"], json!([]));
+    assert_eq!(
+        accepted["projection"]["table"]["play_area"][0]["instance_id"],
+        instances.host_card
+    );
+
+    let recovered = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/games/current/commands/{command_id}"))
+                .header(header::COOKIE, &room.host_cookie)
+                .body(Body::empty())
+                .expect("the optional-target receipt lookup request must be valid"),
+        )
+        .await
+        .expect("the optional-target receipt must remain recoverable");
+    assert_eq!(recovered.status(), StatusCode::OK);
+    let recovered = response_json(recovered).await;
+    assert_eq!(recovered["receipt"], accepted["receipt"]);
+    assert_eq!(
+        recovered["projection"]["snapshot"],
+        accepted["projection"]["snapshot"]
+    );
 }
 
 async fn assert_unassigned_choice_rejected_without_artifacts(room: &ReadyRoom, choice_id: &str) {
