@@ -1719,7 +1719,16 @@ async fn recover_participation(
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
-    postgres::lock_game_access_root(&mut transaction, recovery.candidate.participant_id).await?;
+    if let Some(game_id) =
+        postgres::lock_game_access_root(&mut transaction, recovery.candidate.participant_id).await?
+        && crate::game_expiration::expire_locked_game(&mut transaction, game_id).await?
+    {
+        transaction
+            .commit()
+            .await
+            .map_err(|error| ApiError::internal_with("commit recovery expiration gate", error))?;
+        return Err(ApiError::recovery_failed());
+    }
     let locked = lock_authenticated_recovery(&mut transaction, &recovery).await?;
 
     let successor_recovery_token = state.idempotent_recovery_token(

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { isUncertainTransportFailure } from './api/http'
+import { isUncertainTransportFailure, requestJson } from './api/http'
 import GameStage from './components/GameStage.vue'
 import RecoveryManagement from './components/RecoveryManagement.vue'
 import type {
@@ -23,6 +23,7 @@ type AccessInvalidationReason =
   | 'session_revoked'
   | 'participant_protected'
   | 'room_protected'
+  | 'game_expired'
 
 const accessProtection = useAccessProtectionStore()
 const health = useHealthStore()
@@ -195,6 +196,9 @@ const canEndHeroActions = computed(
     !commandSubmissionBlocked.value,
 )
 const serviceHeading = computed(() => {
+  if (accessInvalidationReason.value === 'game_expired') {
+    return 'Partida expirada'
+  }
   if (accessInvalidationReason.value) {
     return 'Acesso protegido'
   }
@@ -207,6 +211,9 @@ const serviceHeading = computed(() => {
   return currentStatus.value.label
 })
 const serviceDescription = computed(() => {
+  if (accessInvalidationReason.value === 'game_expired') {
+    return 'A partida encerrou após sete dias sem uma ação oficial aceita. Os dados privados e as ações pendentes deste navegador foram removidos. Você pode criar uma nova sala.'
+  }
   if (accessInvalidationReason.value === 'participant_protected') {
     return 'Todas as sessões e links desta participação foram revogados. Use um novo link de recuperação para retornar.'
   }
@@ -355,10 +362,26 @@ function retrySession(): void {
 }
 
 function handleAccessInvalidation(reason: AccessInvalidationReason): void {
+  if (accessInvalidationReason.value === reason) {
+    return
+  }
+  if (reason === 'game_expired') {
+    // A WebSocket cannot clear the HttpOnly cookie. The expired session endpoint can.
+    void requestJson('/api/session').catch(() => undefined)
+  }
   accessInvalidationReason.value = reason
   selectedChoiceOptions.value = []
   selectedReplacementSessionId.value = ''
   recoveryToken.value = null
+  displayName.value = ''
+  recoveryPassword.value = ''
+  roomCode.value = ''
+  selectedHero.value = ''
+  selectedContentKey.value = ''
+  passwordVisible.value = false
+  copyResult.value = 'idle'
+  roomCreation.discardPendingRequest()
+  roomCreation.$reset()
   gameSync.disconnect()
   securitySync.disconnect()
   gameCommand.clearPrivateState()
@@ -695,17 +718,51 @@ watch(
   [() => securitySync.sessionInvalidated, () => gameSync.sessionInvalidated],
   ([securitySessionInvalidated, gameSessionInvalidated]) => {
     if (securitySessionInvalidated || gameSessionInvalidated) {
+      handleAccessInvalidation(
+        securitySync.gameExpired || gameSync.gameExpired ? 'game_expired' : 'session_revoked',
+      )
+    }
+  },
+)
+
+watch(
+  [
+    () => roomAccess.errorCode,
+    () => gameCommand.errorCode,
+    () => recoveryManagement.errorCode,
+    () => accessProtection.errorCode,
+  ],
+  (errors) => {
+    if (errors.includes('GAME_EXPIRED')) {
+      handleAccessInvalidation('game_expired')
+    } else if (
+      errors.includes('SESSION_INVALID') &&
+      (roomAccess.game || roomAccess.lobby || gameCommand.pendingIntent)
+    ) {
+      // Another tab may have already removed the shared cookie after expiry.
       handleAccessInvalidation('session_revoked')
     }
   },
 )
 
+function revalidateVisibleSession(): void {
+  if (document.visibilityState === 'visible' && (roomAccess.game || roomAccess.lobby)) {
+    void roomAccess.revalidateSession()
+  }
+}
+
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', revalidateVisibleSession)
+  window.removeEventListener('pageshow', revalidateVisibleSession)
+  window.removeEventListener('online', revalidateVisibleSession)
   gameSync.disconnect()
   securitySync.disconnect()
 })
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', revalidateVisibleSession)
+  window.addEventListener('pageshow', revalidateVisibleSession)
+  window.addEventListener('online', revalidateVisibleSession)
   await Promise.all([
     health.check(),
     recoveryToken.value ? Promise.resolve() : roomAccess.restoreSession(),
@@ -734,7 +791,7 @@ onMounted(async () => {
     <section
       v-if="health.availability !== 'ready' || isRestoringSession || sessionNeedsRecovery || accessInvalidationReason"
       class="service-check"
-      :class="`service-check--${health.availability}`"
+      :class="`service-check--${accessInvalidationReason ? 'ended' : health.availability}`"
       aria-labelledby="service-heading"
       :aria-busy="health.availability === 'checking' || roomAccess.status === 'restoring'"
     >

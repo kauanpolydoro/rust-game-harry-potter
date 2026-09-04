@@ -129,6 +129,7 @@ pub(super) async fn persist_game(
 ) -> Result<(), ApiError> {
     sqlx::query(
         r"
+        WITH observed AS MATERIALIZED (SELECT clock_timestamp() AS now)
         INSERT INTO games (
             id,
             room_id,
@@ -149,12 +150,15 @@ pub(super) async fn persist_game(
             prng_seed,
             prng_counter,
             shuffle_algorithm,
-            sampling_algorithm
+            sampling_algorithm,
+            last_game_action_at,
+            expires_at
         )
-        VALUES (
+        SELECT
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20
-        )
+            $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20,
+            observed.now, observed.now + INTERVAL '168 hours'
+        FROM observed
         ",
     )
     .bind(game.id)
@@ -290,7 +294,7 @@ pub(super) async fn game_for_participant(
                 ' ',
                 'T'
             ) || 'Z' AS expires_at,
-            clock_timestamp() >= games.expires_at AS expired
+            games.access_expired_at IS NOT NULL OR clock_timestamp() >= games.expires_at AS expired
         FROM games
         JOIN participants ON participants.room_id = games.room_id
         WHERE participants.id = $1
@@ -326,8 +330,7 @@ pub(super) async fn lock_game_for_actor(
             games.prng_counter,
             games.shuffle_algorithm,
             games.sampling_algorithm,
-            participants.position AS actor_position,
-            clock_timestamp() >= games.expires_at AS expired
+            participants.position AS actor_position
         FROM games
         JOIN participants ON participants.room_id = games.room_id
         WHERE participants.id = $1
@@ -401,6 +404,7 @@ async fn update_game_after_command(
 ) -> Result<(Uuid, String), ApiError> {
     let (room_id, expires_at) = sqlx::query_as::<_, (Uuid, String)>(
         r"
+        WITH observed AS MATERIALIZED (SELECT clock_timestamp() AS now)
         UPDATE games
         SET
             state_version = $2,
@@ -410,8 +414,9 @@ async fn update_game_after_command(
             prng_counter = $6,
             status = $7,
             snapshot_version = $8,
-            last_game_action_at = clock_timestamp(),
-            expires_at = clock_timestamp() + INTERVAL '7 days'
+            last_game_action_at = observed.now,
+            expires_at = observed.now + INTERVAL '168 hours'
+        FROM observed
         WHERE id = $1
         RETURNING
             room_id,

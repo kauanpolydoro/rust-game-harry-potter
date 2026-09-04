@@ -38,8 +38,9 @@ interface ConnectionRequest {
 interface ConnectionCallbacks {
   currentRequest: () => ConnectionRequest | null
   discardAnimations: () => void
-  invalidateSession: () => void
+  invalidateSession: (expired: boolean) => void
   receive: (serialized: unknown) => void
+  revalidateSession: () => void
   updateStatus: (status: GameSyncStatus) => void
 }
 
@@ -197,11 +198,12 @@ class GameSyncConnection {
       this.clearStabilityTimer()
       this.clearSynchronizationTimer()
       this.callbacks.discardAnimations()
-      if (event.code === 1008) {
+      if (event.code === 1008 || event.code === 4001) {
         this.callbacks.updateStatus('failed')
-        this.callbacks.invalidateSession()
+        this.callbacks.invalidateSession(event.code === 4001)
         return
       }
+      this.callbacks.revalidateSession()
       this.callbacks.updateStatus('reconnecting')
       this.scheduleReconnect(generation)
     }
@@ -387,6 +389,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
   const roomAccess = useRoomAccessStore()
   const status = ref<GameSyncStatus>('disconnected')
   const sessionInvalidated = ref(false)
+  const gameExpired = ref(false)
   const cursor = ref(0)
   const digest = ref('')
   const snapshotVersion = ref(1)
@@ -424,10 +427,14 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       }
     },
     discardAnimations,
-    invalidateSession: () => {
+    invalidateSession: (expired) => {
+      gameExpired.value = expired
       sessionInvalidated.value = true
     },
     receive,
+    revalidateSession: () => {
+      void roomAccess.revalidateSession()
+    },
     updateStatus: (nextStatus) => {
       status.value = nextStatus
     },
@@ -566,6 +573,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     requiredParticipantPosition.value = null
     gameBlocked.value = false
     sessionInvalidated.value = false
+    gameExpired.value = false
     discardAnimations()
   }
 
@@ -591,6 +599,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     requiredParticipantPosition,
     resynchronize,
     sessionInvalidated,
+    gameExpired,
     snapshotVersion,
     status,
   }

@@ -541,6 +541,7 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let correlation_id = crate::current_correlation_id();
+        let game_expired = matches!(self.code, ErrorCode::GameExpired);
         let mut response = (
             self.status,
             Json(ErrorEnvelope {
@@ -558,6 +559,14 @@ impl IntoResponse for ApiError {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        if game_expired {
+            response.headers_mut().insert(
+                header::SET_COOKIE,
+                HeaderValue::from_static(
+                    "__Host-session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict",
+                ),
+            );
+        }
         if let Ok(value) = HeaderValue::from_str(&correlation_id.to_string()) {
             response.headers_mut().insert("x-correlation-id", value);
         }

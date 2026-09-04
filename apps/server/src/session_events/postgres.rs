@@ -18,7 +18,7 @@ pub(super) async fn load_security_position(
         LEFT JOIN games ON games.room_id = rooms.id
         WHERE participants.id = $1
           AND rooms.status <> 'cancelled'
-          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+          AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
         ",
     )
     .bind(participant_id)

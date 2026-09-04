@@ -251,8 +251,20 @@ pub(crate) async fn projection_for_participant(
     state: &AppState,
     participant_id: Uuid,
 ) -> Result<Option<GameProjectionResponse>, ApiError> {
-    let Some(game) = postgres::game_for_participant(&state.database, participant_id).await? else {
-        return Ok(None);
+    let game = loop {
+        let Some(game) = postgres::game_for_participant(&state.database, participant_id).await?
+        else {
+            return Ok(None);
+        };
+        if !game.expired {
+            break game;
+        }
+        if crate::game_expiration::participant_game_expired(&state.database, participant_id).await?
+        {
+            return Err(ApiError::game_expired());
+        }
+        // An accepted command renewed retention while this read waited for the
+        // root. Reload its committed projection instead of rejecting old data.
     };
     let persisted = decode_persisted_snapshot(&game.snapshot_json)?;
     verify_persisted_snapshot(&game, &persisted)?;
@@ -269,14 +281,8 @@ pub(crate) async fn projection_for_participant(
         .effect_rules(&game.manifest_digest)
         .ok_or_else(ApiError::internal)?;
     let rules = ValidatedGameRules::new(effect_rules.clone()).map_err(|_| ApiError::internal())?;
-    let (player_intents, legal_intentions) = if game.expired {
-        (Vec::new(), LegalGameIntentions::default())
-    } else {
-        (
-            GameEngine::new(&rules).legal_intent_types(&domain_state, actor_position),
-            legal_game_intentions(&domain_state, actor_position, &effect_rules),
-        )
-    };
+    let player_intents = GameEngine::new(&rules).legal_intent_types(&domain_state, actor_position);
+    let legal_intentions = legal_game_intentions(&domain_state, actor_position, &effect_rules);
     let legal_actions = legal_action_names(&player_intents, &legal_intentions);
     let legal_intentions_summary = legal_intentions_summary(
         &player_intents,
