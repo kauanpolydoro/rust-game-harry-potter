@@ -1,7 +1,7 @@
 use game_domain::{
     EffectChangeCause, EffectDie, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
-    EffectResource, EffectZone, GameCommandType, GameStatus, InitialGameState,
-    PendingEffectChoiceKind, legal_game_commands,
+    EffectResource, EffectZone, GameCommandType, GameStatus, InitialGameState, LegalGameIntentions,
+    PendingEffectChoiceKind, legal_game_commands, legal_game_intentions,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -20,6 +20,8 @@ pub(crate) struct GameProjectionResponse {
     participant: GameParticipant,
     participants: Vec<GameParticipant>,
     legal_actions: Vec<String>,
+    legal_intentions: LegalIntentionsSummary,
+    table: TableSummary,
     choice: ChoiceSummary,
     effects: EffectResolutionSummary,
 }
@@ -134,6 +136,7 @@ struct GameParticipant {
     position: i16,
     hero: GameHero,
     resources: GameResources,
+    hand_count: usize,
 }
 
 #[derive(Serialize)]
@@ -147,6 +150,84 @@ struct GameResources {
     health: u16,
     attack: u16,
     influence: u16,
+}
+
+#[derive(Serialize)]
+struct LegalIntentionsSummary {
+    complete_dark_arts: bool,
+    play_cards: Vec<LegalPlayCardSummary>,
+    assign_attack: Vec<LegalAttackSummary>,
+    acquire_cards: Vec<LegalAcquisitionSummary>,
+}
+
+#[derive(Serialize)]
+struct LegalPlayCardSummary {
+    card_id: String,
+    target_slots: Vec<LegalTargetSlotSummary>,
+}
+
+#[derive(Serialize)]
+struct LegalTargetSlotSummary {
+    selector_id: String,
+    min: u16,
+    max: u16,
+    options: Vec<TargetOptionSummary>,
+}
+
+#[derive(Serialize)]
+struct TargetOptionSummary {
+    target_id: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct LegalAttackSummary {
+    villain_id: String,
+    max_amount: u16,
+}
+
+#[derive(Serialize)]
+struct LegalAcquisitionSummary {
+    card_id: String,
+    cost: u16,
+}
+
+#[derive(Serialize)]
+struct TableSummary {
+    hand: Vec<CardSummary>,
+    play_area: Vec<CardSummary>,
+    draw_pile_count: usize,
+    discard_pile_count: usize,
+    market: Vec<MarketCardSummary>,
+    hogwarts_deck_count: usize,
+    active_villains: Vec<VillainSummary>,
+    villain_deck_count: usize,
+}
+
+#[derive(Serialize)]
+struct CardSummary {
+    instance_id: String,
+    catalog_id: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct MarketCardSummary {
+    instance_id: String,
+    catalog_id: String,
+    name: String,
+    cost: u16,
+    affordable: bool,
+}
+
+#[derive(Serialize)]
+struct VillainSummary {
+    instance_id: String,
+    catalog_id: String,
+    name: String,
+    health: u16,
+    attackable: bool,
+    max_attack: u16,
 }
 
 pub(crate) async fn projection_for_participant(
@@ -170,17 +251,29 @@ pub(crate) async fn projection_for_participant(
         .content
         .effect_rules(&game.manifest_digest)
         .ok_or_else(ApiError::internal)?;
-    let legal_actions = if game.expired {
-        Vec::new()
+    let (legal_commands, legal_intentions) = if game.expired {
+        (Vec::new(), LegalGameIntentions::default())
     } else {
-        legal_game_commands(&domain_state, actor_position, &effect_rules)
-            .into_iter()
-            .map(|command| match command {
-                GameCommandType::CompleteDarkArts => "complete_dark_arts".to_owned(),
-                GameCommandType::ResolveChoice => "resolve_choice".to_owned(),
-            })
-            .collect()
+        (
+            legal_game_commands(&domain_state, actor_position, &effect_rules),
+            legal_game_intentions(&domain_state, actor_position, &effect_rules),
+        )
     };
+    let legal_actions = legal_action_names(&legal_commands, &legal_intentions);
+    let legal_intentions_summary = legal_intentions_summary(
+        &legal_intentions,
+        &domain_state,
+        &participants,
+        &state.content,
+        &game.manifest_digest,
+    );
+    let table = table_summary(
+        &domain_state,
+        actor_position,
+        &legal_intentions,
+        &state.content,
+        &game.manifest_digest,
+    )?;
 
     Ok(Some(GameProjectionResponse {
         game: GameSummary {
@@ -219,6 +312,8 @@ pub(crate) async fn projection_for_participant(
             .map(|participant| game_participant(participant, &domain_state))
             .collect::<Result<Vec<_>, _>>()?,
         legal_actions,
+        legal_intentions: legal_intentions_summary,
+        table,
         choice: choice_summary(&domain_state),
         effects: EffectResolutionSummary {
             status: if domain_state.pending_choice().is_some() {
@@ -239,11 +334,232 @@ pub(crate) async fn projection_for_participant(
     }))
 }
 
+fn legal_action_names(
+    commands: &[GameCommandType],
+    intentions: &LegalGameIntentions,
+) -> Vec<String> {
+    let mut actions = commands
+        .iter()
+        .map(|command| match command {
+            GameCommandType::CompleteDarkArts => "complete_dark_arts".to_owned(),
+            GameCommandType::ResolveChoice => "resolve_choice".to_owned(),
+        })
+        .collect::<Vec<_>>();
+    if intentions.complete_dark_arts && !actions.iter().any(|action| action == "complete_dark_arts")
+    {
+        actions.push("complete_dark_arts".to_owned());
+    }
+    if !intentions.playable_cards.is_empty() {
+        actions.push("play_card".to_owned());
+    }
+    if !intentions.attack_targets.is_empty() {
+        actions.push("assign_attack".to_owned());
+    }
+    if !intentions.acquisitions.is_empty() {
+        actions.push("acquire_card".to_owned());
+    }
+    actions
+}
+
+fn legal_intentions_summary(
+    intentions: &LegalGameIntentions,
+    domain_state: &InitialGameState,
+    participants: &[StoredRoomParticipant],
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> LegalIntentionsSummary {
+    LegalIntentionsSummary {
+        complete_dark_arts: intentions.complete_dark_arts,
+        play_cards: intentions
+            .playable_cards
+            .iter()
+            .map(|card| LegalPlayCardSummary {
+                card_id: card.card_id.clone(),
+                target_slots: card
+                    .target_slots
+                    .iter()
+                    .map(|slot| LegalTargetSlotSummary {
+                        selector_id: slot.selector_id.clone(),
+                        min: slot.min,
+                        max: slot.max,
+                        options: slot
+                            .target_ids
+                            .iter()
+                            .map(|target_id| TargetOptionSummary {
+                                target_id: target_id.clone(),
+                                label: target_label(
+                                    target_id,
+                                    domain_state,
+                                    participants,
+                                    content,
+                                    manifest_digest,
+                                ),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        assign_attack: intentions
+            .attack_targets
+            .iter()
+            .map(|target| LegalAttackSummary {
+                villain_id: target.villain_id.clone(),
+                max_amount: target.max_amount,
+            })
+            .collect(),
+        acquire_cards: intentions
+            .acquisitions
+            .iter()
+            .map(|acquisition| LegalAcquisitionSummary {
+                card_id: acquisition.card_id.clone(),
+                cost: acquisition.cost,
+            })
+            .collect(),
+    }
+}
+
+fn target_label(
+    target_id: &str,
+    state: &InitialGameState,
+    participants: &[StoredRoomParticipant],
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> String {
+    let Some((_, entity)) = state.effect_world().entity(target_id) else {
+        return target_id.to_owned();
+    };
+    if let Some(position) = entity.owner_position()
+        && let Some(participant) = participants
+            .iter()
+            .find(|participant| i16::from(position) == participant.position)
+    {
+        return participant
+            .hero_id
+            .as_deref()
+            .and_then(|hero_id| hero_name(hero_id).ok())
+            .map_or_else(
+                || participant.display_name.clone(),
+                |hero| format!("{} - {hero}", participant.display_name),
+            );
+    }
+    entity.catalog_id().map_or_else(
+        || target_id.to_owned(),
+        |catalog_id| {
+            content
+                .entity_name(manifest_digest, catalog_id)
+                .unwrap_or_else(|| catalog_id.to_owned())
+        },
+    )
+}
+
+fn table_summary(
+    state: &InitialGameState,
+    actor_position: u8,
+    intentions: &LegalGameIntentions,
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> Result<TableSummary, ApiError> {
+    let cards_in = |zone| {
+        state
+            .effect_world()
+            .entities_in(zone)
+            .iter()
+            .filter(|entity| entity.owner_position() == Some(actor_position))
+            .filter_map(|entity| card_summary(entity, content, manifest_digest))
+            .collect::<Vec<_>>()
+    };
+    let market = state
+        .effect_world()
+        .entities_in(EffectZone::Market)
+        .iter()
+        .map(|entity| {
+            let card =
+                card_summary(entity, content, manifest_digest).ok_or_else(ApiError::internal)?;
+            let cost = entity.influence_cost().ok_or_else(ApiError::internal)?;
+            Ok(MarketCardSummary {
+                instance_id: card.instance_id,
+                catalog_id: card.catalog_id,
+                name: card.name,
+                cost,
+                affordable: intentions
+                    .acquisitions
+                    .iter()
+                    .any(|acquisition| acquisition.card_id == entity.id()),
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    let active_villains = state
+        .effect_world()
+        .entities_in(EffectZone::ActiveVillains)
+        .iter()
+        .map(|entity| {
+            let catalog_id = entity.catalog_id().ok_or_else(ApiError::internal)?;
+            let legal = intentions
+                .attack_targets
+                .iter()
+                .find(|target| target.villain_id == entity.id());
+            Ok(VillainSummary {
+                instance_id: entity.id().to_owned(),
+                catalog_id: catalog_id.to_owned(),
+                name: content
+                    .entity_name(manifest_digest, catalog_id)
+                    .unwrap_or_else(|| catalog_id.to_owned()),
+                health: entity.resource(EffectResource::Health),
+                attackable: legal.is_some(),
+                max_attack: legal.map_or(0, |target| target.max_amount),
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    let owned_count = |zone| {
+        state
+            .effect_world()
+            .entities_in(zone)
+            .iter()
+            .filter(|entity| entity.owner_position() == Some(actor_position))
+            .count()
+    };
+
+    Ok(TableSummary {
+        hand: cards_in(EffectZone::HeroHand),
+        play_area: cards_in(EffectZone::HeroPlayArea),
+        draw_pile_count: owned_count(EffectZone::HeroDrawPile),
+        discard_pile_count: owned_count(EffectZone::HeroDiscardPile),
+        market,
+        hogwarts_deck_count: state
+            .effect_world()
+            .entities_in(EffectZone::HogwartsDeck)
+            .len(),
+        active_villains,
+        villain_deck_count: state
+            .effect_world()
+            .entities_in(EffectZone::VillainDeck)
+            .len(),
+    })
+}
+
+fn card_summary(
+    entity: &game_domain::EffectEntity,
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> Option<CardSummary> {
+    let catalog_id = entity.catalog_id()?;
+    Some(CardSummary {
+        instance_id: entity.id().to_owned(),
+        catalog_id: catalog_id.to_owned(),
+        name: content
+            .entity_name(manifest_digest, catalog_id)
+            .unwrap_or_else(|| catalog_id.to_owned()),
+    })
+}
+
 fn game_participant(
     stored: &StoredRoomParticipant,
     state: &InitialGameState,
 ) -> Result<GameParticipant, ApiError> {
     let hero_id = stored.hero_id.as_deref().ok_or_else(ApiError::internal)?;
+    let position = u8::try_from(stored.position)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(GameParticipant {
         display_name: stored.display_name.clone(),
         role: stored.role.clone(),
@@ -257,6 +573,12 @@ fn game_participant(
             attack: hero_resource(state, stored.position, EffectResource::Attack)?,
             influence: hero_resource(state, stored.position, EffectResource::Influence)?,
         },
+        hand_count: state
+            .effect_world()
+            .entities_in(EffectZone::HeroHand)
+            .iter()
+            .filter(|entity| entity.owner_position() == Some(position))
+            .count(),
     })
 }
 

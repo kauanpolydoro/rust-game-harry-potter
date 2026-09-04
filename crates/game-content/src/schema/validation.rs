@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    Condition, ContentSet, Effect, EffectChoiceAudience, Eligibility, ImportFailure, Operation,
-    Resource, RuleId, Selector, Zone,
+    Condition, ContentSet, Effect, EffectChoiceAudience, Eligibility, EntryKind, FunctionalField,
+    GameSetupOwner, ImportFailure, Operation, Resource, RuleId, Selector, Zone,
 };
 
 use super::CandidateBundle;
@@ -15,11 +15,13 @@ const MAX_RUNTIME_NODES: usize = 4_096;
 const MAX_RUNTIME_RULE_ID_LENGTH: usize = 244;
 const MAX_TARGETS: u16 = 32;
 const MAX_PARTICIPANT_HEROES: usize = 4;
+const MAX_PARTICIPANTS: u32 = 4;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
     validate_metadata(bundle)?;
     validate_inventory(bundle)?;
     validate_provenance(bundle)?;
+    validate_game_setups(bundle)?;
     validate_effects(bundle)?;
     validate_references(bundle)
 }
@@ -148,6 +150,7 @@ fn validate_inventory(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
                 ),
             });
         }
+        validate_functional_definition_shapes(entry)?;
     }
 
     let card_count = bundle
@@ -164,6 +167,36 @@ fn validate_inventory(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
                 super::BASE_CARD_COUNT,
                 bundle.entries.len()
             ),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_functional_definition_shapes(
+    entry: &super::CandidateEntry,
+) -> Result<(), ImportFailure> {
+    if let Some(incompatible) = entry.functional.iter().find_map(|(field, definition)| {
+        definition
+            .value
+            .filter(|_| !matches!(field, FunctionalField::Cost | FunctionalField::Health))
+            .map(|_| field)
+    }) {
+        return Err(ImportFailure {
+            message: format!(
+                "entry {} value is incompatible with functional field {incompatible:?}",
+                entry.id
+            ),
+        });
+    }
+    if entry
+        .functional
+        .get(&FunctionalField::Health)
+        .and_then(|definition| definition.value)
+        == Some(0)
+    {
+        return Err(ImportFailure {
+            message: format!("entry {} Health value must be greater than zero", entry.id),
         });
     }
 
@@ -248,7 +281,243 @@ fn validate_provenance(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
         }
     }
 
+    for setup in &bundle.game_setups {
+        if setup.sources.is_empty() {
+            return Err(ImportFailure {
+                message: format!(
+                    "game setup {} has no provenance sources",
+                    setup.adventure_id
+                ),
+            });
+        }
+        if let Some(unknown_source) = setup
+            .sources
+            .iter()
+            .find(|source_id| !sources.contains(source_id.as_str()))
+        {
+            return Err(ImportFailure {
+                message: format!(
+                    "game setup {} has unknown provenance source {unknown_source}",
+                    setup.adventure_id
+                ),
+            });
+        }
+    }
+
     Ok(())
+}
+
+fn validate_game_setups(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    if let Some(duplicate) = bundle
+        .game_setups
+        .windows(2)
+        .find(|pair| pair[0].adventure_id == pair[1].adventure_id)
+        .map(|pair| &pair[0].adventure_id)
+    {
+        return Err(ImportFailure {
+            message: format!("duplicate game setup for adventure {duplicate}"),
+        });
+    }
+
+    let entries = bundle
+        .entries
+        .iter()
+        .map(|entry| (&entry.id, entry))
+        .collect::<BTreeMap<_, _>>();
+
+    for setup in &bundle.game_setups {
+        validate_game_setup(setup, &entries)?;
+    }
+
+    Ok(())
+}
+
+fn validate_game_setup(
+    setup: &super::CandidateGameSetup,
+    entries: &BTreeMap<&crate::CatalogId, &super::CandidateEntry>,
+) -> Result<(), ImportFailure> {
+    if setup.entities.is_empty() {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {} must contain at least one entity",
+                setup.adventure_id
+            ),
+        });
+    }
+    if let Some(duplicate) = setup
+        .sources
+        .windows(2)
+        .find(|pair| pair[0] == pair[1])
+        .map(|pair| &pair[0])
+    {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {} has duplicate provenance source {duplicate}",
+                setup.adventure_id
+            ),
+        });
+    }
+    let adventure = entries
+        .get(&setup.adventure_id)
+        .ok_or_else(|| ImportFailure {
+            message: format!(
+                "game setup has unknown adventure reference {}",
+                setup.adventure_id
+            ),
+        })?;
+    if adventure.kind != EntryKind::Adventure {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup adventure reference {} has kind {:?}",
+                setup.adventure_id, adventure.kind
+            ),
+        });
+    }
+
+    let mut entity_ids = BTreeSet::new();
+    for entity in &setup.entities {
+        validate_setup_entity(&setup.adventure_id, entity, entries, &mut entity_ids)?;
+    }
+
+    Ok(())
+}
+
+fn validate_setup_entity(
+    adventure_id: &crate::CatalogId,
+    entity: &super::CandidateGameSetupEntity,
+    entries: &BTreeMap<&crate::CatalogId, &super::CandidateEntry>,
+    entity_ids: &mut BTreeSet<crate::CatalogId>,
+) -> Result<(), ImportFailure> {
+    if !entity_ids.insert(entity.catalog_id.clone()) {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {adventure_id} has duplicate entity reference {}",
+                entity.catalog_id
+            ),
+        });
+    }
+    let entry = entries
+        .get(&entity.catalog_id)
+        .ok_or_else(|| ImportFailure {
+            message: format!(
+                "game setup {adventure_id} has unknown entity reference {}",
+                entity.catalog_id
+            ),
+        })?;
+    if !setup_entity_is_compatible(entry.kind, entity.zone, entity.owner) {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {adventure_id} entity {} kind {:?}, zone {:?}, and owner {:?} are incompatible",
+                entity.catalog_id, entry.kind, entity.zone, entity.owner
+            ),
+        });
+    }
+    validate_setup_entity_data(adventure_id, &entity.catalog_id, entry)?;
+    if entity.copies == 0 {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {adventure_id} entity {} must request at least one copy",
+                entity.catalog_id
+            ),
+        });
+    }
+    let required_copies = u32::from(entity.copies)
+        * match entity.owner {
+            GameSetupOwner::None => 1,
+            GameSetupOwner::EachParticipant => MAX_PARTICIPANTS,
+        };
+    if required_copies > u32::from(entry.copies) {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {adventure_id} entity {} requires {required_copies} copies but the catalog declares {}",
+                entity.catalog_id, entry.copies
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_setup_entity_data(
+    adventure_id: &crate::CatalogId,
+    entity_id: &crate::CatalogId,
+    entry: &super::CandidateEntry,
+) -> Result<(), ImportFailure> {
+    if entry
+        .functional
+        .get(&FunctionalField::Effect)
+        .and_then(|definition| definition.rule.as_ref())
+        .is_none()
+    {
+        return Err(ImportFailure {
+            message: format!(
+                "game setup {adventure_id} entity {entity_id} requires an Effect rule"
+            ),
+        });
+    }
+
+    match entry.kind {
+        EntryKind::HogwartsCard => {
+            let has_unambiguous_cost = entry
+                .functional
+                .get(&FunctionalField::Cost)
+                .is_some_and(|definition| definition.value.is_some() && definition.rule.is_none());
+            if !has_unambiguous_cost {
+                return Err(ImportFailure {
+                    message: format!(
+                        "game setup {adventure_id} entity {entity_id} requires a Cost value"
+                    ),
+                });
+            }
+
+            Ok(())
+        }
+        EntryKind::Villain => {
+            let has_positive_health =
+                entry
+                    .functional
+                    .get(&FunctionalField::Health)
+                    .is_some_and(|definition| {
+                        definition.value.is_some_and(|health| health > 0)
+                            && definition.rule.is_none()
+                    });
+            if !has_positive_health {
+                return Err(ImportFailure {
+                    message: format!(
+                        "game setup {adventure_id} entity {entity_id} requires a positive Health value"
+                    ),
+                });
+            }
+
+            Ok(())
+        }
+        EntryKind::StarterCard => Ok(()),
+        _ => Err(ImportFailure {
+            message: format!(
+                "game setup {adventure_id} entity {entity_id} has unsupported kind {:?}",
+                entry.kind
+            ),
+        }),
+    }
+}
+
+fn setup_entity_is_compatible(kind: EntryKind, zone: Zone, owner: GameSetupOwner) -> bool {
+    matches!(
+        (kind, zone, owner),
+        (
+            EntryKind::StarterCard | EntryKind::HogwartsCard,
+            Zone::HeroDiscardPile | Zone::HeroDrawPile | Zone::HeroHand | Zone::HeroPlayArea,
+            GameSetupOwner::EachParticipant,
+        ) | (
+            EntryKind::HogwartsCard,
+            Zone::HogwartsDeck | Zone::Market,
+            GameSetupOwner::None,
+        ) | (
+            EntryKind::Villain,
+            Zone::VillainDeck | Zone::ActiveVillains,
+            GameSetupOwner::None,
+        )
+    )
 }
 
 fn validate_effects(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
@@ -277,7 +546,9 @@ fn validate_effects(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
             }
         }
         let mut nodes = 0;
-        rule.effect.validate(&rule.id, 0, &mut nodes)?;
+        let mut selectors = BTreeMap::new();
+        rule.effect
+            .validate(&rule.id, 0, &mut nodes, &mut selectors)?;
     }
     Ok(())
 }
@@ -547,6 +818,7 @@ impl Effect {
         rule_id: &RuleId,
         depth: usize,
         nodes: &mut usize,
+        selectors: &mut BTreeMap<String, Selector>,
     ) -> Result<(), ImportFailure> {
         *nodes += 1;
         if depth > MAX_EFFECT_DEPTH || *nodes > MAX_EFFECT_NODES {
@@ -557,7 +829,7 @@ impl Effect {
 
         match self {
             Self::Apply { target, operation } => {
-                target.validate(rule_id)?;
+                target.validate(rule_id, selectors)?;
                 operation.validate_zone(target.zone, rule_id)?;
             }
             Self::Choice { options, .. } => {
@@ -569,7 +841,7 @@ impl Effect {
                     });
                 }
                 for option in options {
-                    option.validate(rule_id, depth + 1, nodes)?;
+                    option.validate(rule_id, depth + 1, nodes, selectors)?;
                 }
             }
             Self::Condition {
@@ -577,10 +849,10 @@ impl Effect {
                 then,
                 otherwise,
             } => {
-                condition.validate(rule_id)?;
-                then.validate(rule_id, depth + 1, nodes)?;
+                condition.validate(rule_id, selectors)?;
+                then.validate(rule_id, depth + 1, nodes, selectors)?;
                 if let Some(otherwise) = otherwise {
-                    otherwise.validate(rule_id, depth + 1, nodes)?;
+                    otherwise.validate(rule_id, depth + 1, nodes, selectors)?;
                 }
             }
             Self::Repeat { times, effect } => {
@@ -591,7 +863,7 @@ impl Effect {
                         ),
                     });
                 }
-                effect.validate(rule_id, depth + 1, nodes)?;
+                effect.validate(rule_id, depth + 1, nodes, selectors)?;
             }
             Self::Roll { die, outcomes } => {
                 if outcomes.len() != die.sides() {
@@ -604,7 +876,7 @@ impl Effect {
                     });
                 }
                 for outcome in outcomes {
-                    outcome.validate(rule_id, depth + 1, nodes)?;
+                    outcome.validate(rule_id, depth + 1, nodes, selectors)?;
                 }
             }
             Self::Sequence { effects } => {
@@ -616,7 +888,7 @@ impl Effect {
                     });
                 }
                 for effect in effects {
-                    effect.validate(rule_id, depth + 1, nodes)?;
+                    effect.validate(rule_id, depth + 1, nodes, selectors)?;
                 }
             }
             Self::NoOp | Self::Reference { .. } | Self::Terminal { .. } => {}
@@ -626,15 +898,19 @@ impl Effect {
 }
 
 impl Condition {
-    fn validate(&self, rule_id: &RuleId) -> Result<(), ImportFailure> {
+    fn validate(
+        &self,
+        rule_id: &RuleId,
+        selectors: &mut BTreeMap<String, Selector>,
+    ) -> Result<(), ImportFailure> {
         match self {
-            Self::HasEligibleTarget { target } => target.validate(rule_id),
+            Self::HasEligibleTarget { target } => target.validate(rule_id, selectors),
             Self::ResourceAtLeast {
                 target,
                 resource,
                 amount,
             } => {
-                target.validate(rule_id)?;
+                target.validate(rule_id, selectors)?;
                 if *amount == 0 || !zone_supports_resource(target.zone, *resource) {
                     return Err(ImportFailure {
                         message: format!(
@@ -651,7 +927,24 @@ impl Condition {
 }
 
 impl Selector {
-    fn validate(&self, rule_id: &RuleId) -> Result<(), ImportFailure> {
+    fn validate(
+        &self,
+        rule_id: &RuleId,
+        selectors: &mut BTreeMap<String, Self>,
+    ) -> Result<(), ImportFailure> {
+        if let Some(id) = &self.id {
+            if id.is_empty() {
+                return Err(ImportFailure {
+                    message: format!("rule {rule_id} selector ID must not be empty"),
+                });
+            }
+            if selectors.get(id).is_some_and(|existing| existing != self) {
+                return Err(ImportFailure {
+                    message: format!("rule {rule_id} selector ID {id} has conflicting definitions"),
+                });
+            }
+            selectors.entry(id.clone()).or_insert_with(|| self.clone());
+        }
         if self.cardinality.min > self.cardinality.max {
             return Err(ImportFailure {
                 message: format!(

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 const initialGameProjection = {
   choice: { status: 'none' },
@@ -10,8 +10,15 @@ const initialGameProjection = {
     status: 'in_progress',
   },
   legal_actions: ['complete_dark_arts'],
+  legal_intentions: {
+    acquire_cards: [],
+    assign_attack: [],
+    complete_dark_arts: true,
+    play_cards: [],
+  },
   participant: {
     display_name: 'Minerva',
+    hand_count: 0,
     hero: { id: 'harry', name: 'Harry' },
     position: 1,
     resources: { attack: 0, health: 10, influence: 0 },
@@ -20,6 +27,7 @@ const initialGameProjection = {
   participants: [
     {
       display_name: 'Minerva',
+      hand_count: 0,
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
       resources: { attack: 0, health: 10, influence: 0 },
@@ -27,6 +35,7 @@ const initialGameProjection = {
     },
     {
       display_name: 'Luna',
+      hand_count: 0,
       hero: { id: 'hermione', name: 'Hermione' },
       position: 2,
       resources: { attack: 0, health: 10, influence: 0 },
@@ -48,6 +57,16 @@ const initialGameProjection = {
       sampling: 'rejection-sampling-v1',
       shuffle: 'fisher-yates-v1',
     },
+  },
+  table: {
+    active_villains: [],
+    discard_pile_count: 0,
+    draw_pile_count: 0,
+    hand: [],
+    hogwarts_deck_count: 0,
+    market: [],
+    play_area: [],
+    villain_deck_count: 0,
   },
   turn: { active_position: 1, number: 1, phase: 'dark_arts' },
 }
@@ -71,6 +90,10 @@ const completedGameProjection = {
   },
   game: { ...initialGameProjection.game, expires_at: '2026-09-10T13:00:00Z' },
   legal_actions: [],
+  legal_intentions: {
+    ...initialGameProjection.legal_intentions,
+    complete_dark_arts: false,
+  },
   participant: {
     ...initialGameProjection.participant,
     resources: { attack: 2, health: 9, influence: 2 },
@@ -90,6 +113,125 @@ const completedGameProjection = {
   turn: { ...initialGameProjection.turn, phase: 'hero_action' },
 }
 
+const heroActionProjection = {
+  ...completedGameProjection,
+  effects: { outcomes: [], status: 'idle' },
+  legal_actions: ['play_card'],
+  legal_intentions: {
+    acquire_cards: [],
+    assign_attack: [],
+    complete_dark_arts: false,
+    play_cards: [
+      {
+        card_id: 'instance:starter',
+        target_slots: [
+          {
+            max: 1,
+            min: 1,
+            options: [
+              { label: 'Minerva - Harry', target_id: 'hero:1' },
+              { label: 'Luna - Hermione', target_id: 'hero:2' },
+            ],
+            selector_id: 'target:hero',
+          },
+        ],
+      },
+    ],
+  },
+  participant: {
+    ...completedGameProjection.participant,
+    hand_count: 1,
+    resources: { attack: 0, health: 9, influence: 0 },
+  },
+  participants: completedGameProjection.participants.map((participant) =>
+    participant.position === 1
+      ? {
+          ...participant,
+          hand_count: 1,
+          resources: { attack: 0, health: 9, influence: 0 },
+        }
+      : participant,
+  ),
+  table: {
+    active_villains: [
+      {
+        attackable: false,
+        catalog_id: 'fixture:villain',
+        health: 2,
+        instance_id: 'instance:villain',
+        max_attack: 0,
+        name: 'Draco',
+      },
+    ],
+    discard_pile_count: 0,
+    draw_pile_count: 0,
+    hand: [
+      {
+        catalog_id: 'fixture:starter-card',
+        instance_id: 'instance:starter',
+        name: 'Lumos',
+      },
+    ],
+    hogwarts_deck_count: 1,
+    market: [
+      {
+        affordable: false,
+        catalog_id: 'fixture:hogwarts-card',
+        cost: 2,
+        instance_id: 'instance:market',
+        name: 'Nimbus 2000',
+      },
+    ],
+    play_area: [],
+    villain_deck_count: 0,
+  },
+}
+
+const playedCardProjection = {
+  ...heroActionProjection,
+  legal_actions: ['assign_attack', 'acquire_card'],
+  legal_intentions: {
+    acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
+    assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
+    complete_dark_arts: false,
+    play_cards: [],
+  },
+  participant: {
+    ...heroActionProjection.participant,
+    hand_count: 0,
+    resources: { attack: 2, health: 9, influence: 3 },
+  },
+  participants: heroActionProjection.participants.map((participant) =>
+    participant.position === 1
+      ? {
+          ...participant,
+          hand_count: 0,
+          resources: { attack: 2, health: 9, influence: 3 },
+        }
+      : participant,
+  ),
+  snapshot: {
+    ...heroActionProjection.snapshot,
+    cursor: 2,
+    digest: `blake3:${'e'.repeat(64)}`,
+    sequence: 2,
+    state_version: 3,
+  },
+  table: {
+    ...heroActionProjection.table,
+    active_villains: [
+      {
+        ...heroActionProjection.table.active_villains[0],
+        attackable: true,
+        max_attack: 2,
+      },
+    ],
+    hand: [],
+    market: [{ ...heroActionProjection.table.market[0], affordable: true }],
+    play_area: [heroActionProjection.table.hand[0]],
+  },
+}
+
 function errorResponse(code: string) {
   return {
     error: {
@@ -101,6 +243,52 @@ function errorResponse(code: string) {
       retry: 'after_correction',
     },
   }
+}
+
+async function installSynchronizedSocket(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    class SynchronizedSocket {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+
+      readonly url: string
+      readonly requestedProtocol: string
+      protocol = ''
+      readyState = SynchronizedSocket.CONNECTING
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: ((event: { code: number }) => void) | null = null
+
+      constructor(url: string | URL, protocol: string | string[]) {
+        this.url = String(url)
+        this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+        queueMicrotask(() => {
+          this.readyState = SynchronizedSocket.OPEN
+          this.protocol = this.requestedProtocol
+          this.onopen?.()
+          const request = new URL(this.url)
+          this.onmessage?.({
+            data: JSON.stringify({
+              cursor: Number(request.searchParams.get('cursor')),
+              digest: request.searchParams.get('digest'),
+              protocol_version: 2,
+              snapshot_version: Number(request.searchParams.get('snapshot_version')),
+              type: 'synchronized',
+            }),
+          })
+        })
+      }
+
+      close(): void {
+        this.readyState = SynchronizedSocket.CLOSED
+        this.onclose?.({ code: 1000 })
+      }
+    }
+    ;(globalThis as unknown as { WebSocket: typeof SynchronizedSocket }).WebSocket =
+      SynchronizedSocket
+  })
 }
 
 test('a player sees when the authoritative service is ready', async ({ page }) => {
@@ -447,53 +635,76 @@ test('the current interface reflows at an effective 200 percent zoom', async ({ 
   expect(overflow).toBeLessThanOrEqual(1)
 })
 
+test('a targeted card stays in the official hand until its command is accepted', async ({
+  page,
+}) => {
+  let acceptCommand = (): void => undefined
+  let submittedCommand: Record<string, unknown> | null = null
+  const commandGate = new Promise<void>((resolve) => {
+    acceptCommand = resolve
+  })
+  await page.addInitScript(() => localStorage.setItem('hogwarts.session.expected', 'true'))
+  await installSynchronizedSocket(page)
+  await page.route('**/api/session', (route) =>
+    route.fulfill({
+      body: JSON.stringify(heroActionProjection),
+      contentType: 'application/json',
+      status: 200,
+    }),
+  )
+  await page.route('**/api/games/current/commands', async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>
+    submittedCommand = body
+    await commandGate
+    await route.fulfill({
+      body: JSON.stringify({
+        projection: playedCardProjection,
+        receipt: {
+          accepted_sequence: 2,
+          accepted_state_version: 3,
+          command_id: body.command_id,
+          expected_state_version: 2,
+          expires_at: '2026-09-10T13:00:00Z',
+          status: 'accepted',
+          type: 'play_card',
+        },
+      }),
+      contentType: 'application/json',
+      status: 200,
+    })
+  })
+
+  await page.goto('/')
+  const hand = page.getByRole('region', { name: 'Sua mão' })
+  await hand.getByRole('radio', { name: 'Minerva - Harry' }).check()
+  await hand.getByRole('button', { name: 'Jogar Lumos' }).click()
+
+  await expect(hand.getByText('Intenção enviada')).toBeVisible()
+  await expect(hand.getByText('Lumos', { exact: true })).toBeVisible()
+  await expect(page.getByText('Ataque 0 · Influência 0', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
+  expect(submittedCommand).toMatchObject({
+    card_id: 'instance:starter',
+    expected_state_version: 2,
+    targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
+    type: 'play_card',
+  })
+
+  acceptCommand()
+
+  await expect(page.getByRole('region', { name: 'Área de jogo' }).getByText('Lumos')).toBeVisible()
+  await expect(page.getByText('Ataque 2 · Influência 3', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Atacar Draco com 2' })).toBeEnabled()
+  await expect(
+    page.getByRole('button', { name: 'Adquirir Nimbus 2000 por 2 de Influência' }),
+  ).toBeEnabled()
+})
+
 test('a stale command resynchronizes before the player can decide again', async ({ page }) => {
   let sessionRequests = 0
   let commandRequests = 0
-  await page.addInitScript(() => {
-    localStorage.setItem('hogwarts.session.expected', 'true')
-    class SynchronizedSocket {
-      static readonly CONNECTING = 0
-      static readonly OPEN = 1
-      static readonly CLOSED = 3
-
-      readonly url: string
-      readonly requestedProtocol: string
-      protocol = ''
-      readyState = SynchronizedSocket.CONNECTING
-      onopen: (() => void) | null = null
-      onmessage: ((event: { data: string }) => void) | null = null
-      onerror: (() => void) | null = null
-      onclose: ((event: { code: number }) => void) | null = null
-
-      constructor(url: string | URL, protocol: string | string[]) {
-        this.url = String(url)
-        this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
-        queueMicrotask(() => {
-          this.readyState = SynchronizedSocket.OPEN
-          this.protocol = this.requestedProtocol
-          this.onopen?.()
-          const request = new URL(this.url)
-          this.onmessage?.({
-            data: JSON.stringify({
-              cursor: Number(request.searchParams.get('cursor')),
-              digest: request.searchParams.get('digest'),
-              protocol_version: 2,
-              snapshot_version: Number(request.searchParams.get('snapshot_version')),
-              type: 'synchronized',
-            }),
-          })
-        })
-      }
-
-      close(): void {
-        this.readyState = SynchronizedSocket.CLOSED
-        this.onclose?.({ code: 1000 })
-      }
-    }
-    ;(globalThis as unknown as { WebSocket: typeof SynchronizedSocket }).WebSocket =
-      SynchronizedSocket
-  })
+  await page.addInitScript(() => localStorage.setItem('hogwarts.session.expected', 'true'))
+  await installSynchronizedSocket(page)
   await page.route('**/api/session', async (route) => {
     sessionRequests += 1
     await route.fulfill({

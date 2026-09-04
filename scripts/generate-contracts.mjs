@@ -44,14 +44,14 @@ const enumAliases = new Map([
 ])
 
 function typeScriptType(schema, indentationLevel) {
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+    return schema.oneOf
+      .map((variant) => typeScriptType(variant, indentationLevel))
+      .join(' | ')
+  }
   const enumAlias = enumAliases.get(schema)
   if (enumAlias) {
     return enumAlias
-  }
-  if (Array.isArray(schema.oneOf)) {
-    return schema.oneOf
-      .map((candidate) => typeScriptType(candidate, indentationLevel))
-      .join(' | ')
   }
   if (typeof schema.$ref === 'string') {
     return schema.$ref.split('/').at(-1)
@@ -137,7 +137,7 @@ function validationExpression(schema, value) {
     }
     return `!(${validationExpression(schema.not, value)})`
   }
-  if (Array.isArray(schema.oneOf)) {
+  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
     const candidates = schema.oneOf.map((candidate) =>
       validationExpression(candidate, value),
     )
@@ -262,7 +262,7 @@ const generatedDefinitions = Object.entries(identitySchema.$defs)
     if (schema.type === 'object' && schema.properties) {
       return `export interface ${name} ${typeScriptType(schema, 1)}`
     }
-    if (Array.isArray(schema.oneOf)) {
+    if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
       return `export type ${name} = ${typeScriptType(schema, 1)}`
     }
     throw new TypeError(
