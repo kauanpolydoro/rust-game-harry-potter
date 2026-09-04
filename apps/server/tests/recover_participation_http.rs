@@ -41,19 +41,37 @@ fn create_room_request() -> Request<Body> {
 }
 
 fn recovery_request(token: &str, password: &str, attempt_id: &str) -> Request<Body> {
+    recovery_request_replacing(token, password, attempt_id, None)
+}
+
+fn recovery_request_replacing(
+    token: &str,
+    password: &str,
+    attempt_id: &str,
+    replace_session_id: Option<&str>,
+) -> Request<Body> {
+    let mut payload = json!({
+        "recovery_token": token,
+        "recovery_password": password,
+        "recovery_attempt_id": attempt_id
+    });
+    if let Some(replace_session_id) = replace_session_id {
+        payload["replace_session_id"] = json!(replace_session_id);
+    }
     Request::builder()
         .method("POST")
         .uri("/api/session/recover")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "recovery_token": token,
-                "recovery_password": password,
-                "recovery_attempt_id": attempt_id
-            })
-            .to_string(),
-        ))
+        .body(Body::from(payload.to_string()))
         .expect("the participant recovery request must be valid")
+}
+
+fn authenticated_session_request(cookie: &str) -> Request<Body> {
+    Request::builder()
+        .uri("/api/session")
+        .header(header::COOKIE, cookie)
+        .body(Body::empty())
+        .expect("the authenticated session request must be valid")
 }
 
 fn session_cookie(response: &Response<Body>) -> &str {
@@ -258,8 +276,8 @@ async fn a_recovery_token_is_single_use_hmac_only_and_creates_one_second_session
     };
     let recovered_cookie = session_cookie(&success).to_owned();
     let recovered = response_json(success).await;
-    assert_eq!(recovered["participant"], created["participant"]);
-    assert_eq!(recovered["participant"]["position"], 1);
+    assert_eq!(recovered["lobby"]["participant"], created["participant"]);
+    assert_eq!(recovered["lobby"]["participant"]["position"], 1);
     assert_concurrent_idempotent_redelivery(
         &app,
         &recovery_token,
@@ -273,4 +291,287 @@ async fn a_recovery_token_is_single_use_hmac_only_and_creates_one_second_session
     assert_eq!(status, "consumed");
     assert_eq!(active_sessions, 2);
     assert!(consumed_session_matches);
+}
+
+#[tokio::test]
+async fn confirming_a_replacement_atomically_revokes_only_the_chosen_session() {
+    let (app, _database) = test_state().await;
+    let created = app
+        .clone()
+        .oneshot(create_room_request())
+        .await
+        .expect("room creation must receive a response");
+    let first_cookie = session_cookie(&created).to_owned();
+    let created = response_json(created).await;
+    let first_recovery_token = created["recovery_token"]
+        .as_str()
+        .expect("room creation must return a recovery token");
+
+    let second = app
+        .clone()
+        .oneshot(recovery_request(
+            first_recovery_token,
+            RECOVERY_PASSWORD,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+        .await
+        .expect("second-device recovery must receive a response");
+    let second_cookie = session_cookie(&second).to_owned();
+    let second = response_json(second).await;
+    let successor_token = second["recovery_token"]
+        .as_str()
+        .expect("second-device recovery must rotate the credential");
+
+    let third_attempt = uuid::Uuid::new_v4().to_string();
+    let replacement_required = app
+        .clone()
+        .oneshot(recovery_request(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &third_attempt,
+        ))
+        .await
+        .expect("third-device discovery must receive a response");
+    let replacement_required = response_json(replacement_required).await;
+    let first_session_id = replacement_required["sessions"][0]["id"]
+        .as_str()
+        .expect("the first replacement candidate must have an ID");
+
+    let replacement = app
+        .clone()
+        .oneshot(recovery_request_replacing(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &third_attempt,
+            Some(first_session_id),
+        ))
+        .await
+        .expect("replacement confirmation must receive a response");
+    assert_eq!(replacement.status(), StatusCode::OK);
+    let replacement_cookie = session_cookie(&replacement).to_owned();
+    let replacement = response_json(replacement).await;
+    assert_ne!(
+        replacement["recovery_token"].as_str(),
+        Some(successor_token)
+    );
+
+    let replay = app
+        .clone()
+        .oneshot(recovery_request_replacing(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &third_attempt,
+            Some(first_session_id),
+        ))
+        .await
+        .expect("replacement replay must receive a response");
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(session_cookie(&replay), replacement_cookie);
+
+    let replaced = app
+        .clone()
+        .oneshot(authenticated_session_request(&first_cookie))
+        .await
+        .expect("the replaced session must receive an authorization response");
+    assert_eq!(replaced.status(), StatusCode::UNAUTHORIZED);
+    for cookie in [&second_cookie, &replacement_cookie] {
+        let active = app
+            .clone()
+            .oneshot(authenticated_session_request(cookie))
+            .await
+            .expect("an active session must remain queryable");
+        assert_eq!(active.status(), StatusCode::OK);
+    }
+
+    let reused_with_new_attempt = app
+        .clone()
+        .oneshot(recovery_request(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+        .await
+        .expect("the consumed token must receive a response");
+    assert_eq!(reused_with_new_attempt.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn concurrent_replacement_confirmations_never_create_three_active_sessions() {
+    let (app, _database) = test_state().await;
+    let created = app
+        .clone()
+        .oneshot(create_room_request())
+        .await
+        .expect("room creation must receive a response");
+    let first_cookie = session_cookie(&created).to_owned();
+    let created = response_json(created).await;
+    let first_recovery_token = created["recovery_token"]
+        .as_str()
+        .expect("room creation must return a recovery token");
+    let second = app
+        .clone()
+        .oneshot(recovery_request(
+            first_recovery_token,
+            RECOVERY_PASSWORD,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+        .await
+        .expect("second-device recovery must receive a response");
+    let second_cookie = session_cookie(&second).to_owned();
+    let second = response_json(second).await;
+    let successor_token = second["recovery_token"]
+        .as_str()
+        .expect("second-device recovery must rotate the credential");
+
+    let first_attempt = uuid::Uuid::new_v4().to_string();
+    let second_attempt = uuid::Uuid::new_v4().to_string();
+    let candidates = app
+        .clone()
+        .oneshot(recovery_request(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &first_attempt,
+        ))
+        .await
+        .expect("candidate discovery must receive a response");
+    let candidates = response_json(candidates).await;
+    let first_session_id = candidates["sessions"][0]["id"]
+        .as_str()
+        .expect("the first candidate must have an ID");
+    let second_session_id = candidates["sessions"][1]["id"]
+        .as_str()
+        .expect("the second candidate must have an ID");
+
+    let (first, second) = tokio::join!(
+        app.clone().oneshot(recovery_request_replacing(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &first_attempt,
+            Some(first_session_id),
+        )),
+        app.clone().oneshot(recovery_request_replacing(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &second_attempt,
+            Some(second_session_id),
+        )),
+    );
+    let first = first.expect("the first replacement must receive a response");
+    let second = second.expect("the second replacement must receive a response");
+    assert_eq!(
+        [first.status(), second.status()]
+            .into_iter()
+            .filter(|status| *status == StatusCode::OK)
+            .count(),
+        1
+    );
+    assert_eq!(
+        [first.status(), second.status()]
+            .into_iter()
+            .filter(|status| *status == StatusCode::UNAUTHORIZED)
+            .count(),
+        1
+    );
+    let winner_cookie = if first.status() == StatusCode::OK {
+        session_cookie(&first).to_owned()
+    } else {
+        session_cookie(&second).to_owned()
+    };
+
+    let mut active_sessions = 0;
+    for cookie in [&first_cookie, &second_cookie, &winner_cookie] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_session_request(cookie))
+            .await
+            .expect("each known session must receive an authorization response");
+        if response.status() == StatusCode::OK {
+            active_sessions += 1;
+        }
+    }
+    assert_eq!(active_sessions, 2);
+}
+
+#[tokio::test]
+async fn a_third_device_must_choose_from_safe_session_metadata_before_recovery_changes_access() {
+    let (app, _database) = test_state().await;
+    let created = app
+        .clone()
+        .oneshot(create_room_request())
+        .await
+        .expect("room creation must receive a response");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let first_cookie = session_cookie(&created).to_owned();
+    let created = response_json(created).await;
+    let first_recovery_token = created["recovery_token"]
+        .as_str()
+        .expect("room creation must return the individual recovery token");
+
+    let second = app
+        .clone()
+        .oneshot(recovery_request(
+            first_recovery_token,
+            RECOVERY_PASSWORD,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+        .await
+        .expect("second-device recovery must receive a response");
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_cookie = session_cookie(&second).to_owned();
+    let second = response_json(second).await;
+    let successor_token = second["recovery_token"]
+        .as_str()
+        .expect("successful recovery must rotate the one-use credential");
+    assert_ne!(successor_token, first_recovery_token);
+
+    let replacement_required = app
+        .clone()
+        .oneshot(recovery_request(
+            successor_token,
+            RECOVERY_PASSWORD,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+        .await
+        .expect("third-device recovery must receive a response");
+    assert_eq!(replacement_required.status(), StatusCode::CONFLICT);
+    assert!(
+        replacement_required
+            .headers()
+            .get(header::SET_COOKIE)
+            .is_none()
+    );
+    let replacement_required = response_json(replacement_required).await;
+    assert_eq!(replacement_required["status"], "replacement_required");
+    let sessions = replacement_required["sessions"]
+        .as_array()
+        .expect("eligible sessions must be returned");
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0]["label"], "Sessão 1");
+    assert_eq!(sessions[1]["label"], "Sessão 2");
+    for session in sessions {
+        let fields = session
+            .as_object()
+            .expect("session metadata must be an object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(fields, ["created_at", "id", "label"].into_iter().collect());
+        assert!(
+            uuid::Uuid::parse_str(
+                session["id"]
+                    .as_str()
+                    .expect("session metadata must expose an opaque ID")
+            )
+            .is_ok()
+        );
+    }
+
+    for cookie in [&first_cookie, &second_cookie] {
+        let still_active = app
+            .clone()
+            .oneshot(authenticated_session_request(cookie))
+            .await
+            .expect("an unchanged session must remain queryable");
+        assert_eq!(still_active.status(), StatusCode::OK);
+    }
 }

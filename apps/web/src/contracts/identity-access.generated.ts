@@ -30,6 +30,30 @@ export interface RecoverParticipationRequest {
   recovery_token: string
   recovery_password: string
   recovery_attempt_id: string
+  replace_session_id?: string
+}
+
+export interface RecoverySessionSummary {
+  id: string
+  label: "Sessão 1" | "Sessão 2"
+  created_at: string
+}
+
+export interface RecoveryReplacementRequiredResponse {
+  status: "replacement_required"
+  sessions: Array<RecoverySessionSummary>
+}
+
+export interface RecoveredLobbyResponse {
+  kind: "lobby"
+  recovery_token: string
+  lobby: LobbyResponse
+}
+
+export interface RecoveredGameResponse {
+  kind: "game"
+  recovery_token: string
+  game: GameProjectionResponse
 }
 
 export interface StartGameRequest {
@@ -326,7 +350,23 @@ export function isSetReadinessRequest(value: unknown): value is SetReadinessRequ
 }
 
 export function isRecoverParticipationRequest(value: unknown): value is RecoverParticipationRequest {
-  return isRecord(value) && Object.keys(value).every((key) => ["recovery_token","recovery_password","recovery_attempt_id"].includes(key)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["recovery_password"] === 'string' && [...value["recovery_password"]].length >= 1 && [...value["recovery_password"]].length <= 128 && typeof value["recovery_attempt_id"] === 'string' && isUuid(value["recovery_attempt_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["recovery_attempt_id"])
+  return isRecord(value) && Object.keys(value).every((key) => ["recovery_token","recovery_password","recovery_attempt_id","replace_session_id"].includes(key)) && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && typeof value["recovery_password"] === 'string' && [...value["recovery_password"]].length >= 1 && [...value["recovery_password"]].length <= 128 && typeof value["recovery_attempt_id"] === 'string' && isUuid(value["recovery_attempt_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["recovery_attempt_id"]) && (!Object.hasOwn(value, "replace_session_id") || (typeof value["replace_session_id"] === 'string' && isUuid(value["replace_session_id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["replace_session_id"])))
+}
+
+export function isRecoverySessionSummary(value: unknown): value is RecoverySessionSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["id","label","created_at"].includes(key)) && typeof value["id"] === 'string' && isUuid(value["id"]) && new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").test(value["id"]) && typeof value["label"] === 'string' && (value["label"] === "Sessão 1" || value["label"] === "Sessão 2") && typeof value["created_at"] === 'string' && isRfc3339DateTime(value["created_at"])
+}
+
+export function isRecoveryReplacementRequiredResponse(value: unknown): value is RecoveryReplacementRequiredResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["status","sessions"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "replacement_required") && Array.isArray(value["sessions"]) && value["sessions"].every((entry) => isRecoverySessionSummary(entry)) && value["sessions"].length === 2
+}
+
+export function isRecoveredLobbyResponse(value: unknown): value is RecoveredLobbyResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["kind","recovery_token","lobby"].includes(key)) && typeof value["kind"] === 'string' && (value["kind"] === "lobby") && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && isLobbyResponse(value["lobby"])
+}
+
+export function isRecoveredGameResponse(value: unknown): value is RecoveredGameResponse {
+  return isRecord(value) && Object.keys(value).every((key) => ["kind","recovery_token","game"].includes(key)) && typeof value["kind"] === 'string' && (value["kind"] === "game") && typeof value["recovery_token"] === 'string' && new RegExp("^[0-9a-f]{64}$").test(value["recovery_token"]) && isGameProjectionResponse(value["game"])
 }
 
 export function isStartGameRequest(value: unknown): value is StartGameRequest {

@@ -4,6 +4,8 @@ import {
   isErrorResponse,
   isGameProjectionResponse,
   isRealtimePresenceMessage,
+  isRecoveredLobbyResponse,
+  isRecoveryReplacementRequiredResponse,
 } from './identity-access.generated'
 
 function projection() {
@@ -108,6 +110,53 @@ describe('generated identity contract guards', () => {
         ...presence,
         participants: [{ position: 1, status: 'unknown' }],
       }),
+    ).toBe(false)
+  })
+
+  it('accepts only the safe device replacement metadata and a complete recovery result', () => {
+    const replacement = {
+      sessions: [
+        {
+          created_at: '2026-09-01T14:20:00Z',
+          id: '2fe6c1be-50fc-42ac-8c4f-6ef270099c24',
+          label: 'Sessão 1',
+        },
+        {
+          created_at: '2026-09-03T10:05:00Z',
+          id: '8aa543d4-9d6f-4a8c-bd7b-6c6605be48fc',
+          label: 'Sessão 2',
+        },
+      ],
+      status: 'replacement_required',
+    }
+
+    expect(isRecoveryReplacementRequiredResponse(replacement)).toBe(true)
+    expect(
+      isRecoveryReplacementRequiredResponse({
+        ...replacement,
+        sessions: [{ ...replacement.sessions[0], user_agent: 'browser fingerprint' }],
+      }),
+    ).toBe(false)
+    expect(
+      isRecoveredLobbyResponse({
+        kind: 'lobby',
+        lobby: {
+          content_options: [],
+          heroes: [],
+          participant: {
+            display_name: 'Minerva',
+            position: 1,
+            ready: false,
+            role: 'host',
+          },
+          participants: [],
+          room: { code: '9HKGW4RT', status: 'open' },
+        },
+        recovery_token: 'a'.repeat(64),
+      }),
+    ).toBe(true)
+    expect(
+      isRecoveredLobbyResponse({ kind: 'lobby', recovery_token: 'a'.repeat(64) }),
     ).toBe(false)
   })
 })

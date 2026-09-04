@@ -5,6 +5,7 @@ import type { EffectOutcomeSummary } from '../contracts/identity-access.generate
 import { useGameCommandStore } from '../stores/gameCommand'
 import { useGameSyncStore } from '../stores/gameSync'
 import { useRoomAccessStore } from '../stores/roomAccess'
+import RecoveryCredential from './RecoveryCredential.vue'
 
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
@@ -219,6 +220,12 @@ function effectOutcomeLabel(outcome: EffectOutcomeSummary): string {
       <p class="stage-description">
         A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
       </p>
+
+      <RecoveryCredential
+        v-if="roomAccess.issuedRecoveryToken"
+        :token="roomAccess.issuedRecoveryToken"
+        @dismiss="roomAccess.dismissRecoveryCredential()"
+      />
 
       <div
         class="realtime-status"

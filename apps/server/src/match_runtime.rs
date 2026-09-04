@@ -609,7 +609,7 @@ async fn execute_game_command(
         .commit()
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    state.signal_game_event(stored.id);
+    state.signal_game_synchronization(stored.id);
 
     let projection = projection_for_participant(&state, participant_id)
         .await?
