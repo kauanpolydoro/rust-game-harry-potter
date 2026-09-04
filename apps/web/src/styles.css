@@ -1624,6 +1624,7 @@ input {
   color: var(--ready);
 }
 
+.service-check--ended .state-signal,
 .service-check--unavailable .state-signal {
   background: var(--warning);
   color: var(--warning);

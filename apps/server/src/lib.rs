@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 mod content_catalog;
 mod current_session;
+mod game_expiration;
 mod http_support;
 mod identity_access;
 mod match_runtime;
@@ -53,6 +54,7 @@ pub struct AppState {
     security_event_fanout: GameSignalFanout,
     session_revocation_fanout: GameSignalFanout,
     session_revocation_listener: Arc<OnceLock<AbortOnDrop>>,
+    game_expiration_worker: Arc<OnceLock<AbortOnDrop>>,
     session_token_key: Arc<[u8; 32]>,
     recovery_token_key: Arc<[u8; 32]>,
     recovery_password_checks: Arc<Semaphore>,
@@ -146,6 +148,7 @@ impl AppState {
             security_event_fanout: GameSignalFanout::default(),
             session_revocation_fanout: GameSignalFanout::default(),
             session_revocation_listener: Arc::new(OnceLock::new()),
+            game_expiration_worker: Arc::new(OnceLock::new()),
             session_token_key: Arc::new(session_token_key),
             recovery_token_key: Arc::new(recovery_token_key),
             recovery_password_checks: Arc::new(Semaphore::new(
@@ -274,6 +277,31 @@ impl AppState {
         }));
         let _ = self.session_revocation_listener.set(task);
         Ok(())
+    }
+
+    fn start_game_expiration_worker(&self) {
+        self.game_expiration_worker.get_or_init(|| {
+            let database = self.database.clone();
+            let mut shutdown = self.subscribe_to_shutdown();
+            AbortOnDrop(tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            if let Err(error) = game_expiration::expire_due_games(&database).await {
+                                tracing::warn!(%error, "game expiration scan failed");
+                            }
+                        }
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }))
+        });
     }
 
     fn idempotent_session_token(
@@ -489,6 +517,7 @@ pub async fn initialize(state: &AppState) -> Result<(), InitializationError> {
         .start_session_revocation_listener()
         .await
         .map_err(InitializationError::SessionRevocationListener)?;
+    state.start_game_expiration_worker();
     state.mark_started();
     Ok(())
 }

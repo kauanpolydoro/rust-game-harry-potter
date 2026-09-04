@@ -498,7 +498,12 @@ async fn register_connection_presence(
     {
         Ok(true) => state.signal_game_presence(game_id),
         Ok(false) => {
-            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            close_socket(
+                socket,
+                crate::session::inactive_session_close_code(state, session).await,
+                "access ended",
+            )
+            .await;
             return None;
         }
         Err(_error) => {
@@ -693,7 +698,12 @@ async fn synchronize_presence(
     match revalidate_socket_session(state, session, game_id).await {
         Ok(true) => {}
         Ok(false) => {
-            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            close_socket(
+                socket,
+                crate::session::inactive_session_close_code(state, session).await,
+                "access ended",
+            )
+            .await;
             return false;
         }
         Err(_) => {
@@ -755,7 +765,12 @@ async fn handle_client_message(
                     RealtimeLoopAction::Continue
                 }
                 Ok(false) => {
-                    close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                    close_socket(
+                        socket,
+                        crate::session::inactive_session_close_code(state, session).await,
+                        "access ended",
+                    )
+                    .await;
                     RealtimeLoopAction::Stop
                 }
                 Err(_error) => {
@@ -825,7 +840,12 @@ async fn validate_realtime_session(
     match revalidate_socket_session(state, session, game_id).await {
         Ok(true) => RealtimeLoopAction::Continue,
         Ok(false) => {
-            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            close_socket(
+                socket,
+                crate::session::inactive_session_close_code(state, session).await,
+                "access ended",
+            )
+            .await;
             RealtimeLoopAction::Stop
         }
         Err(_) => {
@@ -847,7 +867,12 @@ async fn synchronize_connection(
     match revalidate_socket_session(state, session, game_id).await {
         Ok(true) => {}
         Ok(false) => {
-            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            close_socket(
+                socket,
+                crate::session::inactive_session_close_code(state, session).await,
+                "access ended",
+            )
+            .await;
             return false;
         }
         Err(_) => {

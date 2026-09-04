@@ -199,6 +199,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
     pendingStartInput: StartGameRequest | null
     sessionExpected: boolean
     sessionGeneration: number
+    sessionRevalidationPending: boolean
     issuedRecoveryToken: string | null
     recoveryAttemptId: string | null
     replacementSessions: Array<RecoverySessionSummary>
@@ -217,6 +218,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
       pendingStartInput: null,
       sessionExpected: sessionIsExpected(),
       sessionGeneration: 0,
+      sessionRevalidationPending: false,
       issuedRecoveryToken: null,
       recoveryAttemptId: loadRecoveryAttemptId(),
       replacementSessions: [],
@@ -225,6 +227,7 @@ export const useRoomAccessStore = defineStore('roomAccess', {
   actions: {
     clearAuthenticatedSession(): void {
       this.sessionGeneration += 1
+      this.sessionRevalidationPending = false
       this.roomLookup = null
       this.lobby = null
       this.game = null
@@ -653,6 +656,34 @@ export const useRoomAccessStore = defineStore('roomAccess', {
         }
         this.errorCode = transportErrorCode(error)
         this.status = 'failed'
+      }
+    },
+    async revalidateSession(): Promise<void> {
+      if (!this.sessionExpected || this.sessionRevalidationPending) {
+        return
+      }
+      const sessionGeneration = this.sessionGeneration
+      this.sessionRevalidationPending = true
+      try {
+        const { body, response } = await requestJson('/api/session', {
+          headers: { Accept: 'application/json' },
+        })
+        if (this.sessionGeneration !== sessionGeneration) {
+          return
+        }
+        if (!response.ok) {
+          this.errorCode = apiErrorCode(body)
+        }
+        // Revalidation must not replace the projection or advance its cursor:
+        // the realtime channel still needs to replay any missed official events.
+      } catch (error) {
+        if (this.sessionGeneration === sessionGeneration) {
+          this.errorCode = transportErrorCode(error)
+        }
+      } finally {
+        if (this.sessionGeneration === sessionGeneration) {
+          this.sessionRevalidationPending = false
+        }
       }
     },
     async refreshSession(): Promise<void> {

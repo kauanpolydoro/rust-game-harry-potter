@@ -426,7 +426,6 @@ struct StoredCommandGame {
     shuffle_algorithm: String,
     sampling_algorithm: String,
     actor_position: i16,
-    expired: bool,
 }
 
 #[derive(FromRow)]
@@ -987,6 +986,9 @@ async fn lock_game_for_command(
     let stored = postgres::lock_game_for_actor(transaction, authenticated.participant_id)
         .await?
         .ok_or_else(ApiError::game_action_not_allowed)?;
+    if crate::game_expiration::expire_locked_game(transaction, stored.id).await? {
+        return Err(ApiError::game_expired());
+    }
     if !session_is_active_in_transaction(transaction, authenticated).await? {
         return Err(ApiError::session_invalid());
     }
@@ -1010,10 +1012,18 @@ async fn execute_game_command(
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let stored = lock_game_for_command(&mut transaction, authenticated).await?;
-    if stored.expired {
-        return Err(ApiError::game_expired());
-    }
+    let stored = match lock_game_for_command(&mut transaction, authenticated).await {
+        Ok(stored) => stored,
+        Err(error) => {
+            // The gate may have revoked access; commit those effects even though
+            // the command itself is rejected, before returning the error.
+            transaction
+                .commit()
+                .await
+                .map_err(|error| ApiError::internal_with("commit game access gate", error))?;
+            return Err(error);
+        }
+    };
     if let Some(receipt) =
         postgres::command_receipt_in(&mut transaction, stored.id, command_id).await?
     {

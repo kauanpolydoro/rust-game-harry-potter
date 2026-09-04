@@ -2718,7 +2718,7 @@ describe('application shell', () => {
     })
 
     expect(await screen.findByRole('button', { name: 'Sincronizando partida' })).toBeDisabled()
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')).toBe(false)
   })
 
   it('keeps a valid browser binding recoverable when session restoration loses the network', async () => {
@@ -3701,12 +3701,42 @@ describe('application shell', () => {
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
   })
 
-  it('ignores a late command response when only the game channel observes revocation', async () => {
+  it('clears persisted pending work when session restoration reports expiration before sockets open', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    sessionStorage.setItem('hogwarts.game-command.pending-intent', JSON.stringify({
+      commandId: '642103d0-d780-48ea-bf65-c40228751911',
+      commandType: 'end_hero_actions',
+      createdAt: '2026-09-04T18:00:00Z',
+      gameId: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+    }))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) =>
+      Promise.resolve(new Response(JSON.stringify(
+        String(input) === '/health/ready' ? { status: 'ready' } : errorResponse('GAME_EXPIRED'),
+      ), { status: String(input) === '/health/ready' ? 200 : 410 })),
+    ))
+    const pinia = createPinia()
+    render(App, { global: { plugins: [pinia] } })
+    expect(await screen.findByRole('heading', { name: 'Partida expirada' })).toBeVisible()
+    expect(useRoomAccessStore(pinia).game).toBeNull()
+    expect(useRoomAccessStore(pinia).issuedRecoveryToken).toBeNull()
+    expect(useGameCommandStore(pinia).pendingIntent).toBeNull()
+    expect(useGameCommandStore(pinia).receipt).toBeNull()
+    expect(localStorage.getItem('hogwarts.session.expected')).toBeNull()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+    expect(SynchronizedWebSocket.instances).toHaveLength(0)
+  })
+
+  it.each([
+    [1008, 'Acesso protegido'],
+    [4001, 'Partida expirada'],
+    [401, 'Acesso protegido'],
+  ])('ignores a late command response after access ends with %i', async (code, heading) => {
     localStorage.setItem('hogwarts.session.expected', 'true')
     let completeCommand = (_response: Response): void => undefined
     const commandResponse = new Promise<Response>((resolve) => {
       completeCommand = resolve
     })
+    let sessionCookieCleared = false
     let submittedCommandId = ''
     const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -3719,6 +3749,9 @@ describe('application shell', () => {
         )
       }
       if (url === '/api/session') {
+        if (sessionCookieCleared) {
+          return Promise.resolve(new Response(JSON.stringify(errorResponse('SESSION_INVALID')), { status: 401 }))
+        }
         return Promise.resolve(
           new Response(JSON.stringify(gameProjectionResponse()), {
             headers: { 'Content-Type': 'application/json' },
@@ -3745,10 +3778,15 @@ describe('application shell', () => {
       (socket) => socket.requestedProtocol === 'hogwarts.realtime.v2',
     )
 
-    gameSocket?.serverClose(1008)
+    if (code === 401) {
+      sessionCookieCleared = true
+      await useRoomAccessStore(pinia).revalidateSession()
+    } else {
+      gameSocket?.serverClose(code)
+    }
 
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Acesso protegido' }),
+      await screen.findByRole('heading', { level: 2, name: heading }),
     ).toBeVisible()
     expect(useRoomAccessStore(pinia).game).toBeNull()
     expect(useGameCommandStore(pinia).pendingIntent).toBeNull()

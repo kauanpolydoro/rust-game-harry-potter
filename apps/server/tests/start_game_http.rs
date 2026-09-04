@@ -5635,11 +5635,11 @@ async fn an_expired_game_rejects_the_command_at_the_database_clock_boundary() {
         )
         .await
         .expect("the expired game projection must receive a response");
-    assert_eq!(projection_response.status(), StatusCode::OK);
+    assert_eq!(projection_response.status(), StatusCode::GONE);
     assert_eq!(
-        response_json(projection_response).await["legal_actions"],
-        json!([]),
-        "an expired game must not advertise a command that the server rejects"
+        response_json(projection_response).await["error"]["code"],
+        "GAME_EXPIRED",
+        "an expired game must never expose its private projection"
     );
 
     let response = room
@@ -7149,4 +7149,238 @@ async fn reference_reconnect_profile_meets_replay_and_snapshot_slos() {
         snapshot_p95 <= SNAPSHOT_SLO,
         "Snapshot p95 {snapshot_p95:?} exceeded {SNAPSHOT_SLO:?}"
     );
+}
+
+#[tokio::test]
+async fn expiration_gate_covers_minus_one_equal_and_plus_one_millisecond() {
+    for offset in [-1_i32, 0, 1] {
+        let room = ready_room().await;
+        let projection = start_ready_game(&room, "expiration-boundary").await;
+        let game_id = uuid::Uuid::parse_str(projection["game"]["id"].as_str().unwrap()).unwrap();
+        sqlx::query(
+            "UPDATE games SET last_game_action_at = '2099-12-25T00:00:00Z', expires_at = '2100-01-01T00:00:00Z' WHERE id = $1",
+        )
+        .bind(game_id)
+        .execute(&room.database)
+        .await
+        .unwrap();
+        let before = authoritative_command_state(&room).await;
+        // Exercise the same PostgreSQL gate as commands and recovery with an
+        // explicit observation. HTTP alone cannot reliably hit a 1 ms window.
+        let expired: bool = sqlx::query_scalar(
+            "SELECT expire_game_access($1, '2100-01-01T00:00:00Z'::timestamptz + $2 * INTERVAL '1 millisecond')",
+        )
+        .bind(game_id)
+        .bind(offset)
+        .fetch_one(&room.database)
+        .await
+        .unwrap();
+        assert_eq!(expired, offset >= 0);
+        assert_eq!(authoritative_command_state(&room).await, before);
+
+        let command = room
+            .app
+            .clone()
+            .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+            .await
+            .unwrap();
+        assert_eq!(
+            command.status(),
+            if expired {
+                StatusCode::GONE
+            } else {
+                StatusCode::OK
+            }
+        );
+        let recovery = room
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                "/api/session/recover",
+                &json!({
+                    "recovery_token": room.guest_recovery_token,
+                    "recovery_password": "a long uncommon passphrase",
+                    "recovery_attempt_id": uuid::Uuid::new_v4().to_string()
+                }),
+                None,
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            recovery.status(),
+            if expired {
+                StatusCode::UNAUTHORIZED
+            } else {
+                StatusCode::OK
+            }
+        );
+        if expired {
+            assert_eq!(
+                response_json(command).await["error"]["code"],
+                "GAME_EXPIRED"
+            );
+            assert_eq!(
+                response_json(recovery).await["error"]["code"],
+                "RECOVERY_FAILED"
+            );
+            assert_eq!(authoritative_command_state(&room).await, before);
+            let active: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM device_sessions JOIN participants ON participants.id = device_sessions.participant_id WHERE participants.room_id = (SELECT room_id FROM games WHERE id = $1) AND device_sessions.status = 'active'",
+            ).bind(game_id).fetch_one(&room.database).await.unwrap();
+            assert_eq!(active, 0);
+            let still_expired: bool = sqlx::query_scalar("SELECT expire_game_access($1)")
+                .bind(game_id)
+                .fetch_one(&room.database)
+                .await
+                .unwrap();
+            assert!(
+                still_expired,
+                "expiration is durable even if the observed clock later goes back"
+            );
+        } else {
+            let exact_retention: bool = sqlx::query_scalar(
+                "SELECT expires_at = last_game_action_at + INTERVAL '168 hours' FROM games WHERE id = $1",
+            ).bind(game_id).fetch_one(&room.database).await.unwrap();
+            assert!(exact_retention);
+        }
+    }
+}
+
+#[tokio::test]
+async fn command_and_recovery_recheck_expiration_after_waiting_for_the_root_lock() {
+    let room = ready_room().await;
+    start_ready_game(&room, "expiration-lock-race").await;
+    let (mut fence, fence_pid) = lock_game_fence(&room).await;
+    let command = tokio::spawn(room.app.clone().oneshot(command_request(
+        &room.host_cookie,
+        uuid::Uuid::new_v4(),
+        1,
+    )));
+    let recovery = tokio::spawn(room.app.clone().oneshot(json_request(
+        "POST",
+        "/api/session/recover",
+        &json!({
+            "recovery_token": room.guest_recovery_token,
+            "recovery_password": "a long uncommon passphrase",
+            "recovery_attempt_id": uuid::Uuid::new_v4().to_string()
+        }),
+        None,
+        None,
+    )));
+    wait_for_requests_blocked_by(&room.database, fence_pid, 2).await;
+    sqlx::query(
+        "UPDATE games SET last_game_action_at = clock_timestamp() - INTERVAL '168 hours 1 millisecond', expires_at = clock_timestamp() - INTERVAL '1 millisecond' WHERE room_id = (SELECT id FROM rooms WHERE code = $1)",
+    ).bind(&room.room_code).execute(&mut *fence).await.unwrap();
+    fence.commit().await.unwrap();
+    let command = command.await.unwrap().unwrap();
+    assert_eq!(command.status(), StatusCode::GONE);
+    assert_eq!(
+        response_json(command).await["error"]["code"],
+        "GAME_EXPIRED"
+    );
+    let recovery = recovery.await.unwrap().unwrap();
+    assert_eq!(recovery.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response_json(recovery).await["error"]["code"],
+        "RECOVERY_FAILED"
+    );
+    let state = authoritative_command_state(&room).await;
+    assert_eq!((state.0, state.1, state.2, state.3), (1, 0, 0, 0));
+}
+
+#[tokio::test]
+async fn expiration_without_requests_revokes_sessions_and_closes_both_channels() {
+    let room = ready_room().await;
+    start_ready_game(&room, "expiration-idle-channels").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let mut game_socket = connect_current_game(address, &room.host_cookie).await;
+    let (status, _, mut security_socket) = websocket_handshake(
+        address,
+        "/api/session/events",
+        Some(&room.guest_cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.session.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let _ = security_socket.read_text().await;
+    expire_game(&room.database, &room.room_code).await;
+    let before = authoritative_command_state(&room).await;
+    for socket in [&mut game_socket, &mut security_socket] {
+        let code = tokio::time::timeout(Duration::from_secs(5), socket.read_close_code())
+            .await
+            .expect("idle expiration must close both channels promptly");
+        assert_eq!(code, 4001);
+    }
+    assert_eq!(authoritative_command_state(&room).await, before);
+    let sessions: Vec<String> = sqlx::query_scalar(
+        "SELECT device_sessions.status FROM device_sessions JOIN participants ON participants.id = device_sessions.participant_id JOIN rooms ON rooms.id = participants.room_id WHERE rooms.code = $1",
+    ).bind(&room.room_code).fetch_all(&room.database).await.unwrap();
+    assert_eq!(sessions, ["expired", "expired"]);
+    for cookie in [&room.host_cookie, &room.guest_cookie] {
+        let (status, _, _) = websocket_handshake(
+            address,
+            "/api/games/current/events",
+            Some(cookie),
+            Some("http://127.0.0.1:5173"),
+            Some("hogwarts.realtime.v2"),
+        )
+        .await;
+        assert_eq!(status, 410);
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_retention_renewal_committed_under_the_root_wins_over_an_old_expiration_read() {
+    for revoke in [false, true] {
+        let room = ready_room().await;
+        let projection = start_ready_game(&room, "expiration-renewal-race").await;
+        let game_id = uuid::Uuid::parse_str(projection["game"]["id"].as_str().unwrap()).unwrap();
+        // Hold an in-flight renewal under the real root while the previously
+        // committed deadline passes. The scanner skips this locked game.
+        sqlx::query(
+            "UPDATE games SET expires_at = clock_timestamp() + INTERVAL '5 seconds' WHERE id = $1",
+        )
+        .bind(game_id)
+        .execute(&room.database)
+        .await
+        .unwrap();
+        let (mut fence, fence_pid) = lock_game_fence(&room).await;
+        sqlx::query("UPDATE games SET expires_at = clock_timestamp() + INTERVAL '168 hours', last_game_action_at = clock_timestamp() WHERE id = $1")
+        .bind(game_id).execute(&mut *fence).await.unwrap();
+        sqlx::query("SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM expires_at - clock_timestamp()))::double precision) FROM games WHERE id = $1")
+        .bind(game_id).execute(&room.database).await.unwrap();
+        if revoke {
+            sqlx::query("UPDATE device_sessions SET status = 'revoked' FROM participants WHERE participants.id = device_sessions.participant_id AND participants.room_id = (SELECT room_id FROM games WHERE id = $1) AND participants.role = 'host'")
+            .bind(game_id).execute(&mut *fence).await.unwrap();
+        }
+        let read = tokio::spawn(
+            room.app.clone().oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header(header::COOKIE, &room.host_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
+        );
+        wait_for_requests_blocked_by(&room.database, fence_pid, 1).await;
+        fence.commit().await.unwrap();
+        let response = read.await.unwrap().unwrap();
+        if revoke {
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                response_json(response).await["error"]["code"],
+                "SESSION_INVALID"
+            );
+            continue;
+        }
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+        let restored = response_json(response).await;
+        assert_eq!(restored["game"]["id"], projection["game"]["id"]);
+        assert_eq!(restored["snapshot"], projection["snapshot"]);
+    }
 }

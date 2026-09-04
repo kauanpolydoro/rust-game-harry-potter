@@ -83,3 +83,26 @@ Readiness tem timeout de um segundo e não mascara falhas de banco como disponib
 - `content/bundles` contém os catálogos candidatos e sua proveniência por campo.
 
 O gate `scripts/check-boundaries.mjs` impede dependências de infraestrutura no módulo de domínio.
+
+## Expiração da Partida
+
+Uma Ação oficial aceita define `last_game_action_at` pelo relógio do PostgreSQL e `expires_at` exatamente 168 horas depois, usando uma única observação.
+Leituras, presença, reconexão, retry, erro e operações de recuperação ou proteção não renovam esse prazo.
+Comandos e recuperação revalidam a expiração após obter o lock da raiz, com rejeição no instante exato do limite.
+
+A migration `0019_game_expiration.sql` registra a expiração de acesso de forma durável e encerra as Sessões ativas e leases da Partida.
+Cada instância verifica até 100 candidatas por segundo com `SKIP LOCKED`, e a decisão final sempre consulta `clock_timestamp()` depois do lock.
+A autenticação também aplica esse gate sob demanda.
+O processamento é idempotente, notifica as outras instâncias após o commit e não modifica o histórico oficial.
+Purge, ledger de Tombstones e política de backup pertencem aos tickets posteriores de ciclo de vida.
+
+HTTP responde `GAME_EXPIRED` sem projeção privada e apaga o cookie da Sessão.
+Recuperação preserva o erro genérico `RECOVERY_FAILED`.
+Os canais de jogo e segurança fecham com código privado `4001`, levando o cliente à tela de Partida expirada e removendo stores privados, credenciais exibidas, animações e intenções pendentes.
+Respostas em voo de uma geração anterior de Sessão são descartadas.
+Uma aba suspensa confirma a Sessão ao voltar a ficar visível, e uma falha de reconexão também consulta o endpoint HTTP.
+
+Os testes usam PostgreSQL real para locks, revogação, relógio corrente e concorrência.
+O parâmetro opcional de observação de `expire_game_access` permite exercitar o corte em menos um, igual e mais um milissegundo, sem depender de acertar essa janela pela rede.
+Chamadas da aplicação omitem esse parâmetro.
+Playwright cobre dois navegadores e uma segunda aba, incluindo um Comando pendente, fechamento dos canais, remoção do cookie, recarga e rejeição da recuperação.
