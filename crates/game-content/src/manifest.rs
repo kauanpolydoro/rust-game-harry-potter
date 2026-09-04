@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CatalogId, EffectRule, RuleId};
+use crate::{CatalogId, EffectRule, RuleId, Zone};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ContentManifest {
@@ -17,7 +17,38 @@ pub struct ContentManifest {
     pub entries: Vec<ManifestEntry>,
     pub executable_rules: BTreeSet<RuleId>,
     pub rules: Vec<EffectRule>,
+    pub game_setups: Vec<GameSetup>,
     pub sources: Vec<ProvenanceSource>,
+}
+
+/// An externally trusted, ordered setup for one adventure.
+///
+/// Publication proves the setup provenance and structural validity only.
+/// Consumers must also require `ContentManifest::playable` and each referenced
+/// `ManifestEntry::playable` before creating a game.
+/// Every referenced rule ID must belong to `ContentManifest::executable_rules`, and its definition
+/// must resolve from `ContentManifest::rules`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GameSetup {
+    pub adventure_id: CatalogId,
+    pub confidence: FunctionalConfidence,
+    pub sources: Vec<String>,
+    pub entities: Vec<GameSetupEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GameSetupEntity {
+    pub catalog_id: CatalogId,
+    pub copies: u16,
+    pub zone: Zone,
+    pub owner: GameSetupOwner,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GameSetupOwner {
+    None,
+    EachParticipant,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -52,6 +83,7 @@ pub struct FunctionalProvenance {
     pub confidence: FunctionalConfidence,
     pub sources: Vec<String>,
     pub rule_id: Option<RuleId>,
+    pub value: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]

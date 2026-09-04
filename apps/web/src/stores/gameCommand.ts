@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { apiError, requestJson, transportErrorCode } from '../api/http'
 import {
   isExecuteGameCommandResponse,
+  type EffectTargetBinding,
   type ExecuteGameCommandRequest,
   type GameCommandReceipt,
   type GameProjectionResponse,
@@ -20,18 +21,92 @@ type GameCommandStatus =
   | 'resynced'
   | 'failed'
 
+type GameCommandType = ExecuteGameCommandRequest['type']
+type GameCommandIntent = ExecuteGameCommandRequest extends infer Command
+  ? Command extends ExecuteGameCommandRequest
+    ? Omit<Command, 'command_id' | 'expected_state_version'>
+    : never
+  : never
+
+export type PendingGameCommandOverlay = GameCommandIntent
+
 interface PendingGameIntent {
   commandId: string
-  commandType: ExecuteGameCommandRequest['type']
+  commandType: GameCommandType
   createdAt: string
   gameId: string
 }
 
 const pendingCommandStorage = 'hogwarts.game-command.pending-intent'
+const gameCommandTypes = [
+  'complete_dark_arts',
+  'resolve_choice',
+  'play_card',
+  'assign_attack',
+  'acquire_card',
+] as const satisfies readonly GameCommandType[]
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function isGameCommandType(value: unknown): value is GameCommandType {
+  return gameCommandTypes.some((commandType) => commandType === value)
+}
+
+function cloneOverlay(intent: GameCommandIntent): PendingGameCommandOverlay {
+  if (intent.type === 'play_card') {
+    return {
+      ...intent,
+      targets: intent.targets.map((target) => ({
+        selector_id: target.selector_id,
+        target_ids: [...target.target_ids],
+      })),
+    }
+  }
+  if (intent.type === 'resolve_choice') {
+    return { ...intent, selected_options: [...intent.selected_options] }
+  }
+  return { ...intent }
+}
+
+function createRequest(
+  intent: GameCommandIntent,
+  commandId: string,
+  expectedStateVersion: number,
+): ExecuteGameCommandRequest {
+  const metadata = {
+    command_id: commandId,
+    expected_state_version: expectedStateVersion,
+  }
+  switch (intent.type) {
+    case 'complete_dark_arts':
+      return { ...metadata, type: intent.type }
+    case 'resolve_choice':
+      return {
+        ...metadata,
+        choice_id: intent.choice_id,
+        selected_options: intent.selected_options,
+        type: intent.type,
+      }
+    case 'play_card':
+      return {
+        ...metadata,
+        card_id: intent.card_id,
+        targets: intent.targets,
+        type: intent.type,
+      }
+    case 'assign_attack':
+      return {
+        ...metadata,
+        amount: intent.amount,
+        type: intent.type,
+        villain_id: intent.villain_id,
+      }
+    case 'acquire_card':
+      return { ...metadata, card_id: intent.card_id, type: intent.type }
+  }
 }
 
 function loadPendingIntent(): PendingGameIntent | null {
@@ -45,7 +120,7 @@ function loadPendingIntent(): PendingGameIntent | null {
       !isRecord(intent) ||
       typeof intent.commandId !== 'string' ||
       !uuidPattern.test(intent.commandId) ||
-      (intent.commandType !== 'complete_dark_arts' && intent.commandType !== 'resolve_choice') ||
+      !isGameCommandType(intent.commandType) ||
       typeof intent.createdAt !== 'string' ||
       Number.isNaN(Date.parse(intent.createdAt)) ||
       typeof intent.gameId !== 'string' ||
@@ -86,6 +161,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
   state: (): {
     status: GameCommandStatus
     pendingIntent: PendingGameIntent | null
+    pendingOverlay: PendingGameCommandOverlay | null
     receipt: GameCommandReceipt | null
     errorCode: string | null
   } => {
@@ -93,45 +169,66 @@ export const useGameCommandStore = defineStore('gameCommand', {
     return {
       status: pendingIntent ? 'uncertain' : 'idle',
       pendingIntent,
+      pendingOverlay: null,
       receipt: null,
       errorCode: null,
     }
   },
   actions: {
     async completeDarkArts(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
-      return this.submit(game, {
-        command_id: crypto.randomUUID(),
-        expected_state_version: game.snapshot.state_version,
-        type: 'complete_dark_arts',
-      })
+      return this.execute(game, { type: 'complete_dark_arts' })
     },
     async resolveChoice(
       game: GameProjectionResponse,
       choiceId: string,
       selectedOptions: string[],
     ): Promise<GameProjectionResponse | null> {
-      return this.submit(game, {
+      return this.execute(game, {
         choice_id: choiceId,
-        command_id: crypto.randomUUID(),
-        expected_state_version: game.snapshot.state_version,
         selected_options: selectedOptions,
         type: 'resolve_choice',
       })
     },
-    async submit(
+    async playCard(
       game: GameProjectionResponse,
-      request: ExecuteGameCommandRequest,
+      cardId: string,
+      targets: EffectTargetBinding[],
+    ): Promise<GameProjectionResponse | null> {
+      return this.execute(game, { card_id: cardId, targets, type: 'play_card' })
+    },
+    async assignAttack(
+      game: GameProjectionResponse,
+      villainId: string,
+      amount: number,
+    ): Promise<GameProjectionResponse | null> {
+      return this.execute(game, { amount, type: 'assign_attack', villain_id: villainId })
+    },
+    async acquireCard(
+      game: GameProjectionResponse,
+      cardId: string,
+    ): Promise<GameProjectionResponse | null> {
+      return this.execute(game, { card_id: cardId, type: 'acquire_card' })
+    },
+    async execute(
+      game: GameProjectionResponse,
+      intent: GameCommandIntent,
     ): Promise<GameProjectionResponse | null> {
       if (this.status === 'submitting' || this.status === 'recovering' || this.pendingIntent) {
         return null
       }
 
+      const request = createRequest(
+        intent,
+        crypto.randomUUID(),
+        game.snapshot.state_version,
+      )
       this.pendingIntent = {
         commandId: request.command_id,
         commandType: request.type,
         createdAt: new Date().toISOString(),
         gameId: game.game.id,
       }
+      this.pendingOverlay = cloneOverlay(intent)
       this.status = 'submitting'
       this.errorCode = null
       this.receipt = null
@@ -158,6 +255,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
         } else {
           this.status = this.errorCode === 'STALE_STATE_VERSION' ? 'stale' : 'failed'
           this.pendingIntent = null
+          this.pendingOverlay = null
           removePendingIntent()
         }
         return null
@@ -173,6 +271,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
       }
       if (this.pendingIntent.gameId !== gameId) {
         this.pendingIntent = null
+        this.pendingOverlay = null
         this.status = 'idle'
         this.errorCode = null
         removePendingIntent()
@@ -197,6 +296,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
         this.errorCode = apiError(result)?.code ?? 'UNEXPECTED_RESPONSE'
         if (response.status === 404 && this.errorCode === 'COMMAND_NOT_FOUND') {
           this.pendingIntent = null
+          this.pendingOverlay = null
           this.status = 'not_committed'
           removePendingIntent()
         } else {
@@ -236,6 +336,7 @@ export const useGameCommandStore = defineStore('gameCommand', {
     ): GameProjectionResponse {
       this.receipt = receipt
       this.pendingIntent = null
+      this.pendingOverlay = null
       this.status = 'accepted'
       this.errorCode = null
       removePendingIntent()

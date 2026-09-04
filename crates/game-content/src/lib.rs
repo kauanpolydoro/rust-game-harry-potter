@@ -17,7 +17,8 @@ pub use effects::{
 pub use ids::{CardInstanceId, CatalogId, InvalidId, RuleId};
 pub use manifest::{
     ContentGap, ContentManifest, ContentSet, EntryKind, FunctionalConfidence, FunctionalField,
-    FunctionalProvenance, ManifestEntry, ProvenanceSource, SourceKind,
+    FunctionalProvenance, GameSetup, GameSetupEntity, GameSetupOwner, ManifestEntry,
+    ProvenanceSource, SourceKind,
 };
 pub use schema::{
     import_base_bundle, import_base_bundle_with_runtime_rules,

@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use game_content::{
     Condition, ContentManifest, Die, Effect, EffectChoiceAudience as ContentEffectChoiceAudience,
-    EffectRule, EffectTrigger, Eligibility, EntryKind, GameOutcome, ManifestEntry, Operation,
-    Resource, Selector, TargetOwner, Zone,
+    EffectRule, EffectTrigger, Eligibility, EntryKind, FunctionalField, GameOutcome,
+    GameSetupOwner, ManifestEntry, Operation, Resource, Selector, TargetOwner, Zone,
 };
 use serde::Serialize;
 use sqlx::PgPool;
@@ -32,6 +32,54 @@ impl ContentCatalog {
         let adventure = manifest.entries.iter().find(|entry| {
             entry.kind == EntryKind::Adventure && entry.catalog_id.as_str() == adventure_id
         })?;
+        let initial_entities = match manifest
+            .game_setups
+            .iter()
+            .find(|setup| setup.adventure_id == adventure.catalog_id)
+        {
+            Some(setup) => setup
+                .entities
+                .iter()
+                .map(|setup_entity| {
+                    let entry = manifest
+                        .entries
+                        .iter()
+                        .find(|entry| entry.catalog_id == setup_entity.catalog_id)?;
+                    let effect_rule_id = entry
+                        .functional_provenance
+                        .get(&FunctionalField::Effect)?
+                        .rule_id
+                        .as_ref()?
+                        .as_str()
+                        .to_owned();
+                    let influence_cost = entry
+                        .functional_provenance
+                        .get(&FunctionalField::Cost)
+                        .and_then(|definition| definition.value);
+                    let health = entry
+                        .functional_provenance
+                        .get(&FunctionalField::Health)
+                        .and_then(|definition| definition.value);
+                    if (entry.kind == EntryKind::HogwartsCard && influence_cost.is_none())
+                        || (entry.kind == EntryKind::Villain
+                            && health.is_none_or(|health| health == 0))
+                    {
+                        return None;
+                    }
+                    Some(SelectedInitialEntity {
+                        catalog_id: entry.catalog_id.as_str().to_owned(),
+                        copies: setup_entity.copies,
+                        zone: effect_zone(setup_entity.zone),
+                        owner: setup_entity.owner,
+                        kind: entry.kind,
+                        effect_rule_id,
+                        influence_cost,
+                        health,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+            None => Vec::new(),
+        };
 
         Some(SelectedContent {
             adventure_id: adventure.catalog_id.as_str().to_owned(),
@@ -41,6 +89,7 @@ impl ContentCatalog {
             manifest_digest: manifest.digest.clone(),
             manifest_version: manifest.manifest_version,
             playable: manifest.playable && adventure.playable,
+            initial_entities,
         })
     }
 
@@ -88,6 +137,16 @@ impl ContentCatalog {
             .collect()
     }
 
+    pub(crate) fn entity_name(&self, manifest_digest: &str, catalog_id: &str) -> Option<String> {
+        self.manifests
+            .iter()
+            .find(|manifest| manifest.digest == manifest_digest)?
+            .entries
+            .iter()
+            .find(|entry| entry.catalog_id.as_str() == catalog_id)
+            .map(entry_name)
+    }
+
     pub(crate) async fn publish(&self, database: &PgPool) -> Result<(), sqlx::Error> {
         for manifest in self.manifests.iter() {
             let document = serde_json::to_string(manifest)
@@ -124,6 +183,85 @@ pub(crate) struct SelectedContent {
     pub(crate) manifest_digest: String,
     pub(crate) manifest_version: u16,
     pub(crate) playable: bool,
+    initial_entities: Vec<SelectedInitialEntity>,
+}
+
+#[derive(Clone)]
+struct SelectedInitialEntity {
+    catalog_id: String,
+    copies: u16,
+    zone: game_domain::EffectZone,
+    owner: GameSetupOwner,
+    kind: EntryKind,
+    effect_rule_id: String,
+    influence_cost: Option<u16>,
+    health: Option<u16>,
+}
+
+impl SelectedContent {
+    pub(crate) fn initial_entities(
+        &self,
+        participant_positions: &[u8],
+    ) -> Vec<game_domain::EffectEntityPlacement> {
+        let mut next_instance = 1_u32;
+        let mut placements = Vec::new();
+        for template in &self.initial_entities {
+            let owners = match template.owner {
+                GameSetupOwner::None => vec![None],
+                GameSetupOwner::EachParticipant => {
+                    participant_positions.iter().copied().map(Some).collect()
+                }
+            };
+            for owner_position in owners {
+                for _ in 0..template.copies {
+                    let instance_id = format!("instance:{next_instance:08}");
+                    next_instance += 1;
+                    let entity = match template.kind {
+                        EntryKind::StarterCard => game_domain::EffectEntity::card(
+                            instance_id,
+                            &template.catalog_id,
+                            game_domain::EffectEntityKind::StarterCard,
+                            owner_position,
+                            &template.effect_rule_id,
+                            None,
+                        ),
+                        EntryKind::HogwartsCard => game_domain::EffectEntity::card(
+                            instance_id,
+                            &template.catalog_id,
+                            game_domain::EffectEntityKind::HogwartsCard,
+                            owner_position,
+                            &template.effect_rule_id,
+                            template.influence_cost,
+                        ),
+                        EntryKind::Villain => game_domain::EffectEntity::villain(
+                            instance_id,
+                            &template.catalog_id,
+                            &template.effect_rule_id,
+                            template
+                                .health
+                                .expect("validated villain setup has positive health"),
+                        ),
+                        EntryKind::Adventure
+                        | EntryKind::Catalog
+                        | EntryKind::DarkArts
+                        | EntryKind::Hero
+                        | EntryKind::Horcrux
+                        | EntryKind::Location
+                        | EntryKind::Proficiency
+                        | EntryKind::Ruleset
+                        | EntryKind::TurnOrder => {
+                            unreachable!("validated game setup has a supported entity kind")
+                        }
+                    };
+                    placements.push(game_domain::EffectEntityPlacement::new(
+                        entity,
+                        template.zone,
+                    ));
+                }
+            }
+        }
+        placements
+    }
 }
 
 async fn publish_manifest(
@@ -311,6 +449,7 @@ fn effect_condition(condition: &Condition) -> game_domain::EffectCondition {
 
 fn effect_selector(selector: &Selector) -> game_domain::EffectSelector {
     game_domain::EffectSelector {
+        id: selector.id.clone(),
         zone: effect_zone(selector.zone),
         owner: match selector.owner {
             TargetOwner::Actor => game_domain::EffectTargetOwner::Actor,
