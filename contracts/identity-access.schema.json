@@ -61,6 +61,170 @@
         }
       }
     },
+    "RotateRecoveryPasswordRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_recovery_password", "new_recovery_password"],
+      "properties": {
+        "current_recovery_password": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "new_recovery_password": { "type": "string", "minLength": 12, "maxLength": 128 }
+      }
+    },
+    "RegenerateOwnRecoveryCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "RegenerateAssistedRecoveryCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_assistance_risk_acknowledged"],
+      "properties": {
+        "host_assistance_risk_acknowledged": { "type": "boolean", "enum": [true] }
+      }
+    },
+    "RecoveryParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "position"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "position": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "RecoveryPasswordRotatedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "password_generation",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["recovery_password_rotated"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "password_generation": { "type": "integer", "minimum": 2 },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RecoveryCredentialRegeneratedSecurityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_version",
+        "cursor",
+        "type",
+        "actor_position",
+        "target_position",
+        "delivery",
+        "recovery_generation",
+        "occurred_at"
+      ],
+      "properties": {
+        "event_version": { "type": "integer", "enum": [1] },
+        "cursor": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string", "enum": ["recovery_credential_regenerated"] },
+        "actor_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "delivery": { "type": "string", "enum": ["direct", "host_assisted"] },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RotateRecoveryPasswordResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["password_generation", "security_event"],
+      "properties": {
+        "password_generation": { "type": "integer", "minimum": 2 },
+        "security_event": { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" }
+      }
+    },
+    "DirectRecoveryCredentialResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "participant",
+        "recovery_generation",
+        "recovery_token",
+        "security_event"
+      ],
+      "properties": {
+        "delivery": { "type": "string", "enum": ["direct"] },
+        "participant": { "$ref": "#/$defs/RecoveryParticipant" },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "security_event": { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+      }
+    },
+    "AssistedRecoveryCredentialResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery",
+        "participant",
+        "recovery_generation",
+        "recovery_token",
+        "risk_message_key",
+        "security_event"
+      ],
+      "properties": {
+        "delivery": { "type": "string", "enum": ["host_assisted"] },
+        "participant": { "$ref": "#/$defs/RecoveryParticipant" },
+        "recovery_generation": { "type": "integer", "minimum": 2 },
+        "recovery_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "risk_message_key": {
+          "type": "string",
+          "enum": ["participant.recovery.host_assisted_impersonation_risk"]
+        },
+        "security_event": { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+      }
+    },
+    "SecuritySnapshotMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "cursor", "events"],
+      "properties": {
+        "protocol_version": { "type": "integer", "enum": [1] },
+        "type": { "type": "string", "enum": ["security_snapshot"] },
+        "cursor": { "type": "integer", "minimum": 0 },
+        "events": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" },
+              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+            ]
+          }
+        }
+      }
+    },
+    "SecurityEventsMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "from_cursor", "cursor", "events"],
+      "properties": {
+        "protocol_version": { "type": "integer", "enum": [1] },
+        "type": { "type": "string", "enum": ["security_events"] },
+        "from_cursor": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "integer", "minimum": 0 },
+        "events": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/RecoveryPasswordRotatedSecurityEvent" },
+              { "$ref": "#/$defs/RecoveryCredentialRegeneratedSecurityEvent" }
+            ]
+          }
+        }
+      }
+    },
     "RecoverySessionSummary": {
       "type": "object",
       "additionalProperties": false,

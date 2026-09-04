@@ -3,7 +3,9 @@ use uuid::Uuid;
 
 use super::{
     ApiError, StoredDeviceSession, StoredLobby, StoredParticipant, StoredRecoveryCandidate,
-    StoredRoomCreation, StoredRoomJoin, random_room_code,
+    StoredRecoveryCredentialRegeneration, StoredRecoveryCredentialSecurityEvent,
+    StoredRecoveryParticipant, StoredRecoveryPasswordAuthority, StoredRecoveryPasswordRotation,
+    StoredRecoveryRoom, StoredRoomCreation, StoredRoomJoin, StoredSecurityEvent, random_room_code,
 };
 
 pub(super) struct NewRoomJoin<'a> {
@@ -96,6 +98,529 @@ pub(super) async fn selected_room_heroes(
     .fetch_all(database)
     .await
     .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))
+}
+
+pub(super) async fn load_recovery_password_authority(
+    database: &PgPool,
+    participant_id: Uuid,
+) -> Result<Option<StoredRecoveryPasswordAuthority>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryPasswordAuthority>(
+        r"
+        SELECT
+            rooms.id AS room_id,
+            participants.id AS participant_id,
+            participants.role,
+            rooms.recovery_password_hash,
+            rooms.password_generation
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        LEFT JOIN games ON games.room_id = rooms.id
+        WHERE participants.id = $1
+          AND rooms.status <> 'cancelled'
+          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+        ",
+    )
+    .bind(participant_id)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("load recovery password authority", error))
+}
+
+pub(super) async fn lock_recovery_password_authority(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant_id: Uuid,
+) -> Result<Option<StoredRecoveryPasswordAuthority>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryPasswordAuthority>(
+        r"
+        SELECT
+            rooms.id AS room_id,
+            participants.id AS participant_id,
+            participants.role,
+            rooms.recovery_password_hash,
+            rooms.password_generation
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        LEFT JOIN games ON games.room_id = rooms.id
+        WHERE participants.id = $1
+          AND rooms.status <> 'cancelled'
+          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+        FOR UPDATE OF rooms
+        ",
+    )
+    .bind(participant_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("lock recovery password authority", error))
+}
+
+pub(super) async fn load_recovery_password_rotation(
+    database: &PgPool,
+    idempotency_key: &str,
+) -> Result<Option<StoredRecoveryPasswordRotation>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryPasswordRotation>(RECOVERY_PASSWORD_ROTATION_SELECT)
+        .bind(idempotency_key)
+        .fetch_optional(database)
+        .await
+        .map_err(|error| ApiError::internal_with("load recovery password rotation", error))
+}
+
+pub(super) async fn load_recovery_password_rotation_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+) -> Result<Option<StoredRecoveryPasswordRotation>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryPasswordRotation>(RECOVERY_PASSWORD_ROTATION_SELECT)
+        .bind(idempotency_key)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| ApiError::internal_with("load recovery password rotation", error))
+}
+
+const RECOVERY_PASSWORD_ROTATION_SELECT: &str = r"
+    SELECT
+        requests.actor_participant_id,
+        requests.request_fingerprint,
+        requests.password_generation,
+        events.sequence,
+        participants.position AS actor_position,
+        replace(
+            to_char(events.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+            ' ',
+            'T'
+        ) || 'Z' AS occurred_at
+    FROM recovery_password_rotation_requests AS requests
+    JOIN identity_security_events AS events
+      ON events.room_id = requests.room_id
+     AND events.sequence = requests.security_event_sequence
+    JOIN participants ON participants.id = requests.actor_participant_id
+    WHERE requests.idempotency_key = $1
+      AND requests.completed_at IS NOT NULL
+";
+
+pub(super) async fn claim_recovery_password_rotation(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    request_fingerprint: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r"
+        INSERT INTO recovery_password_rotation_requests (
+            idempotency_key,
+            room_id,
+            actor_participant_id,
+            request_fingerprint
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(room_id)
+    .bind(actor_participant_id)
+    .bind(request_fingerprint)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map(|claim| claim.is_some())
+    .map_err(|error| ApiError::internal_with("claim recovery password rotation", error))
+}
+
+pub(super) async fn complete_recovery_password_rotation(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    event: &StoredSecurityEvent,
+) -> Result<(), ApiError> {
+    let completed = sqlx::query(
+        r"
+        UPDATE recovery_password_rotation_requests
+        SET
+            password_generation = $2,
+            security_event_sequence = $3,
+            completed_at = clock_timestamp()
+        WHERE idempotency_key = $1
+          AND completed_at IS NULL
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(event.password_generation)
+    .bind(event.sequence)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("complete recovery password rotation", error))?;
+    if completed.rows_affected() != 1 {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
+
+pub(super) async fn rotate_recovery_password(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    new_password_hash: &str,
+) -> Result<StoredSecurityEvent, ApiError> {
+    sqlx::query_as::<_, StoredSecurityEvent>(
+        r"
+        WITH rotated AS (
+            UPDATE rooms
+            SET
+                recovery_password_hash = $3,
+                password_generation = password_generation + 1,
+                security_event_sequence = security_event_sequence + 1
+            WHERE id = $1
+            RETURNING password_generation, security_event_sequence
+        ),
+        superseded AS (
+            UPDATE recovery_credentials
+            SET
+                status = 'superseded',
+                superseded_at = clock_timestamp()
+            FROM participants, rotated
+            WHERE participants.room_id = $1
+              AND recovery_credentials.participant_id = participants.id
+              AND recovery_credentials.status = 'active'
+            RETURNING recovery_credentials.id
+        ),
+        inserted AS (
+            INSERT INTO identity_security_events (
+                room_id,
+                sequence,
+                event_type,
+                actor_participant_id,
+                password_generation
+            )
+            SELECT
+                $1,
+                rotated.security_event_sequence,
+                'recovery_password_rotated',
+                $2,
+                rotated.password_generation
+            FROM rotated
+            RETURNING sequence, actor_participant_id, password_generation, created_at
+        ),
+        inserted_recipients AS (
+            INSERT INTO identity_security_event_recipients (
+                room_id,
+                security_event_sequence,
+                participant_id
+            )
+            SELECT $1, inserted.sequence, participants.id
+            FROM inserted
+            JOIN participants ON participants.room_id = $1
+            RETURNING participant_id
+        )
+        SELECT
+            inserted.sequence,
+            participants.position AS actor_position,
+            inserted.password_generation,
+            replace(
+                to_char(inserted.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM inserted
+        JOIN participants ON participants.id = inserted.actor_participant_id
+        WHERE (SELECT COUNT(*) FROM inserted_recipients) >= 1
+        ",
+    )
+    .bind(room_id)
+    .bind(actor_participant_id)
+    .bind(new_password_hash)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("rotate recovery password", error))
+}
+
+pub(super) async fn load_recovery_credential_regeneration(
+    database: &PgPool,
+    idempotency_key: &str,
+) -> Result<Option<StoredRecoveryCredentialRegeneration>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryCredentialRegeneration>(
+        RECOVERY_CREDENTIAL_REGENERATION_SELECT,
+    )
+    .bind(idempotency_key)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("load recovery credential regeneration", error))
+}
+
+pub(super) async fn load_recovery_credential_regeneration_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+) -> Result<Option<StoredRecoveryCredentialRegeneration>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryCredentialRegeneration>(
+        RECOVERY_CREDENTIAL_REGENERATION_SELECT,
+    )
+    .bind(idempotency_key)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("load recovery credential regeneration", error))
+}
+
+const RECOVERY_CREDENTIAL_REGENERATION_SELECT: &str = r"
+    SELECT
+        requests.actor_participant_id,
+        requests.target_participant_id,
+        requests.delivery,
+        requests.request_fingerprint,
+        requests.recovery_generation,
+        events.sequence,
+        actors.position AS actor_position,
+        targets.display_name AS target_display_name,
+        targets.position AS target_position,
+        replace(
+            to_char(events.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+            ' ',
+            'T'
+        ) || 'Z' AS occurred_at
+    FROM recovery_credential_regeneration_requests AS requests
+    JOIN identity_security_events AS events
+      ON events.room_id = requests.room_id
+     AND events.sequence = requests.security_event_sequence
+    JOIN participants AS actors ON actors.id = requests.actor_participant_id
+    JOIN participants AS targets ON targets.id = requests.target_participant_id
+    WHERE requests.idempotency_key = $1
+      AND requests.completed_at IS NOT NULL
+";
+
+pub(super) async fn claim_recovery_credential_regeneration(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    target_participant_id: Uuid,
+    delivery: &str,
+    request_fingerprint: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r"
+        INSERT INTO recovery_credential_regeneration_requests (
+            idempotency_key,
+            room_id,
+            actor_participant_id,
+            target_participant_id,
+            delivery,
+            request_fingerprint
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(room_id)
+    .bind(actor_participant_id)
+    .bind(target_participant_id)
+    .bind(delivery)
+    .bind(request_fingerprint)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map(|claim| claim.is_some())
+    .map_err(|error| ApiError::internal_with("claim recovery credential regeneration", error))
+}
+
+pub(super) async fn lock_recovery_participant(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    participant_id: Uuid,
+) -> Result<Option<StoredRecoveryParticipant>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryParticipant>(
+        r"
+        SELECT
+            id AS participant_id,
+            display_name,
+            position,
+            recovery_generation
+        FROM participants
+        WHERE room_id = $1
+          AND id = $2
+        FOR NO KEY UPDATE
+        ",
+    )
+    .bind(room_id)
+    .bind(participant_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("lock recovery participant", error))
+}
+
+pub(super) async fn lock_recovery_participant_by_position(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    position: i16,
+) -> Result<Option<StoredRecoveryParticipant>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryParticipant>(
+        r"
+        SELECT
+            id AS participant_id,
+            display_name,
+            position,
+            recovery_generation
+        FROM participants
+        WHERE room_id = $1
+          AND position = $2
+        FOR NO KEY UPDATE
+        ",
+    )
+    .bind(room_id)
+    .bind(position)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("lock recovery participant by position", error))
+}
+
+pub(super) async fn advance_recovery_generation(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant: StoredRecoveryParticipant,
+) -> Result<StoredRecoveryParticipant, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryParticipant>(
+        r"
+        UPDATE participants
+        SET recovery_generation = recovery_generation + 1
+        WHERE id = $1
+          AND recovery_generation = $2
+        RETURNING
+            id AS participant_id,
+            display_name,
+            position,
+            recovery_generation
+        ",
+    )
+    .bind(participant.participant_id)
+    .bind(participant.recovery_generation)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("advance recovery generation", error))?
+    .ok_or_else(ApiError::internal)
+}
+
+pub(super) async fn supersede_active_recovery_credentials(
+    transaction: &mut Transaction<'_, Postgres>,
+    participant_id: Uuid,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r"
+        UPDATE recovery_credentials
+        SET
+            status = 'superseded',
+            superseded_at = clock_timestamp()
+        WHERE participant_id = $1
+          AND status = 'active'
+        ",
+    )
+    .bind(participant_id)
+    .execute(&mut **transaction)
+    .await
+    .map(|_| ())
+    .map_err(|error| ApiError::internal_with("supersede recovery credentials", error))
+}
+
+pub(super) async fn append_recovery_credential_security_event(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+    actor_participant_id: Uuid,
+    target_participant_id: Uuid,
+    delivery: &str,
+    recovery_generation: i64,
+) -> Result<StoredRecoveryCredentialSecurityEvent, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryCredentialSecurityEvent>(
+        r"
+        WITH advanced_room AS (
+            UPDATE rooms
+            SET security_event_sequence = security_event_sequence + 1
+            WHERE id = $1
+            RETURNING security_event_sequence
+        ),
+        inserted_event AS (
+            INSERT INTO identity_security_events (
+                room_id,
+                sequence,
+                event_type,
+                actor_participant_id,
+                target_participant_id,
+                delivery,
+                recovery_generation
+            )
+            SELECT
+                $1,
+                advanced_room.security_event_sequence,
+                'recovery_credential_regenerated',
+                $2,
+                $3,
+                $4,
+                $5
+            FROM advanced_room
+            RETURNING sequence, actor_participant_id, target_participant_id,
+                recovery_generation, created_at
+        ),
+        inserted_recipients AS (
+            INSERT INTO identity_security_event_recipients (
+                room_id,
+                security_event_sequence,
+                participant_id
+            )
+            SELECT $1, inserted_event.sequence, $3
+            FROM inserted_event
+            UNION
+            SELECT $1, inserted_event.sequence, $2
+            FROM inserted_event
+            WHERE $4 = 'host_assisted'
+            RETURNING participant_id
+        )
+        SELECT
+            inserted_event.sequence,
+            actors.position AS actor_position,
+            targets.position AS target_position,
+            inserted_event.recovery_generation,
+            replace(
+                to_char(inserted_event.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'),
+                ' ',
+                'T'
+            ) || 'Z' AS occurred_at
+        FROM inserted_event
+        JOIN participants AS actors ON actors.id = inserted_event.actor_participant_id
+        JOIN participants AS targets ON targets.id = inserted_event.target_participant_id
+        WHERE (SELECT COUNT(*) FROM inserted_recipients) >= 1
+        ",
+    )
+    .bind(room_id)
+    .bind(actor_participant_id)
+    .bind(target_participant_id)
+    .bind(delivery)
+    .bind(recovery_generation)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("append recovery credential security event", error))
+}
+
+pub(super) async fn complete_recovery_credential_regeneration(
+    transaction: &mut Transaction<'_, Postgres>,
+    idempotency_key: &str,
+    recovery_generation: i64,
+    security_event_sequence: i64,
+) -> Result<(), ApiError> {
+    let completed = sqlx::query(
+        r"
+        UPDATE recovery_credential_regeneration_requests
+        SET
+            recovery_generation = $2,
+            security_event_sequence = $3,
+            completed_at = clock_timestamp()
+        WHERE idempotency_key = $1
+          AND completed_at IS NULL
+        ",
+    )
+    .bind(idempotency_key)
+    .bind(recovery_generation)
+    .bind(security_event_sequence)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("complete recovery credential regeneration", error))?;
+    if completed.rows_affected() != 1 {
+        return Err(ApiError::internal());
+    }
+    Ok(())
 }
 
 pub(super) async fn lock_open_room(
@@ -472,15 +997,33 @@ pub(super) async fn persist_room_creation(
     })
 }
 
-async fn insert_recovery_credential(
+pub(super) async fn insert_recovery_credential(
     transaction: &mut Transaction<'_, Postgres>,
     participant_id: Uuid,
     token_hmac: &str,
 ) -> Result<(), ApiError> {
     sqlx::query(
         r"
-        INSERT INTO recovery_credentials (id, participant_id, token_hmac)
-        VALUES ($1, $2, $3)
+        INSERT INTO recovery_credentials (
+            id,
+            participant_id,
+            token_hmac,
+            recovery_password_hash,
+            recovery_epoch,
+            password_generation,
+            recovery_generation
+        )
+        SELECT
+            $1,
+            participants.id,
+            $3,
+            rooms.recovery_password_hash,
+            rooms.recovery_epoch,
+            rooms.password_generation,
+            participants.recovery_generation
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE participants.id = $2
         ",
     )
     .bind(Uuid::new_v4())
@@ -501,10 +1044,14 @@ pub(super) async fn load_recovery_candidate(
         r"
         SELECT
             recovery_credentials.id AS credential_id,
+            rooms.id AS room_id,
             participants.id AS participant_id,
             participants.guest_identity_id,
             games.id AS game_id,
-            rooms.recovery_password_hash,
+            recovery_credentials.recovery_password_hash,
+            recovery_credentials.recovery_epoch,
+            recovery_credentials.password_generation,
+            recovery_credentials.recovery_generation,
             recovery_credentials.status,
             recovery_credentials.recovery_attempt_id,
             recovery_credentials.replaced_device_session_id,
@@ -531,7 +1078,12 @@ pub(super) async fn load_recovery_candidate(
           AND rooms.status <> 'cancelled'
           AND (games.id IS NULL OR games.expires_at > clock_timestamp())
           AND (
-              recovery_credentials.status = 'active'
+              (
+                  recovery_credentials.status = 'active'
+                  AND recovery_credentials.recovery_epoch = rooms.recovery_epoch
+                  AND recovery_credentials.password_generation = rooms.password_generation
+                  AND recovery_credentials.recovery_generation = participants.recovery_generation
+              )
               OR (
                   recovery_credentials.status = 'consumed'
                   AND recovery_credentials.recovery_attempt_id = $2
@@ -548,6 +1100,31 @@ pub(super) async fn load_recovery_candidate(
     .map_err(|error| ApiError::internal_with("load participant recovery candidate", error))
 }
 
+pub(super) async fn lock_recovery_room(
+    transaction: &mut Transaction<'_, Postgres>,
+    room_id: Uuid,
+) -> Result<Option<StoredRecoveryRoom>, ApiError> {
+    sqlx::query_as::<_, StoredRecoveryRoom>(
+        r"
+        SELECT
+            rooms.id AS room_id,
+            rooms.recovery_password_hash,
+            rooms.recovery_epoch,
+            rooms.password_generation
+        FROM rooms
+        LEFT JOIN games ON games.room_id = rooms.id
+        WHERE rooms.id = $1
+          AND rooms.status <> 'cancelled'
+          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+        FOR UPDATE OF rooms
+        ",
+    )
+    .bind(room_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| ApiError::internal_with("lock participant recovery room", error))
+}
+
 pub(super) async fn lock_recovery_candidate(
     transaction: &mut Transaction<'_, Postgres>,
     token_hmac: &str,
@@ -557,10 +1134,14 @@ pub(super) async fn lock_recovery_candidate(
         r"
         SELECT
             recovery_credentials.id AS credential_id,
+            rooms.id AS room_id,
             participants.id AS participant_id,
             participants.guest_identity_id,
             games.id AS game_id,
-            rooms.recovery_password_hash,
+            recovery_credentials.recovery_password_hash,
+            recovery_credentials.recovery_epoch,
+            recovery_credentials.password_generation,
+            recovery_credentials.recovery_generation,
             recovery_credentials.status,
             recovery_credentials.recovery_attempt_id,
             recovery_credentials.replaced_device_session_id,
@@ -587,7 +1168,12 @@ pub(super) async fn lock_recovery_candidate(
           AND rooms.status <> 'cancelled'
           AND (games.id IS NULL OR games.expires_at > clock_timestamp())
           AND (
-              recovery_credentials.status = 'active'
+              (
+                  recovery_credentials.status = 'active'
+                  AND recovery_credentials.recovery_epoch = rooms.recovery_epoch
+                  AND recovery_credentials.password_generation = rooms.password_generation
+                  AND recovery_credentials.recovery_generation = participants.recovery_generation
+              )
               OR (
                   recovery_credentials.status = 'consumed'
                   AND recovery_credentials.recovery_attempt_id = $2

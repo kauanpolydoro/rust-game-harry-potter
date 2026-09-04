@@ -7,7 +7,7 @@ use axum::{
 };
 use game_domain::HeroId;
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Postgres, Transaction};
 use uuid::{Uuid, Variant};
 
 use crate::{
@@ -33,6 +33,18 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/rooms/{room_code}", get(find_room))
         .route("/api/rooms/{room_code}/participants", post(join_room))
         .route("/api/session/recover", post(recover_participation))
+        .route(
+            "/api/session/recovery-password",
+            put(rotate_recovery_password),
+        )
+        .route(
+            "/api/session/recovery-credential",
+            post(regenerate_own_recovery_credential),
+        )
+        .route(
+            "/api/rooms/current/participants/{position}/recovery-credential",
+            post(regenerate_assisted_recovery_credential),
+        )
         .route("/api/session/hero", put(select_hero))
         .route("/api/session/readiness", put(set_readiness))
 }
@@ -75,6 +87,23 @@ struct RecoverParticipationRequest {
     replace_session_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RotateRecoveryPasswordRequest {
+    current_recovery_password: String,
+    new_recovery_password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegenerateOwnRecoveryCredentialRequest {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegenerateAssistedRecoveryCredentialRequest {
+    host_assistance_risk_acknowledged: bool,
+}
+
 #[derive(Serialize)]
 struct FindRoomResponse {
     room: RoomSummary,
@@ -111,6 +140,53 @@ struct ParticipantAccessResponse {
     #[serde(flatten)]
     lobby: LobbyResponse,
     recovery_token: String,
+}
+
+#[derive(Serialize)]
+struct RotateRecoveryPasswordResponse {
+    password_generation: i64,
+    security_event: SecurityEvent,
+}
+
+#[derive(Serialize)]
+struct RegenerateRecoveryCredentialResponse {
+    delivery: &'static str,
+    participant: RecoveryParticipant,
+    recovery_generation: i64,
+    recovery_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk_message_key: Option<&'static str>,
+    security_event: RecoveryCredentialSecurityEvent,
+}
+
+#[derive(Serialize)]
+struct RecoveryParticipant {
+    display_name: String,
+    position: i16,
+}
+
+#[derive(Serialize)]
+struct RecoveryCredentialSecurityEvent {
+    event_version: u16,
+    cursor: i64,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    actor_position: i16,
+    target_position: i16,
+    delivery: &'static str,
+    recovery_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(Serialize)]
+struct SecurityEvent {
+    event_version: u16,
+    cursor: i64,
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    actor_position: i16,
+    password_generation: i64,
+    occurred_at: String,
 }
 
 #[derive(Serialize)]
@@ -154,14 +230,92 @@ struct StoredParticipant {
 #[derive(FromRow)]
 struct StoredRecoveryCandidate {
     credential_id: Uuid,
+    room_id: Uuid,
     participant_id: Uuid,
     guest_identity_id: Uuid,
     game_id: Option<Uuid>,
     recovery_password_hash: String,
+    recovery_epoch: i64,
+    password_generation: i64,
+    recovery_generation: i64,
     status: String,
     recovery_attempt_id: Option<Uuid>,
     replaced_device_session_id: Option<Uuid>,
     session_max_age_seconds: Option<i64>,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryRoom {
+    room_id: Uuid,
+    recovery_password_hash: String,
+    recovery_epoch: i64,
+    password_generation: i64,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryPasswordAuthority {
+    room_id: Uuid,
+    participant_id: Uuid,
+    role: String,
+    recovery_password_hash: String,
+    password_generation: i64,
+}
+
+#[derive(FromRow)]
+struct StoredSecurityEvent {
+    sequence: i64,
+    actor_position: i16,
+    password_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryPasswordRotation {
+    actor_participant_id: Uuid,
+    request_fingerprint: String,
+    password_generation: i64,
+    sequence: i64,
+    actor_position: i16,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryParticipant {
+    participant_id: Uuid,
+    display_name: String,
+    position: i16,
+    recovery_generation: i64,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryCredentialSecurityEvent {
+    sequence: i64,
+    actor_position: i16,
+    target_position: i16,
+    recovery_generation: i64,
+    occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryCredentialRegeneration {
+    actor_participant_id: Uuid,
+    target_participant_id: Uuid,
+    delivery: String,
+    request_fingerprint: String,
+    recovery_generation: i64,
+    sequence: i64,
+    actor_position: i16,
+    target_display_name: String,
+    target_position: i16,
+    occurred_at: String,
+}
+
+struct RecoveryCredentialRegenerationCommand {
+    idempotency_key: String,
+    actor_participant_id: Uuid,
+    target_position: Option<i16>,
+    delivery: &'static str,
+    request_fingerprint: String,
 }
 
 #[derive(FromRow)]
@@ -413,6 +567,457 @@ async fn join_room(
     room_joined_response(&state, stored, &idempotency_key).await
 }
 
+async fn rotate_recovery_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<RotateRecoveryPasswordRequest>,
+) -> Result<Response, ApiError> {
+    let key = idempotency_key(&headers)?;
+    require_session_grant_key(&key)?;
+    validate_password(&request.new_recovery_password)?;
+    let participant_id = authenticated_participant(&state, &headers).await?;
+    let request_fingerprint = state.recovery_request_fingerprint(
+        "rotate_recovery_password",
+        &key,
+        &[
+            request.current_recovery_password.as_bytes(),
+            request.new_recovery_password.as_bytes(),
+        ],
+    );
+    if let Some(stored) = postgres::load_recovery_password_rotation(&state.database, &key).await? {
+        return replay_recovery_password_rotation(stored, participant_id, &request_fingerprint);
+    }
+    let observed = postgres::load_recovery_password_authority(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::session_invalid)?;
+    if observed.role != "host" {
+        return Err(ApiError::not_room_host());
+    }
+    if request.current_recovery_password.is_empty()
+        || request.current_recovery_password.chars().count() > 128
+    {
+        return Err(ApiError::recovery_confirmation_failed());
+    }
+    let password_check_permit = state
+        .try_recovery_password_check()
+        .ok_or_else(ApiError::recovery_unavailable)?;
+    if !verify_password(
+        request.current_recovery_password,
+        observed.recovery_password_hash.clone(),
+    )
+    .await?
+    {
+        return Err(ApiError::recovery_confirmation_failed());
+    }
+    let new_password_hash = hash_password(request.new_recovery_password).await?;
+    drop(password_check_permit);
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|error| ApiError::internal_with("recovery password rotation", error))?;
+    let locked = postgres::lock_recovery_password_authority(&mut transaction, participant_id)
+        .await?
+        .ok_or_else(ApiError::recovery_confirmation_failed)?;
+    if let Some(stored) =
+        postgres::load_recovery_password_rotation_in_transaction(&mut transaction, &key).await?
+    {
+        let replayed =
+            replay_recovery_password_rotation(stored, participant_id, &request_fingerprint);
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| ApiError::internal_with("recovery password rotation", error))?;
+        return replayed;
+    }
+    let locked = Some(locked)
+        .filter(|locked| {
+            locked.room_id == observed.room_id
+                && locked.participant_id == observed.participant_id
+                && locked.role == observed.role
+                && locked.recovery_password_hash == observed.recovery_password_hash
+                && locked.password_generation == observed.password_generation
+        })
+        .ok_or_else(ApiError::recovery_confirmation_failed)?;
+    let claimed = postgres::claim_recovery_password_rotation(
+        &mut transaction,
+        &key,
+        locked.room_id,
+        locked.participant_id,
+        &request_fingerprint,
+    )
+    .await?;
+    if !claimed {
+        let stored =
+            postgres::load_recovery_password_rotation_in_transaction(&mut transaction, &key)
+                .await?
+                .ok_or_else(ApiError::internal)?;
+        return replay_recovery_password_rotation(stored, participant_id, &request_fingerprint);
+    }
+    let event = postgres::rotate_recovery_password(
+        &mut transaction,
+        locked.room_id,
+        locked.participant_id,
+        &new_password_hash,
+    )
+    .await?;
+    let room_id = locked.room_id;
+    postgres::complete_recovery_password_rotation(&mut transaction, &key, &event).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| ApiError::internal_with("recovery password rotation", error))?;
+    state.signal_security_event(room_id);
+
+    Ok(recovery_password_rotation_response(event))
+}
+
+fn replay_recovery_password_rotation(
+    stored: StoredRecoveryPasswordRotation,
+    participant_id: Uuid,
+    request_fingerprint: &str,
+) -> Result<Response, ApiError> {
+    if stored.actor_participant_id != participant_id
+        || stored.request_fingerprint != request_fingerprint
+    {
+        return Err(ApiError::idempotency_conflict());
+    }
+    Ok(recovery_password_rotation_response(StoredSecurityEvent {
+        sequence: stored.sequence,
+        actor_position: stored.actor_position,
+        password_generation: stored.password_generation,
+        occurred_at: stored.occurred_at,
+    }))
+}
+
+fn recovery_password_rotation_response(event: StoredSecurityEvent) -> Response {
+    no_store_json(
+        StatusCode::OK,
+        RotateRecoveryPasswordResponse {
+            password_generation: event.password_generation,
+            security_event: SecurityEvent {
+                event_version: 1,
+                cursor: event.sequence,
+                event_type: "recovery_password_rotated",
+                actor_position: event.actor_position,
+                password_generation: event.password_generation,
+                occurred_at: event.occurred_at,
+            },
+        },
+    )
+}
+
+async fn regenerate_own_recovery_credential(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(_request): Json<RegenerateOwnRecoveryCredentialRequest>,
+) -> Result<Response, ApiError> {
+    regenerate_recovery_credential(state, headers, None, true).await
+}
+
+async fn regenerate_assisted_recovery_credential(
+    State(state): State<AppState>,
+    Path(position): Path<i16>,
+    headers: HeaderMap,
+    Json(request): Json<RegenerateAssistedRecoveryCredentialRequest>,
+) -> Result<Response, ApiError> {
+    regenerate_recovery_credential(
+        state,
+        headers,
+        Some(position),
+        request.host_assistance_risk_acknowledged,
+    )
+    .await
+}
+
+async fn regenerate_recovery_credential(
+    state: AppState,
+    headers: HeaderMap,
+    target_position: Option<i16>,
+    risk_acknowledged: bool,
+) -> Result<Response, ApiError> {
+    let command = recovery_credential_regeneration_command(
+        &state,
+        &headers,
+        target_position,
+        risk_acknowledged,
+    )
+    .await?;
+    if let Some(stored) =
+        postgres::load_recovery_credential_regeneration(&state.database, &command.idempotency_key)
+            .await?
+    {
+        return replay_recovery_credential_regeneration(&state, stored, &command);
+    }
+
+    let (committed_room_id, response) =
+        commit_recovery_credential_regeneration(&state, &command).await?;
+    if let Some(room_id) = committed_room_id {
+        state.signal_security_event(room_id);
+    }
+    Ok(response)
+}
+
+async fn recovery_credential_regeneration_command(
+    state: &AppState,
+    headers: &HeaderMap,
+    target_position: Option<i16>,
+    risk_acknowledged: bool,
+) -> Result<RecoveryCredentialRegenerationCommand, ApiError> {
+    let idempotency_key = idempotency_key(headers)?;
+    require_session_grant_key(&idempotency_key)?;
+    let actor_participant_id = authenticated_participant(state, headers).await?;
+    if target_position.is_some() && !risk_acknowledged {
+        return Err(ApiError::host_assistance_risk_not_acknowledged());
+    }
+    let delivery = if target_position.is_some() {
+        "host_assisted"
+    } else {
+        "direct"
+    };
+    let target_position_value = target_position.map(|position| position.to_string());
+    let request_fingerprint = match target_position_value.as_deref() {
+        Some(position) => state.recovery_request_fingerprint(
+            "regenerate_recovery_credential",
+            &idempotency_key,
+            &[
+                delivery.as_bytes(),
+                position.as_bytes(),
+                b"risk-acknowledged",
+            ],
+        ),
+        None => state.recovery_request_fingerprint(
+            "regenerate_recovery_credential",
+            &idempotency_key,
+            &[delivery.as_bytes()],
+        ),
+    };
+    Ok(RecoveryCredentialRegenerationCommand {
+        idempotency_key,
+        actor_participant_id,
+        target_position,
+        delivery,
+        request_fingerprint,
+    })
+}
+
+async fn commit_recovery_credential_regeneration(
+    state: &AppState,
+    command: &RecoveryCredentialRegenerationCommand,
+) -> Result<(Option<Uuid>, Response), ApiError> {
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|error| ApiError::internal_with("recovery credential regeneration", error))?;
+    let (authority, participant) =
+        lock_recovery_credential_participants(&mut transaction, command).await?;
+    if let Some(replayed) = replay_or_claim_recovery_credential_regeneration(
+        state,
+        &mut transaction,
+        command,
+        &authority,
+        &participant,
+    )
+    .await?
+    {
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| ApiError::internal_with("recovery credential regeneration", error))?;
+        return Ok((None, replayed));
+    }
+
+    let participant = postgres::advance_recovery_generation(&mut transaction, participant).await?;
+    postgres::supersede_active_recovery_credentials(&mut transaction, participant.participant_id)
+        .await?;
+    let recovery_token = state.idempotent_recovery_token(
+        "regenerate_recovery_credential",
+        &command.idempotency_key,
+        participant.participant_id,
+    );
+    let recovery_token_hmac = state.recovery_token_hmac(&recovery_token);
+    postgres::insert_recovery_credential(
+        &mut transaction,
+        participant.participant_id,
+        &recovery_token_hmac,
+    )
+    .await?;
+    let event = postgres::append_recovery_credential_security_event(
+        &mut transaction,
+        authority.room_id,
+        command.actor_participant_id,
+        participant.participant_id,
+        command.delivery,
+        participant.recovery_generation,
+    )
+    .await?;
+    postgres::complete_recovery_credential_regeneration(
+        &mut transaction,
+        &command.idempotency_key,
+        participant.recovery_generation,
+        event.sequence,
+    )
+    .await?;
+    let room_id = authority.room_id;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| ApiError::internal_with("recovery credential regeneration", error))?;
+    let response = recovery_credential_regeneration_response(
+        recovery_token,
+        participant,
+        event,
+        command.delivery,
+    );
+    Ok((Some(room_id), response))
+}
+
+async fn lock_recovery_credential_participants(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &RecoveryCredentialRegenerationCommand,
+) -> Result<(StoredRecoveryPasswordAuthority, StoredRecoveryParticipant), ApiError> {
+    let authority =
+        postgres::lock_recovery_password_authority(transaction, command.actor_participant_id)
+            .await?
+            .ok_or_else(ApiError::session_invalid)?;
+    if command.target_position.is_some() && authority.role != "host" {
+        return Err(ApiError::not_room_host());
+    }
+    let participant = match command.target_position {
+        Some(position) => postgres::lock_recovery_participant_by_position(
+            transaction,
+            authority.room_id,
+            position,
+        )
+        .await?
+        .ok_or_else(ApiError::room_participant_not_found)?,
+        None => postgres::lock_recovery_participant(
+            transaction,
+            authority.room_id,
+            command.actor_participant_id,
+        )
+        .await?
+        .ok_or_else(ApiError::session_invalid)?,
+    };
+    if command.target_position.is_some()
+        && participant.participant_id == command.actor_participant_id
+    {
+        return Err(ApiError::recovery_assistance_not_required());
+    }
+    Ok((authority, participant))
+}
+
+async fn replay_or_claim_recovery_credential_regeneration(
+    state: &AppState,
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &RecoveryCredentialRegenerationCommand,
+    authority: &StoredRecoveryPasswordAuthority,
+    participant: &StoredRecoveryParticipant,
+) -> Result<Option<Response>, ApiError> {
+    if let Some(stored) = postgres::load_recovery_credential_regeneration_in_transaction(
+        transaction,
+        &command.idempotency_key,
+    )
+    .await?
+    {
+        return replay_recovery_credential_regeneration(state, stored, command).map(Some);
+    }
+    let claimed = postgres::claim_recovery_credential_regeneration(
+        transaction,
+        &command.idempotency_key,
+        authority.room_id,
+        command.actor_participant_id,
+        participant.participant_id,
+        command.delivery,
+        &command.request_fingerprint,
+    )
+    .await?;
+    if claimed {
+        return Ok(None);
+    }
+    let stored = postgres::load_recovery_credential_regeneration_in_transaction(
+        transaction,
+        &command.idempotency_key,
+    )
+    .await?
+    .ok_or_else(ApiError::internal)?;
+    replay_recovery_credential_regeneration(state, stored, command).map(Some)
+}
+
+fn replay_recovery_credential_regeneration(
+    state: &AppState,
+    stored: StoredRecoveryCredentialRegeneration,
+    command: &RecoveryCredentialRegenerationCommand,
+) -> Result<Response, ApiError> {
+    if stored.actor_participant_id != command.actor_participant_id
+        || stored.delivery != command.delivery
+        || stored.request_fingerprint != command.request_fingerprint
+        || command
+            .target_position
+            .is_some_and(|position| stored.target_position != position)
+        || (command.target_position.is_none()
+            && stored.target_participant_id != command.actor_participant_id)
+    {
+        return Err(ApiError::idempotency_conflict());
+    }
+    let recovery_token = state.idempotent_recovery_token(
+        "regenerate_recovery_credential",
+        &command.idempotency_key,
+        stored.target_participant_id,
+    );
+    Ok(recovery_credential_regeneration_response(
+        recovery_token,
+        StoredRecoveryParticipant {
+            participant_id: stored.target_participant_id,
+            display_name: stored.target_display_name,
+            position: stored.target_position,
+            recovery_generation: stored.recovery_generation,
+        },
+        StoredRecoveryCredentialSecurityEvent {
+            sequence: stored.sequence,
+            actor_position: stored.actor_position,
+            target_position: stored.target_position,
+            recovery_generation: stored.recovery_generation,
+            occurred_at: stored.occurred_at,
+        },
+        command.delivery,
+    ))
+}
+
+fn recovery_credential_regeneration_response(
+    recovery_token: String,
+    participant: StoredRecoveryParticipant,
+    event: StoredRecoveryCredentialSecurityEvent,
+    delivery: &'static str,
+) -> Response {
+    no_store_json(
+        StatusCode::OK,
+        RegenerateRecoveryCredentialResponse {
+            delivery,
+            participant: RecoveryParticipant {
+                display_name: participant.display_name,
+                position: participant.position,
+            },
+            recovery_generation: participant.recovery_generation,
+            recovery_token,
+            risk_message_key: (delivery == "host_assisted")
+                .then_some("participant.recovery.host_assisted_impersonation_risk"),
+            security_event: RecoveryCredentialSecurityEvent {
+                event_version: 1,
+                cursor: event.sequence,
+                event_type: "recovery_credential_regenerated",
+                actor_position: event.actor_position,
+                target_position: event.target_position,
+                delivery,
+                recovery_generation: event.recovery_generation,
+                occurred_at: event.occurred_at,
+            },
+        },
+    )
+}
+
 async fn recover_participation(
     State(state): State<AppState>,
     Json(request): Json<RecoverParticipationRequest>,
@@ -424,20 +1029,7 @@ async fn recover_participation(
         .begin()
         .await
         .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
-    let locked = postgres::lock_recovery_candidate(
-        &mut transaction,
-        &recovery.token_hmac,
-        recovery.attempt_id,
-    )
-    .await?
-    .filter(|locked| {
-        locked.credential_id == recovery.candidate.credential_id
-            && locked.participant_id == recovery.candidate.participant_id
-            && locked.guest_identity_id == recovery.candidate.guest_identity_id
-            && locked.game_id == recovery.candidate.game_id
-            && locked.recovery_password_hash == recovery.candidate.recovery_password_hash
-    })
-    .ok_or_else(ApiError::recovery_failed)?;
+    let locked = lock_authenticated_recovery(&mut transaction, &recovery).await?;
 
     let successor_recovery_token = state.idempotent_recovery_token(
         "recover_participation",
@@ -520,6 +1112,46 @@ async fn recover_participation(
     Ok(response)
 }
 
+async fn lock_authenticated_recovery(
+    transaction: &mut Transaction<'_, Postgres>,
+    recovery: &AuthenticatedRecovery,
+) -> Result<StoredRecoveryCandidate, ApiError> {
+    let candidate = &recovery.candidate;
+    let locked_room = postgres::lock_recovery_room(transaction, candidate.room_id)
+        .await?
+        .ok_or_else(ApiError::recovery_failed)?;
+    let locked_participant = postgres::lock_recovery_participant(
+        transaction,
+        candidate.room_id,
+        candidate.participant_id,
+    )
+    .await?
+    .ok_or_else(ApiError::recovery_failed)?;
+    if candidate.status == "active"
+        && (locked_room.room_id != candidate.room_id
+            || locked_room.recovery_password_hash != candidate.recovery_password_hash
+            || locked_room.recovery_epoch != candidate.recovery_epoch
+            || locked_room.password_generation != candidate.password_generation
+            || locked_participant.recovery_generation != candidate.recovery_generation)
+    {
+        return Err(ApiError::recovery_failed());
+    }
+    postgres::lock_recovery_candidate(transaction, &recovery.token_hmac, recovery.attempt_id)
+        .await?
+        .filter(|locked| {
+            locked.credential_id == candidate.credential_id
+                && locked.room_id == candidate.room_id
+                && locked.participant_id == candidate.participant_id
+                && locked.guest_identity_id == candidate.guest_identity_id
+                && locked.game_id == candidate.game_id
+                && locked.recovery_password_hash == candidate.recovery_password_hash
+                && locked.recovery_epoch == candidate.recovery_epoch
+                && locked.password_generation == candidate.password_generation
+                && locked.recovery_generation == candidate.recovery_generation
+        })
+        .ok_or_else(ApiError::recovery_failed)
+}
+
 async fn authenticate_recovery_request(
     state: &AppState,
     request: RecoverParticipationRequest,
@@ -580,7 +1212,6 @@ async fn authenticate_recovery_request(
     let replace_session_id = replace_session_id.expect("the candidate requires a valid choice");
     let session_token = state.recovered_session_token(&request.token, candidate.participant_id);
     drop(password_check_permit);
-
     Ok(AuthenticatedRecovery {
         candidate,
         token_hmac,

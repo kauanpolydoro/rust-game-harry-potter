@@ -175,7 +175,11 @@ function validationExpression(schema, value) {
     return checks.join(' && ')
   }
   if (schema.type === 'boolean') {
-    return `typeof ${value} === 'boolean'`
+    const checks = [`typeof ${value} === 'boolean'`]
+    if (Array.isArray(schema.enum)) {
+      checks.push(`(${schema.enum.map((entry) => `${value} === ${JSON.stringify(entry)}`).join(' || ')})`)
+    }
+    return checks.join(' && ')
   }
   if (schema.type === 'integer') {
     const checks = [`typeof ${value} === 'number'`, `Number.isInteger(${value})`]
@@ -226,7 +230,9 @@ function validationExpression(schema, value) {
     const checks = [`isRecord(${value})`]
     if (schema.additionalProperties === false) {
       checks.push(
-        `Object.keys(${value}).every((key) => ${JSON.stringify(properties.map(([name]) => name))}.includes(key))`,
+        properties.length === 0
+          ? `Object.keys(${value}).length === 0`
+          : `Object.keys(${value}).every((key) => ${JSON.stringify(properties.map(([name]) => name))}.includes(key))`,
       )
     }
     for (const [name, property] of properties) {
@@ -260,6 +266,9 @@ const generatedDefinitions = Object.entries(identitySchema.$defs)
   .filter(([name]) => name !== 'HeroId')
   .map(([name, schema]) => {
     if (schema.type === 'object' && schema.properties) {
+      if (Object.keys(schema.properties).length === 0) {
+        return `export type ${name} = Record<string, never>`
+      }
       return `export interface ${name} ${typeScriptType(schema, 1)}`
     }
     if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {

@@ -10,7 +10,7 @@ import { useGameCommandStore } from '../stores/gameCommand'
 import { useGameSyncStore } from '../stores/gameSync'
 import { useRoomAccessStore } from '../stores/roomAccess'
 import GameTable from './GameTable.vue'
-import RecoveryCredential from './RecoveryCredential.vue'
+import RecoveryManagement from './RecoveryManagement.vue'
 
 const props = defineProps<{
   choiceInputDisabled: boolean
@@ -343,12 +343,6 @@ function acquireCard(cardId: string): void {
         A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
       </p>
 
-      <RecoveryCredential
-        v-if="roomAccess.issuedRecoveryToken"
-        :token="roomAccess.issuedRecoveryToken"
-        @dismiss="roomAccess.dismissRecoveryCredential()"
-      />
-
       <div
         class="realtime-status"
         :class="`realtime-status--${gameSync.status}`"
@@ -587,6 +581,11 @@ function acquireCard(cardId: string): void {
           </li>
         </ol>
       </div>
+
+      <RecoveryManagement
+        :participant="game.participant"
+        :participants="game.participants"
+      />
 
       <details class="snapshot-details">
         <summary>Ver versões do Snapshot</summary>
