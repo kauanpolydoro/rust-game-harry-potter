@@ -1179,6 +1179,90 @@ input {
   line-height: 1.1;
 }
 
+.phase-guidance {
+  max-width: 34rem;
+  margin: 0.9rem 0 0;
+  color: var(--chalk-muted);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.resolution-queue {
+  margin-top: 1.75rem;
+  padding-block: 1.25rem;
+  border-block: 1px solid var(--brass-quiet);
+}
+
+.resolution-queue-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+}
+
+.resolution-queue h3,
+.resolution-queue-heading p {
+  margin: 0;
+}
+
+.resolution-queue h3 {
+  color: var(--chalk);
+  font-family: "Archivo Narrow Variable", ui-sans-serif, sans-serif;
+  font-size: 1.5rem;
+  line-height: 1.08;
+}
+
+.resolution-queue-heading p,
+.resolution-queue-empty {
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.resolution-queue ol {
+  display: grid;
+  gap: 0;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resolution-queue li {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: baseline;
+  min-height: 2.75rem;
+  padding-block: 0.65rem;
+  border-bottom: 1px solid rgb(111 99 63 / 55%);
+}
+
+.resolution-queue li:last-child {
+  border-bottom: 0;
+}
+
+.resolution-queue li span {
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.resolution-queue li strong {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.resolution-queue .resolution-queue-current strong {
+  color: var(--brass);
+}
+
+.resolution-queue-empty {
+  margin: 0.75rem 0 0;
+}
+
 .game-table {
   margin-top: 2rem;
 }
@@ -1624,6 +1708,25 @@ input {
   50% {
     background: currentColor;
     opacity: 0.35;
+  }
+}
+
+@media (max-width: 47.999rem) {
+  .shell {
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+
+  .action-dock {
+    position: fixed;
+    z-index: 4;
+    right: max(1.25rem, env(safe-area-inset-right));
+    bottom: 0;
+    left: calc(4.45rem + max(1.25rem, env(safe-area-inset-left)));
+    min-height: 0;
+    margin: 0;
+    padding-block: 0.75rem max(0.75rem, env(safe-area-inset-bottom));
+    background: var(--ink);
+    box-shadow: 0 -0.9rem 1.8rem rgb(0 0 0 / 32%);
   }
 }
 

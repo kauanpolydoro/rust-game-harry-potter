@@ -181,9 +181,17 @@ const lobbyIsReadyToSeal = computed(
 const canStartGame = computed(
   () => Boolean(isHost.value && lobbyIsReadyToSeal.value && selectedContent.value?.playable),
 )
-const canCompleteDarkArts = computed(
+const endHeroActionsIsLegal = computed(() => {
+  const currentGame = game.value
+  return (
+    currentGame?.turn.phase === 'hero_actions' &&
+    currentGame.participant.position === currentGame.turn.active_position &&
+    currentGame.legal_actions.includes('end_hero_actions')
+  )
+})
+const canEndHeroActions = computed(
   () =>
-    game.value?.legal_actions.includes('complete_dark_arts') === true &&
+    endHeroActionsIsLegal.value &&
     !commandSubmissionBlocked.value,
 )
 const serviceHeading = computed(() => {
@@ -504,11 +512,11 @@ async function refreshLobby(): Promise<void> {
   document.getElementById(game.value ? 'game-heading' : 'room-success-heading')?.focus()
 }
 
-async function completeDarkArts(): Promise<void> {
-  if (!game.value || !canCompleteDarkArts.value) {
+async function endHeroActions(): Promise<void> {
+  if (!game.value || !canEndHeroActions.value) {
     return
   }
-  const projection = await gameCommand.completeDarkArts(game.value)
+  const projection = await gameCommand.endHeroActions(game.value)
   if (projection) {
     roomAccess.advanceGameProjection(projection)
     await nextTick()
@@ -1347,7 +1355,7 @@ onMounted(async () => {
         Confirmar escolha
       </button>
       <button
-        v-else-if="game && game.legal_actions.includes('complete_dark_arts') && gameSync.commandsFrozen"
+        v-else-if="game && endHeroActionsIsLegal && gameSync.commandsFrozen"
         class="primary-button"
         :disabled="true"
         type="button"
@@ -1355,12 +1363,12 @@ onMounted(async () => {
         Sincronizando partida
       </button>
       <button
-        v-else-if="game && canCompleteDarkArts"
+        v-else-if="game && canEndHeroActions"
         class="primary-button"
         type="button"
-        @click="completeDarkArts()"
+        @click="endHeroActions()"
       >
-        Concluir Artes das Trevas
+        Encerrar ações do Herói
       </button>
       <p
         v-else-if="game && pendingChoice && !isResponsibleForPendingChoice"
@@ -1372,11 +1380,13 @@ onMounted(async () => {
       <p v-else-if="game" class="continuity-note">
         <span aria-hidden="true"></span>
         {{
-          game.turn.phase === 'hero_action'
-            ? game.legal_actions.length > 0
-              ? 'Escolha uma carta, um vilão ou o mercado na mesa acima.'
-              : 'Não há outra ação legal nesta versão. O encerramento do turno virá na próxima etapa.'
-            : 'Aguardando a ação do participante ativo.'
+          game.turn.phase === 'hero_actions'
+            ? game.choice.status === 'pending'
+              ? 'Aguardando a escolha oficial do participante responsável.'
+              : game.legal_actions.length > 0
+                ? 'Escolha uma carta, um vilão ou o mercado na mesa acima, ou encerre suas ações.'
+                : 'Aguardando as ações do participante ativo.'
+            : 'O servidor está resolvendo esta fase automaticamente.'
         }}
       </p>
       <button

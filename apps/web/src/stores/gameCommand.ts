@@ -40,7 +40,7 @@ interface PendingGameIntent {
 
 const pendingCommandStorage = 'hogwarts.game-command.pending-intent'
 const gameCommandTypes = [
-  'complete_dark_arts',
+  'end_hero_actions',
   'resolve_choice',
   'play_card',
   'assign_attack',
@@ -82,7 +82,7 @@ function createRequest(
     expected_state_version: expectedStateVersion,
   }
   switch (intent.type) {
-    case 'complete_dark_arts':
+    case 'end_hero_actions':
       return { ...metadata, type: intent.type }
     case 'resolve_choice':
       return {
@@ -184,8 +184,8 @@ export const useGameCommandStore = defineStore('gameCommand', {
       this.errorCode = null
       removePendingIntent()
     },
-    async completeDarkArts(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
-      return this.execute(game, { type: 'complete_dark_arts' })
+    async endHeroActions(game: GameProjectionResponse): Promise<GameProjectionResponse | null> {
+      return this.execute(game, { type: 'end_hero_actions' })
     },
     async resolveChoice(
       game: GameProjectionResponse,

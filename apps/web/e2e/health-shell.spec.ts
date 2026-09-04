@@ -1,27 +1,91 @@
 import { expect, test, type Page } from '@playwright/test'
 
+function automaticPhaseOutcomes(targetPosition: number) {
+  const targetId = `hero:${targetPosition}`
+  return [
+    {
+      after: 9,
+      before: 10,
+      cause: 'effect',
+      resource: 'health',
+      rule_id: 'rule:functional',
+      target_id: targetId,
+      target_position: targetPosition,
+      type: 'resource_changed',
+    },
+    {
+      after: 2,
+      before: 0,
+      cause: 'effect',
+      resource: 'influence',
+      rule_id: 'rule:functional',
+      target_id: targetId,
+      target_position: targetPosition,
+      type: 'resource_changed',
+    },
+    {
+      after: 1,
+      before: 0,
+      cause: 'effect',
+      resource: 'attack',
+      rule_id: 'rule:functional',
+      target_id: targetId,
+      target_position: targetPosition,
+      type: 'resource_changed',
+    },
+    {
+      after: 2,
+      before: 1,
+      cause: 'effect',
+      resource: 'attack',
+      rule_id: 'rule:functional',
+      target_id: targetId,
+      target_position: targetPosition,
+      type: 'resource_changed',
+    },
+    {
+      die: 'd4',
+      result: 3,
+      rule_id: 'rule:functional',
+      type: 'die_rolled',
+    },
+    {
+      reason: 'explicit',
+      rule_id: 'rule:functional',
+      type: 'no_op',
+    },
+    {
+      reason: 'no_eligible_target',
+      rule_id: 'rule:functional',
+      type: 'no_op',
+    },
+  ]
+}
+
 const initialGameProjection = {
   choice: { status: 'none' },
-  effects: { outcomes: [], status: 'idle' },
+  effects: { outcomes: automaticPhaseOutcomes(1), status: 'resolved' },
   game: {
     adventure: { id: 'adventure:001', name: 'Game 1' },
     expires_at: '2026-09-10T12:00:00Z',
     id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
     status: 'in_progress',
   },
-  legal_actions: ['complete_dark_arts'],
+  legal_actions: ['end_hero_actions'],
   legal_intentions: {
     acquire_cards: [],
     assign_attack: [],
-    complete_dark_arts: true,
+    end_hero_actions: true,
     play_cards: [],
   },
+  queued_effect_count: 0,
+  queued_phases: ['end_turn'],
   participant: {
     display_name: 'Minerva',
     hand_count: 0,
     hero: { id: 'harry', name: 'Harry' },
     position: 1,
-    resources: { attack: 0, health: 10, influence: 0 },
+    resources: { attack: 2, health: 9, influence: 2 },
     role: 'host',
   },
   participants: [
@@ -30,7 +94,7 @@ const initialGameProjection = {
       hand_count: 0,
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
-      resources: { attack: 0, health: 10, influence: 0 },
+      resources: { attack: 2, health: 9, influence: 2 },
       role: 'host',
     },
     {
@@ -68,40 +132,26 @@ const initialGameProjection = {
     play_area: [],
     villain_deck_count: 0,
   },
-  turn: { active_position: 1, number: 1, phase: 'dark_arts' },
+  turn: { active_position: 1, number: 1, phase: 'hero_actions' },
 }
 
-const completedGameProjection = {
+const nextTurnGameProjection = {
   ...initialGameProjection,
-  effects: {
-    outcomes: [
-      {
-        after: 2,
-        before: 0,
-        cause: 'effect',
-        resource: 'influence',
-        rule_id: 'rule:functional',
-        target_id: 'hero:1',
-        target_position: 1,
-        type: 'resource_changed',
-      },
-    ],
-    status: 'resolved',
-  },
+  effects: { outcomes: automaticPhaseOutcomes(2), status: 'resolved' },
   game: { ...initialGameProjection.game, expires_at: '2026-09-10T13:00:00Z' },
   legal_actions: [],
   legal_intentions: {
     ...initialGameProjection.legal_intentions,
-    complete_dark_arts: false,
+    end_hero_actions: false,
   },
   participant: {
     ...initialGameProjection.participant,
-    resources: { attack: 2, health: 9, influence: 2 },
+    resources: { attack: 0, health: 9, influence: 0 },
   },
   participants: initialGameProjection.participants.map((participant) =>
     participant.position === 1
-      ? { ...participant, resources: { attack: 2, health: 9, influence: 2 } }
-      : participant,
+      ? { ...participant, resources: { attack: 0, health: 9, influence: 0 } }
+      : { ...participant, resources: { attack: 2, health: 9, influence: 2 } },
   ),
   snapshot: {
     ...initialGameProjection.snapshot,
@@ -110,17 +160,17 @@ const completedGameProjection = {
     sequence: 1,
     state_version: 2,
   },
-  turn: { ...initialGameProjection.turn, phase: 'hero_action' },
+  turn: { active_position: 2, number: 2, phase: 'hero_actions' },
 }
 
 const heroActionProjection = {
-  ...completedGameProjection,
+  ...initialGameProjection,
   effects: { outcomes: [], status: 'idle' },
-  legal_actions: ['play_card'],
+  legal_actions: ['end_hero_actions', 'play_card'],
   legal_intentions: {
     acquire_cards: [],
     assign_attack: [],
-    complete_dark_arts: false,
+    end_hero_actions: true,
     play_cards: [
       {
         card_id: 'instance:starter',
@@ -139,11 +189,11 @@ const heroActionProjection = {
     ],
   },
   participant: {
-    ...completedGameProjection.participant,
+    ...initialGameProjection.participant,
     hand_count: 1,
     resources: { attack: 0, health: 9, influence: 0 },
   },
-  participants: completedGameProjection.participants.map((participant) =>
+  participants: initialGameProjection.participants.map((participant) =>
     participant.position === 1
       ? {
           ...participant,
@@ -189,11 +239,11 @@ const heroActionProjection = {
 
 const playedCardProjection = {
   ...heroActionProjection,
-  legal_actions: ['assign_attack', 'acquire_card'],
+  legal_actions: ['end_hero_actions', 'assign_attack', 'acquire_card'],
   legal_intentions: {
     acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
     assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
-    complete_dark_arts: false,
+    end_hero_actions: true,
     play_cards: [],
   },
   participant: {
@@ -212,10 +262,10 @@ const playedCardProjection = {
   ),
   snapshot: {
     ...heroActionProjection.snapshot,
-    cursor: 2,
+    cursor: 1,
     digest: `blake3:${'e'.repeat(64)}`,
-    sequence: 2,
-    state_version: 3,
+    sequence: 1,
+    state_version: 2,
   },
   table: {
     ...heroActionProjection.table,
@@ -599,15 +649,22 @@ test('a player replays a missed event and falls back to Snapshot within recovery
       url: string | URL,
       protocols?: string | string[],
     ) => BrowserSocket
+    type TurnCompletedEvent = {
+      event_version?: unknown
+      steps?: Array<{ phase?: unknown }>
+      type?: unknown
+    }
     const scope = globalThis as unknown as {
       WebSocket: BrowserSocketConstructor
       __e2eForceBadDigest: boolean
       __e2eMessages: string[]
       __e2eSockets: BrowserSocket[]
+      __e2eTurnCompletedEvents: TurnCompletedEvent[]
     }
     const NativeWebSocket = scope.WebSocket
     const messages: string[] = []
     const observed: BrowserSocket[] = []
+    const turnCompletedEvents: TurnCompletedEvent[] = []
     class ObservedWebSocket extends NativeWebSocket {
       constructor(url: string | URL, protocols?: string | string[]) {
         let requestedUrl = url
@@ -620,9 +677,17 @@ test('a player replays a missed event and falls back to Snapshot within recovery
         super(requestedUrl, protocols)
         observed.push(this)
         this.addEventListener('message', (event) => {
-          const message = JSON.parse(String(event.data)) as { type?: unknown }
+          const message = JSON.parse(String(event.data)) as {
+            events?: TurnCompletedEvent[]
+            type?: unknown
+          }
           if (typeof message.type === 'string') {
             messages.push(message.type)
+          }
+          if (message.type === 'events') {
+            turnCompletedEvents.push(
+              ...(message.events ?? []).filter((candidate) => candidate.type === 'turn_completed'),
+            )
           }
         })
       }
@@ -630,6 +695,7 @@ test('a player replays a missed event and falls back to Snapshot within recovery
     scope.__e2eForceBadDigest = false
     scope.__e2eMessages = messages
     scope.__e2eSockets = observed
+    scope.__e2eTurnCompletedEvents = turnCompletedEvents
     scope.WebSocket = ObservedWebSocket
   })
 
@@ -661,6 +727,13 @@ test('a player replays a missed event and falls back to Snapshot within recovery
     await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
     await expect(hostPage.locator('.presence-label--online')).toHaveCount(2)
     await expect(guestPage.locator('.presence-label--online')).toHaveCount(2)
+    await expect(hostPage.locator('.game-situation').getByText('1', { exact: true })).toBeVisible()
+    await expect(
+      hostPage.locator('.game-situation').getByText('Ações do Herói', { exact: true }),
+    ).toBeVisible()
+    await expect(hostPage.getByText('Minerva perdeu 1 de Vida (10 → 9).')).toBeVisible()
+    await expect(hostPage.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
+    await expect(hostPage.getByText('Vida 9 · Ataque 2 · Influência 2')).toBeVisible()
 
     await guestContext.setOffline(true)
     await guestPage.evaluate(() => {
@@ -676,24 +749,40 @@ test('a player replays a missed event and falls back to Snapshot within recovery
     )
     await expect(hostPage.locator('.presence-label--reconnecting')).toContainText('Reconectando')
     await expect(hostPage.locator('.presence-block')).toHaveCount(0)
-    await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
+    await hostPage.getByRole('button', { name: 'Encerrar ações do Herói' }).click()
     await expect(
       hostPage.getByRole('heading', { level: 3, name: 'Última resolução oficial' }),
     ).toBeVisible()
-    await expect(hostPage.getByText('Minerva pagou 1 de Vida (10 → 9).')).toBeVisible()
-    await expect(hostPage.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
+    await expect(hostPage.locator('.game-situation').getByText('2', { exact: true })).toBeVisible()
+    await expect(
+      hostPage.locator('.game-situation').getByText('Luna', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      hostPage.locator('.game-situation').getByText('Ações do Herói', { exact: true }),
+    ).toBeVisible()
+    await expect(hostPage.getByText('Luna perdeu 1 de Vida (10 → 9).')).toBeVisible()
+    await expect(hostPage.getByText('Luna recebeu 2 de Influência (0 → 2).')).toBeVisible()
     await expect(hostPage.getByText(/Dado D4: resultado [1-4]\./)).toBeVisible()
     await expect(
       hostPage.getByText('Nenhum alvo era elegível. O efeito foi resolvido sem alterar a mesa.'),
     ).toBeVisible()
+    await expect(hostPage.getByText('Vida 9 · Ataque 0 · Influência 0')).toBeVisible()
     await expect(hostPage.getByText('Vida 9 · Ataque 2 · Influência 2')).toBeVisible()
+    await expect(hostPage.locator('.presence-block')).toContainText('Aguardando Luna')
     await guestContext.setOffline(false)
 
     const replayStartedAt = Date.now()
-    await expect(guestPage.getByText('Ação do Herói')).toBeVisible({ timeout: 3_000 })
+    await expect(
+      guestPage.locator('.game-situation').getByText('Ações do Herói', { exact: true }),
+    ).toBeVisible({ timeout: 3_000 })
+    await expect(guestPage.locator('.game-situation').getByText('2', { exact: true })).toBeVisible()
+    await expect(
+      guestPage.locator('.game-situation').getByText('Luna', { exact: true }),
+    ).toBeVisible()
     await expect(
       guestPage.getByRole('heading', { level: 3, name: 'Última resolução oficial' }),
     ).toBeVisible()
+    await expect(guestPage.getByText('Luna perdeu 1 de Vida (10 → 9).')).toBeVisible()
     await expect(guestPage.getByText(/Dado D4: resultado [1-4]\./)).toBeVisible()
     expect(Date.now() - replayStartedAt).toBeLessThan(3_000)
     await expect
@@ -705,6 +794,30 @@ test('a player replays a missed event and falls back to Snapshot within recovery
         { timeout: 3_000 },
       )
       .toBe(true)
+    await expect
+      .poll(() =>
+        guestPage.evaluate(() => {
+          const event = (
+            globalThis as unknown as {
+              __e2eTurnCompletedEvents: Array<{
+                event_version?: unknown
+                steps?: Array<{ phase?: unknown }>
+                type?: unknown
+              }>
+            }
+          ).__e2eTurnCompletedEvents.at(-1)
+          return {
+            eventVersion: event?.event_version,
+            phases: event?.steps?.map((step) => step.phase),
+            type: event?.type,
+          }
+        }),
+      )
+      .toEqual({
+        eventVersion: 4,
+        phases: ['end_turn', 'dark_arts', 'villains'],
+        type: 'turn_completed',
+      })
     await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
 
     await guestPage.evaluate(() => {
@@ -729,6 +842,17 @@ test('a player replays a missed event and falls back to Snapshot within recovery
       .toBe(true)
     expect(Date.now() - snapshotStartedAt).toBeLessThan(5_000)
     await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
+    await expect(guestPage.locator('.game-situation').getByText('2', { exact: true })).toBeVisible()
+    await expect(
+      guestPage.locator('.game-situation').getByText('Luna', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      guestPage.locator('.game-situation').getByText('Ações do Herói', { exact: true }),
+    ).toBeVisible()
+    await expect(guestPage.getByText('Luna perdeu 1 de Vida (10 → 9).')).toBeVisible()
+    await expect(
+      guestPage.getByRole('button', { name: 'Encerrar ações do Herói' }),
+    ).toBeEnabled()
   } finally {
     await guestContext.close()
   }
@@ -779,10 +903,10 @@ test('a targeted card stays in the official hand until its command is accepted',
       body: JSON.stringify({
         projection: playedCardProjection,
         receipt: {
-          accepted_sequence: 2,
-          accepted_state_version: 3,
+          accepted_sequence: 1,
+          accepted_state_version: 2,
           command_id: body.command_id,
-          expected_state_version: 2,
+          expected_state_version: 1,
           expires_at: '2026-09-10T13:00:00Z',
           status: 'accepted',
           type: 'play_card',
@@ -804,7 +928,7 @@ test('a targeted card stays in the official hand until its command is accepted',
   await expect(page.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
   expect(submittedCommand).toMatchObject({
     card_id: 'instance:starter',
-    expected_state_version: 2,
+    expected_state_version: 1,
     targets: [{ selector_id: 'target:hero', target_ids: ['hero:1'] }],
     type: 'play_card',
   })
@@ -820,6 +944,7 @@ test('a targeted card stays in the official hand until its command is accepted',
 })
 
 test('a stale command resynchronizes before the player can decide again', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   let sessionRequests = 0
   let commandRequests = 0
   await page.addInitScript(() => localStorage.setItem('hogwarts.session.expected', 'true'))
@@ -828,7 +953,7 @@ test('a stale command resynchronizes before the player can decide again', async 
     sessionRequests += 1
     await route.fulfill({
       body: JSON.stringify(
-        sessionRequests === 1 ? initialGameProjection : completedGameProjection,
+        sessionRequests === 1 ? initialGameProjection : nextTurnGameProjection,
       ),
       contentType: 'application/json',
       status: 200,
@@ -836,6 +961,10 @@ test('a stale command resynchronizes before the player can decide again', async 
   })
   await page.route('**/api/games/current/commands', async (route) => {
     commandRequests += 1
+    expect(route.request().postDataJSON()).toMatchObject({
+      expected_state_version: 1,
+      type: 'end_hero_actions',
+    })
     await route.fulfill({
       body: JSON.stringify(errorResponse('STALE_STATE_VERSION')),
       contentType: 'application/json',
@@ -845,11 +974,21 @@ test('a stale command resynchronizes before the player can decide again', async 
 
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 2, name: 'Partida iniciada' })).toBeVisible()
-  await page.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
+  await expect(
+    page.locator('.game-situation').getByText('Ações do Herói', { exact: true }),
+  ).toBeVisible()
+  const primaryAction = page.getByRole('button', { name: 'Encerrar ações do Herói' })
+  await expect(primaryAction).toBeInViewport()
+  await primaryAction.click()
 
   await expect(page.getByText('Estado oficial atualizado')).toBeVisible()
-  await expect(page.getByText('Ação do Herói')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Concluir Artes das Trevas' })).toHaveCount(0)
+  await expect(
+    page.locator('.game-situation').getByText('Ações do Herói', { exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('.game-situation').getByText('2', { exact: true })).toBeVisible()
+  await expect(page.locator('.game-situation').getByText('Luna', { exact: true })).toBeVisible()
+  await expect(page.getByText('Luna perdeu 1 de Vida (10 → 9).')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Encerrar ações do Herói' })).toHaveCount(0)
   expect(sessionRequests).toBe(2)
   expect(commandRequests).toBe(1)
 })

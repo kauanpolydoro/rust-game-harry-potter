@@ -13,8 +13,10 @@ const MAX_BRANCHES: usize = 64;
 const MAX_REPEAT: u8 = 16;
 const MAX_RUNTIME_NODES: usize = 4_096;
 const MAX_RUNTIME_RULE_ID_LENGTH: usize = 244;
+const MAX_RUNTIME_OUTCOMES: usize = 4_096;
 const MAX_TARGETS: u16 = 32;
 const MAX_PARTICIPANT_HEROES: usize = 4;
+const MAX_VERSION_BYTES: usize = 256;
 const MAX_PARTICIPANTS: u32 = 4;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
@@ -33,7 +35,9 @@ fn validate_metadata(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
     ] {
         if !valid_version(version) {
             return Err(ImportFailure {
-                message: format!("{label} must be a non-empty lowercase version identifier"),
+                message: format!(
+                    "{label} must be a non-empty lowercase version identifier of at most {MAX_VERSION_BYTES} bytes"
+                ),
             });
         }
     }
@@ -59,6 +63,7 @@ fn validate_metadata(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
 
 fn valid_version(value: &str) -> bool {
     !value.is_empty()
+        && value.len() <= MAX_VERSION_BYTES
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'.' | b'_')
         })
@@ -558,12 +563,41 @@ struct EffectStats {
     compiled_nodes: usize,
     reference_depth: usize,
     runtime_nodes: usize,
+    runtime_outcomes: usize,
 }
 
 pub(super) fn validate_runtime_rules(
     bundle: &CandidateBundle,
     roots: &BTreeSet<RuleId>,
 ) -> Result<(), ImportFailure> {
+    let mut previous_automatic_root: Option<&crate::EffectRule> = None;
+    for rule in bundle
+        .rules
+        .iter()
+        .filter(|rule| roots.contains(&rule.id) && rule.trigger.is_automatic())
+    {
+        if !rule.cost.is_empty() {
+            return Err(ImportFailure {
+                message: format!(
+                    "executable automatic root {} cannot declare a cost",
+                    rule.id
+                ),
+            });
+        }
+        if let Some(previous) = previous_automatic_root
+            && previous.trigger == rule.trigger
+            && previous.order == rule.order
+        {
+            return Err(ImportFailure {
+                message: format!(
+                    "executable rules {} and {} share automatic trigger {:?} and order {}",
+                    previous.id, rule.id, rule.trigger, rule.order
+                ),
+            });
+        }
+        previous_automatic_root = Some(rule);
+    }
+
     let rules = bundle
         .rules
         .iter()
@@ -572,6 +606,8 @@ pub(super) fn validate_runtime_rules(
     let mut memo = BTreeMap::new();
     let mut compiled_nodes = 0;
     let mut runtime_nodes = 0;
+    let mut automatic_outcomes = 0;
+    let mut manual_outcomes = 0;
     for root in roots {
         if root.as_str().chars().count() > MAX_RUNTIME_RULE_ID_LENGTH {
             return Err(ImportFailure {
@@ -596,6 +632,25 @@ pub(super) fn validate_runtime_rules(
             checked_total(runtime_nodes, stats.runtime_nodes).ok_or_else(|| ImportFailure {
                 message: format!("runtime rule {root} exceeds the execution step limit"),
             })?;
+        let root_rule = bundle
+            .rules
+            .iter()
+            .find(|rule| &rule.id == root)
+            .ok_or_else(|| ImportFailure {
+                message: format!("runtime rule {root} is not declared in the bundle"),
+            })?;
+        let root_outcomes = outcome_total(root_rule.cost.len(), stats.runtime_outcomes);
+        let phase_outcomes = if root_rule.trigger.is_automatic() {
+            &mut automatic_outcomes
+        } else {
+            &mut manual_outcomes
+        };
+        *phase_outcomes = outcome_total(*phase_outcomes, root_outcomes);
+        if *phase_outcomes > MAX_RUNTIME_OUTCOMES {
+            return Err(ImportFailure {
+                message: format!("runtime rule {root} exceeds the effect outcome limit"),
+            });
+        }
     }
     Ok(())
 }
@@ -619,21 +674,30 @@ fn effect_stats(
     memo: &mut BTreeMap<RuleId, EffectStats>,
 ) -> Option<EffectStats> {
     match effect {
-        Effect::Apply { .. } | Effect::NoOp | Effect::Terminal { .. } => Some(EffectStats {
+        Effect::Apply { target, .. } => Some(EffectStats {
             compiled_nodes: 1,
             reference_depth: 0,
             runtime_nodes: 1,
+            runtime_outcomes: usize::from(target.cardinality.max).max(1),
         }),
         Effect::Choice { audience, options } => {
-            let mut stats = branch_stats(options, 1, true, rules, memo)?;
+            let mut stats = branch_stats(options, 1, 0, true, rules, memo)?;
             if *audience == EffectChoiceAudience::EachHero {
                 stats.runtime_nodes = stats
                     .runtime_nodes
                     .checked_mul(MAX_PARTICIPANT_HEROES)
                     .filter(|total| *total <= MAX_RUNTIME_NODES)?;
+                stats.runtime_outcomes =
+                    repeated_outcomes(stats.runtime_outcomes, MAX_PARTICIPANT_HEROES);
             }
             Some(stats)
         }
+        Effect::NoOp | Effect::Terminal { .. } => Some(EffectStats {
+            compiled_nodes: 1,
+            reference_depth: 0,
+            runtime_nodes: 1,
+            runtime_outcomes: 1,
+        }),
         Effect::Condition {
             then, otherwise, ..
         } => {
@@ -644,6 +708,7 @@ fn effect_stats(
                     compiled_nodes: 0,
                     reference_depth: 0,
                     runtime_nodes: 0,
+                    runtime_outcomes: 0,
                 },
             };
             Some(EffectStats {
@@ -658,6 +723,9 @@ fn effect_stats(
                     1,
                     then_stats.runtime_nodes.max(otherwise_stats.runtime_nodes),
                 )?,
+                runtime_outcomes: then_stats
+                    .runtime_outcomes
+                    .max(otherwise_stats.runtime_outcomes),
             })
         }
         Effect::Reference { rule } => {
@@ -674,16 +742,18 @@ fn effect_stats(
                     1,
                     child.runtime_nodes.checked_mul(usize::from(*times))?,
                 )?,
+                runtime_outcomes: repeated_outcomes(child.runtime_outcomes, usize::from(*times)),
             })
         }
-        Effect::Roll { outcomes, .. } => branch_stats(outcomes, 1, true, rules, memo),
-        Effect::Sequence { effects } => branch_stats(effects, 1, false, rules, memo),
+        Effect::Roll { outcomes, .. } => branch_stats(outcomes, 1, 1, true, rules, memo),
+        Effect::Sequence { effects } => branch_stats(effects, 1, 0, false, rules, memo),
     }
 }
 
 fn branch_stats(
     effects: &[Effect],
     base_runtime_nodes: usize,
+    base_runtime_outcomes: usize,
     runtime_uses_largest_branch: bool,
     rules: &BTreeMap<&RuleId, &Effect>,
     memo: &mut BTreeMap<RuleId, EffectStats>,
@@ -692,6 +762,7 @@ fn branch_stats(
         compiled_nodes: 1,
         reference_depth: 0,
         runtime_nodes: base_runtime_nodes,
+        runtime_outcomes: base_runtime_outcomes,
     };
     for effect in effects {
         let child = effect_stats(effect, rules, memo)?;
@@ -707,11 +778,32 @@ fn branch_stats(
         } else {
             checked_total(combined.runtime_nodes, child.runtime_nodes)?
         };
+        combined.runtime_outcomes = if runtime_uses_largest_branch {
+            outcome_total(
+                base_runtime_outcomes,
+                combined
+                    .runtime_outcomes
+                    .saturating_sub(base_runtime_outcomes)
+                    .max(child.runtime_outcomes),
+            )
+        } else {
+            outcome_total(combined.runtime_outcomes, child.runtime_outcomes)
+        };
         if combined.runtime_nodes > MAX_RUNTIME_NODES {
             return None;
         }
     }
     Some(combined)
+}
+
+fn outcome_total(current: usize, additional: usize) -> usize {
+    current
+        .saturating_add(additional)
+        .min(MAX_RUNTIME_OUTCOMES + 1)
+}
+
+fn repeated_outcomes(outcomes: usize, times: usize) -> usize {
+    outcomes.saturating_mul(times).min(MAX_RUNTIME_OUTCOMES + 1)
 }
 
 fn checked_total(current: usize, additional: usize) -> Option<usize> {
@@ -721,22 +813,14 @@ fn checked_total(current: usize, additional: usize) -> Option<usize> {
 }
 
 fn validate_references(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
-    if let Some(duplicate) = bundle
-        .rules
-        .windows(2)
-        .find(|pair| pair[0].id == pair[1].id)
-        .map(|pair| &pair[0].id)
-    {
-        return Err(ImportFailure {
-            message: format!("duplicate rule ID {duplicate}"),
-        });
+    let mut rule_ids = BTreeSet::new();
+    for rule in &bundle.rules {
+        if !rule_ids.insert(&rule.id) {
+            return Err(ImportFailure {
+                message: format!("duplicate rule ID {}", rule.id),
+            });
+        }
     }
-
-    let rule_ids = bundle
-        .rules
-        .iter()
-        .map(|rule| &rule.id)
-        .collect::<BTreeSet<_>>();
 
     for entry in &bundle.entries {
         for definition in entry.functional.values() {

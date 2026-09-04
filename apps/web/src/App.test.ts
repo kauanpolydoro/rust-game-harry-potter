@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
+import type { GameProjectionResponse } from './contracts/identity-access.generated'
 import { useGameCommandStore } from './stores/gameCommand'
 import { useRoomAccessStore } from './stores/roomAccess'
 import { useSecuritySyncStore } from './stores/securitySync'
@@ -134,7 +135,7 @@ function unreadyHostLobbyResponse() {
   }
 }
 
-function gameProjectionResponse() {
+function gameProjectionResponse(): GameProjectionResponse {
   return {
     choice: { status: 'none' },
     effects: { outcomes: [], status: 'idle' },
@@ -144,13 +145,15 @@ function gameProjectionResponse() {
       id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
       status: 'in_progress',
     },
-    legal_actions: ['complete_dark_arts'],
+    legal_actions: ['end_hero_actions'],
     legal_intentions: {
       acquire_cards: [],
       assign_attack: [],
-      complete_dark_arts: true,
+      end_hero_actions: true,
       play_cards: [],
     },
+    queued_effect_count: 0,
+    queued_phases: ['end_turn'],
     participant: {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
@@ -203,11 +206,11 @@ function gameProjectionResponse() {
       play_area: [],
       villain_deck_count: 0,
     },
-    turn: { active_position: 1, number: 1, phase: 'dark_arts' },
+    turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }
 }
 
-function completedGameProjectionResponse() {
+function completedGameProjectionResponse(): GameProjectionResponse {
   const projection = gameProjectionResponse()
   const participants = projection.participants.map((participant) =>
     participant.position === 1
@@ -221,7 +224,7 @@ function completedGameProjectionResponse() {
         {
           after: 9,
           before: 10,
-          cause: 'cost',
+          cause: 'effect',
           resource: 'health',
           rule_id: 'rule:functional',
           target_id: 'hero:1',
@@ -254,8 +257,8 @@ function completedGameProjectionResponse() {
     },
     game: { ...projection.game, expires_at: '2026-09-10T13:00:00Z' },
     legal_actions: [],
-    legal_intentions: { ...projection.legal_intentions, complete_dark_arts: false },
-    participant: participants[0],
+    participant: participants[0]!,
+    legal_intentions: { ...projection.legal_intentions, end_hero_actions: false },
     participants,
     snapshot: {
       ...projection.snapshot,
@@ -264,7 +267,7 @@ function completedGameProjectionResponse() {
       sequence: 1,
       state_version: 2,
     },
-    turn: { ...projection.turn, phase: 'hero_action' },
+    turn: { active_position: 2, number: 2, phase: 'hero_actions' },
   }
 }
 
@@ -339,7 +342,7 @@ function acceptedChoiceResponse(commandId: string) {
         sequence: 2,
         state_version: 3,
       },
-      turn: { ...projection.turn, phase: 'hero_action' },
+      turn: { ...projection.turn, phase: 'hero_actions' },
     },
     receipt: {
       accepted_sequence: 2,
@@ -367,11 +370,11 @@ function heroActionGameProjectionResponse() {
   return {
     ...projection,
     effects: { outcomes: [], status: 'idle' },
-    legal_actions: ['play_card'],
+    legal_actions: ['end_hero_actions', 'play_card'],
     legal_intentions: {
       acquire_cards: [],
       assign_attack: [],
-      complete_dark_arts: false,
+      end_hero_actions: true,
       play_cards: [
         {
           card_id: 'instance:starter',
@@ -440,11 +443,11 @@ function playedCardGameProjectionResponse() {
   )
   return {
     ...projection,
-    legal_actions: ['assign_attack', 'acquire_card'],
+    legal_actions: ['end_hero_actions', 'assign_attack', 'acquire_card'],
     legal_intentions: {
       acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
       assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
-      complete_dark_arts: false,
+      end_hero_actions: true,
       play_cards: [],
     },
     participant: participants[0],
@@ -482,7 +485,7 @@ function acceptedCommandResponse(commandId: string) {
       expected_state_version: 1,
       expires_at: '2026-09-10T13:00:00Z',
       status: 'accepted',
-      type: 'complete_dark_arts',
+      type: 'end_hero_actions',
     },
   }
 }
@@ -1567,7 +1570,16 @@ describe('application shell', () => {
 
     const heading = await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
     await waitFor(() => expect(heading).toHaveFocus())
-    expect(screen.getByText('Artes das Trevas')).toBeVisible()
+    expect(screen.getByText('Ações do Herói')).toBeVisible()
+    expect(
+      screen.getByText(
+        'Realize suas ações. Ao encerrar, sua mão e as cartas jogadas serão descartadas, você comprará até completar 5 cartas e o turno passará ao próximo participante.',
+      ),
+    ).toBeVisible()
+    const resolutionQueue = screen.getByRole('region', { name: 'Fila de resolução' })
+    expect(within(resolutionQueue).getByText('0 efeitos aguardando')).toBeVisible()
+    expect(within(resolutionQueue).getByText('Fim do turno')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Encerrar ações do Herói' })).toBeEnabled()
     expect(screen.getByText('Snapshot inicial confirmado')).toBeVisible()
     expect(screen.getByText('A seed permanece secreta enquanto a partida estiver em andamento.')).toBeVisible()
     expect(document.body.textContent).not.toContain('0123456789abcdef0123456789abcdef')
@@ -1730,7 +1742,7 @@ describe('application shell', () => {
         status: 200,
       }),
     )
-    expect(await screen.findByText('Ação do Herói')).toBeVisible()
+    expect(await screen.findByText('Ações do Herói')).toBeVisible()
   })
 
   it('keeps a newer realtime projection after a delayed choice response', async () => {
@@ -1793,7 +1805,7 @@ describe('application shell', () => {
         sequence: 3,
         state_version: 4,
       },
-      turn: { active_position: 1, number: 2, phase: 'hero_action' },
+      turn: { active_position: 1, number: 2, phase: 'hero_actions' },
     }
     const socket = SynchronizedWebSocket.instances[0]
     if (!socket) {
@@ -2256,6 +2268,103 @@ describe('application shell', () => {
     expect(within(choicePanel).queryByRole('radio')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Confirmar escolha' })).not.toBeInTheDocument()
     expect(screen.getByText('Aguardando Luna concluir a escolha.')).toBeVisible()
+    expect(
+      screen.getByText(
+        'A resolução está pausada nesta fase. Aguardando Luna concluir a escolha oficial.',
+      ),
+    ).toBeVisible()
+    expect(
+      screen.queryByText(
+        'Minerva realiza as ações deste turno. Sua vez chegará depois da resolução automática seguinte.',
+      ),
+    ).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [
+      'dark_arts',
+      'Artes das Trevas',
+      'O servidor está resolvendo os efeitos de Artes das Trevas na ordem oficial. Nenhuma ação manual é necessária.',
+    ],
+    [
+      'villains',
+      'Vilões',
+      'O servidor está resolvendo os efeitos dos Vilões na ordem oficial. Nenhuma ação manual é necessária.',
+    ],
+    [
+      'end_turn',
+      'Fim do turno',
+      'O servidor está descartando as cartas, repondo a mão e passando o turno automaticamente.',
+    ],
+  ])('does not offer a command during the automatic %s phase', async (phase, label, guidance) => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const automaticProjection = gameProjectionResponse()
+    automaticProjection.legal_actions = []
+    automaticProjection.turn.phase = phase as GameProjectionResponse['turn']['phase']
+    automaticProjection.queued_phases =
+      phase === 'dark_arts'
+        ? ['villains', 'hero_actions', 'end_turn']
+        : phase === 'villains'
+          ? ['hero_actions', 'end_turn']
+          : []
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(automaticProjection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        ),
+    )
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    expect(screen.getByText(label)).toBeVisible()
+    expect(screen.getByText(guidance)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Encerrar ações do Herói' })).toBeNull()
+    expect(screen.getByText('O servidor está resolvendo esta fase automaticamente.')).toBeVisible()
+  })
+
+  it('does not offer the active player intent to another participant', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const inactiveProjection = gameProjectionResponse()
+    inactiveProjection.participant = inactiveProjection.participants[1]!
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(inactiveProjection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        ),
+    )
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
+    expect(screen.queryByRole('button', { name: 'Encerrar ações do Herói' })).toBeNull()
+    expect(
+      screen.getByText(
+        'Minerva realiza as ações deste turno. Sua vez chegará depois da resolução automática seguinte.',
+      ),
+    ).toBeVisible()
   })
 
   it('shows ephemeral availability and waits only for the required offline participant', async () => {
@@ -2281,7 +2390,7 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     expect(
-      await screen.findByRole('button', { name: 'Concluir Artes das Trevas' }),
+      await screen.findByRole('button', { name: 'Encerrar ações do Herói' }),
     ).toBeEnabled()
     expect(screen.getByText('Gerenciar recuperação')).toBeVisible()
     const socket = SynchronizedWebSocket.instances.find(
@@ -2303,7 +2412,7 @@ describe('application shell', () => {
     expect(screen.getByText(/Não há bot, timeout ou pulo automático/)).toBeVisible()
     expect(screen.getByText('Offline · Você')).toBeVisible()
     expect(screen.getByText('Online')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Encerrar ações do Herói' })).toBeEnabled()
 
     socket?.receive({
       blocked: false,
@@ -2553,7 +2662,7 @@ describe('application shell', () => {
     )
     gameSocket?.open()
     expect(screen.getByRole('button', { name: 'Sincronizando partida' })).toBeDisabled()
-    expect(screen.queryByRole('button', { name: 'Concluir Artes das Trevas' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Encerrar ações do Herói' })).toBeNull()
 
     gameSocket?.receive({
       cursor: 0,
@@ -2562,23 +2671,44 @@ describe('application shell', () => {
       snapshot_version: 1,
       type: 'synchronized',
     })
-    expect(await screen.findByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: 'Encerrar ações do Herói' })).toBeEnabled()
 
     const gapProjection = completedGameProjectionResponse()
     gapProjection.snapshot.cursor = 2
     gapProjection.snapshot.sequence = 2
     gapProjection.snapshot.state_version = 3
     gapProjection.snapshot.digest = `blake3:${'e'.repeat(64)}`
+    gapProjection.turn = { active_position: 1, number: 3, phase: 'hero_actions' }
+    gapProjection.legal_actions = ['end_hero_actions']
     gameSocket?.receive({
       cursor: 2,
       events: [
         {
-          actor_position: 1,
-          event_version: 1,
+          actor_position: 2,
+          control: {
+            active_position: 1,
+            decision_point: { responsible_position: 1, type: 'player_intent' },
+            phase: 'hero_actions',
+            queued_effect_count: 0,
+            queued_phases: ['end_turn'],
+            status: 'in_progress',
+            turn: 3,
+          },
+          end_turn: [
+            { before: 0, resource: 'attack', type: 'resource_reset' },
+            { before: 0, resource: 'influence', type: 'resource_reset' },
+          ],
+          event_version: 4,
+          prng_counter: 0,
           sequence: 2,
+          steps: [
+            { effects: [], phase: 'end_turn' },
+            { effects: [], phase: 'dark_arts' },
+            { effects: [], phase: 'villains' },
+          ],
           state_version: 3,
-          turn: 1,
-          type: 'dark_arts_completed',
+          turn: 2,
+          type: 'turn_completed',
         },
       ],
       from_cursor: 1,
@@ -2657,11 +2787,11 @@ describe('application shell', () => {
     const gameCommand = useGameCommandStore(pinia)
     render(App, { global: { plugins: [pinia] } })
     await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
-    void fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+    void fireEvent.click(screen.getByRole('button', { name: 'Encerrar ações do Herói' }))
 
     await waitFor(() => expect(screen.getByText('Intenção pendente')).toBeVisible())
     expect(gameCommand.errorCode).toBeNull()
-    expect(screen.getByText('Artes das Trevas')).toBeVisible()
+    expect(screen.getByText('Ações do Herói')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
     const persisted = JSON.parse(
       sessionStorage.getItem('hogwarts.game-command.pending-intent') ?? '{}',
@@ -2683,11 +2813,11 @@ describe('application shell', () => {
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Partida em andamento' }),
     ).toBeVisible()
-    expect(screen.getByText('Ação do Herói')).toBeVisible()
+    expect(screen.getByText('Ações do Herói')).toBeVisible()
     expect(screen.getByText('Ação oficial')).toBeVisible()
     expect(screen.getByText(/Recibo aceito no estado v2, sequência 1/)).toBeVisible()
     expect(screen.getByRole('heading', { level: 3, name: 'Última resolução oficial' })).toBeVisible()
-    expect(screen.getByText('Minerva pagou 1 de Vida (10 → 9).')).toBeVisible()
+    expect(screen.getByText('Minerva perdeu 1 de Vida (10 → 9).')).toBeVisible()
     expect(screen.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
     expect(screen.getByText('Dado D4: resultado 3.')).toBeVisible()
     expect(
@@ -2702,7 +2832,7 @@ describe('application shell', () => {
     expect(JSON.parse(String(commandCall?.[1]?.body))).toEqual({
       command_id: submittedCommandId,
       expected_state_version: 1,
-      type: 'complete_dark_arts',
+      type: 'end_hero_actions',
     })
   })
 
@@ -2900,7 +3030,7 @@ describe('application shell', () => {
           command_id: submittedPlayId,
           effect_stop: 'stable',
           effects: [],
-          event_version: 3,
+          event_version: 4,
           prng_counter: 0,
           sequence: 2,
           state_version: 3,
@@ -2913,7 +3043,7 @@ describe('application shell', () => {
           amount: 1,
           command_id: '8cbef381-3a98-4731-b16f-8b55db5e8f63',
           effects: [],
-          event_version: 3,
+          event_version: 4,
           sequence: 3,
           state_version: 4,
           turn: 1,
@@ -3062,11 +3192,11 @@ describe('application shell', () => {
     const gameCommand = useGameCommandStore(pinia)
     render(App, { global: { plugins: [pinia] } })
     await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
-    await fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Encerrar ações do Herói' }))
 
     expect(await screen.findByText('Estado oficial atualizado')).toBeVisible()
-    expect(screen.getByText('Ação do Herói')).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Concluir Artes das Trevas' })).not.toBeInTheDocument()
+    expect(screen.getByText('Ações do Herói')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Encerrar ações do Herói' })).not.toBeInTheDocument()
     expect(gameCommand.status).toBe('resynced')
     expect(gameCommand.pendingIntent).toBeNull()
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
@@ -3105,7 +3235,7 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
-    await fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Encerrar ações do Herói' }))
     expect(await screen.findByText('Confirmação ainda desconhecida')).toBeVisible()
     const pending = JSON.parse(
       sessionStorage.getItem('hogwarts.game-command.pending-intent') ?? '{}',
@@ -3158,7 +3288,7 @@ describe('application shell', () => {
       'hogwarts.game-command.pending-intent',
       JSON.stringify({
         commandId,
-        commandType: 'complete_dark_arts',
+        commandType: 'end_hero_actions',
         createdAt: '2026-09-03T12:00:00Z',
         gameId: game.game.id,
       }),
@@ -3196,8 +3326,8 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     expect(await screen.findByText('Nenhum aceite encontrado')).toBeVisible()
-    expect(screen.getByText('Artes das Trevas')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
+    expect(screen.getByText('Ações do Herói')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Encerrar ações do Herói' })).toBeEnabled()
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
   })
 
@@ -3490,7 +3620,7 @@ describe('application shell', () => {
       'hogwarts.game-command.pending-intent',
       JSON.stringify({
         commandId: '642103d0-d780-48ea-bf65-c40228751911',
-        commandType: 'complete_dark_arts',
+        commandType: 'end_hero_actions',
         createdAt: '2026-09-04T18:00:00Z',
         gameId: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
       }),
@@ -3608,7 +3738,7 @@ describe('application shell', () => {
     const execute = vi.spyOn(useGameCommandStore(pinia), 'execute')
     render(App, { global: { plugins: [pinia] } })
     await screen.findByRole('heading', { level: 2, name: 'Partida iniciada' })
-    void fireEvent.click(screen.getByRole('button', { name: 'Concluir Artes das Trevas' }))
+    void fireEvent.click(screen.getByRole('button', { name: 'Encerrar ações do Herói' }))
     await waitFor(() => expect(screen.getByText('Intenção pendente')).toBeVisible())
     useSecuritySyncStore(pinia).disconnect()
     const gameSocket = SynchronizedWebSocket.instances.find(

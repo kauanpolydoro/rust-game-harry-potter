@@ -8,7 +8,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::test]
-async fn migration_0017_preserves_existing_events_and_enforces_revocation_shapes() {
+async fn migration_0018_preserves_existing_events_and_enforces_revocation_shapes() {
     let database_url = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must point to the integration PostgreSQL database");
     let admin = PgPoolOptions::new()
@@ -46,9 +46,9 @@ async fn migration_0017_preserves_existing_events_and_enforces_revocation_shapes
 }
 
 async fn exercise_upgrade(database: &PgPool) -> TestResult<()> {
-    MIGRATOR.run_to(16, database).await?;
-    let (room_id, participant_id) = seed_legacy_security_event(database).await?;
     MIGRATOR.run_to(17, database).await?;
+    let (room_id, participant_id) = seed_legacy_security_event(database).await?;
+    MIGRATOR.run_to(18, database).await?;
 
     assert_legacy_event_preserved(database, room_id).await?;
     assert_access_revocation_event_shapes(database, room_id, participant_id).await?;
@@ -323,6 +323,6 @@ async fn assert_access_revocation_schema(database: &PgPool) -> TestResult<()> {
     )
     .fetch_one(database)
     .await?;
-    assert_eq!(schema_version, "17");
+    assert_eq!(schema_version, "18");
     Ok(())
 }

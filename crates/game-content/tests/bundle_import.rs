@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
 use game_content::{
-    CardInstanceId, CatalogId, Effect, EffectChoiceAudience, EffectTrigger, FunctionalField,
-    GameSetupOwner, ProvenanceSource, RuleId, SourceKind, Zone, import_base_bundle,
-    import_base_bundle_with_runtime_rules, import_base_bundle_with_trusted_sources,
+    CardInstanceId, CatalogId, Effect, EffectChoiceAudience, EffectRule, EffectTrigger,
+    FunctionalField, GameSetupOwner, ProvenanceSource, RuleId, SourceKind, Zone,
+    import_base_bundle, import_base_bundle_with_runtime_rules,
+    import_base_bundle_with_trusted_sources,
 };
 use serde_json::json;
 
@@ -31,7 +32,7 @@ fn complete_bundle() -> Vec<u8> {
         .collect::<Vec<_>>();
 
     serde_json::to_vec(&json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "content_version": "fixture-v1",
         "ruleset_version": "fixture-rules-v1",
         "locale": "en",
@@ -55,6 +56,7 @@ fn playable_bundle_without_setup() -> serde_json::Value {
     bundle["sources"][0]["kind"] = json!("validated");
     bundle["rules"] = json!([{
         "id": "rule:playable",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -149,6 +151,248 @@ fn contains_participant_choice(effect: &Effect) -> bool {
     }
 }
 
+fn actor_attack_effect() -> serde_json::Value {
+    json!({
+        "type": "apply",
+        "target": {
+            "zone": "heroes",
+            "owner": "actor",
+            "cardinality": { "min": 1, "max": 1 }
+        },
+        "operation": {
+            "type": "modify_resource",
+            "resource": "attack",
+            "amount": 1
+        }
+    })
+}
+
+#[test]
+fn effect_rule_schema_supports_turn_phase_triggers_and_explicit_order() {
+    let cases = [
+        ("dark_arts", EffectTrigger::DarkArts, "dark_arts"),
+        ("dark_arts_completed", EffectTrigger::DarkArts, "dark_arts"),
+        ("villains", EffectTrigger::Villains, "villains"),
+        ("manual", EffectTrigger::Manual, "manual"),
+    ];
+
+    for (json_trigger, expected_trigger, canonical_trigger) in cases {
+        let rule = serde_json::from_value::<EffectRule>(json!({
+            "id": "rule:phase-trigger",
+            "trigger": json_trigger,
+            "order": 7,
+            "effect": { "type": "no_op" }
+        }))
+        .expect("the phase trigger and order should deserialize");
+
+        assert_eq!(rule.trigger, expected_trigger);
+        assert_eq!(rule.order, 7);
+        assert_eq!(
+            serde_json::to_value(rule).expect("the rule should serialize")["trigger"],
+            canonical_trigger
+        );
+    }
+}
+
+#[test]
+fn effect_rule_order_is_required_by_the_json_schema() {
+    let failure = serde_json::from_value::<EffectRule>(json!({
+        "id": "rule:missing-order",
+        "trigger": "manual",
+        "effect": { "type": "no_op" }
+    }))
+    .expect_err("semantic rule order must be explicit");
+
+    assert!(failure.to_string().contains("missing field `order`"));
+}
+
+#[test]
+fn legacy_bundle_version_is_rejected_before_current_rule_fields_are_decoded() {
+    let mut bundle = bundle_value();
+    bundle["schema_version"] = json!(1);
+    bundle["rules"] = json!([{
+        "id": "rule:legacy",
+        "trigger": "dark_arts_completed",
+        "effect": { "type": "no_op" }
+    }]);
+
+    let failure = import_value(&bundle).expect_err("schema v1 must require an explicit upgrade");
+
+    assert_eq!(failure, "unsupported bundle schema version: 1");
+}
+
+#[test]
+fn manifest_rules_follow_phase_order_independently_from_json_and_rule_id_order() {
+    let mut bundle = bundle_value();
+    let effect = actor_attack_effect();
+    bundle["rules"] = json!([
+        {
+            "id": "rule:z-villains-first",
+            "trigger": "villains",
+            "order": 1,
+            "effect": effect
+        },
+        {
+            "id": "rule:a-dark-arts-second",
+            "trigger": "dark_arts",
+            "order": 2,
+            "effect": effect
+        },
+        {
+            "id": "rule:a-manual",
+            "trigger": "manual",
+            "order": 0,
+            "effect": effect
+        },
+        {
+            "id": "rule:z-dark-arts-first",
+            "trigger": "dark_arts",
+            "order": 1,
+            "effect": effect
+        }
+    ]);
+    let executable_rules = bundle["rules"]
+        .as_array()
+        .expect("rules should be an array")
+        .iter()
+        .map(|rule| {
+            RuleId::parse(rule["id"].as_str().expect("rule ID should be a string"))
+                .expect("fixture rule ID should be valid")
+        })
+        .collect::<BTreeSet<_>>();
+
+    let manifest = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &executable_rules,
+    )
+    .expect("rules with distinct automatic order should import");
+
+    assert_eq!(
+        manifest
+            .rules
+            .iter()
+            .map(|rule| (rule.trigger, rule.order, rule.id.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (EffectTrigger::DarkArts, 1, "rule:z-dark-arts-first"),
+            (EffectTrigger::DarkArts, 2, "rule:a-dark-arts-second"),
+            (EffectTrigger::Villains, 1, "rule:z-villains-first"),
+            (EffectTrigger::Manual, 0, "rule:a-manual"),
+        ]
+    );
+}
+
+#[test]
+fn duplicate_order_for_executable_automatic_roots_prevents_manifest_publication() {
+    for trigger in ["dark_arts", "villains"] {
+        let mut bundle = bundle_value();
+        let effect = actor_attack_effect();
+        bundle["rules"] = json!([
+            {
+                "id": "rule:first",
+                "trigger": trigger,
+                "order": 4,
+                "effect": effect
+            },
+            {
+                "id": "rule:second",
+                "trigger": trigger,
+                "order": 4,
+                "effect": effect
+            }
+        ]);
+        let executable_rules = BTreeSet::from([
+            RuleId::parse("rule:first").expect("fixture rule ID should be valid"),
+            RuleId::parse("rule:second").expect("fixture rule ID should be valid"),
+        ]);
+
+        let failure = import_base_bundle_with_runtime_rules(
+            &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+            &[],
+            &executable_rules,
+        )
+        .expect_err("ambiguous automatic root order must fail closed");
+
+        assert!(failure.to_string().contains("share automatic trigger"));
+        assert!(failure.to_string().contains("order 4"));
+    }
+}
+
+#[test]
+fn executable_automatic_roots_cannot_charge_the_active_hero() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{
+        "id": "rule:mandatory",
+        "trigger": "dark_arts",
+        "order": 1,
+        "cost": [{ "resource": "influence", "amount": 1 }],
+        "effect": actor_attack_effect()
+    }]);
+    let executable_rules =
+        BTreeSet::from([RuleId::parse("rule:mandatory").expect("fixture rule ID should be valid")]);
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &executable_rules,
+    )
+    .expect_err("mandatory phase work cannot depend on a player payment");
+
+    assert!(failure.to_string().contains("automatic root"));
+    assert!(failure.to_string().contains("cannot declare a cost"));
+}
+
+#[test]
+fn duplicate_order_is_allowed_outside_executable_automatic_roots() {
+    let effect = actor_attack_effect();
+
+    let mut manual_bundle = bundle_value();
+    manual_bundle["rules"] = json!([
+        {
+            "id": "rule:manual-first",
+            "trigger": "manual",
+            "order": 4,
+            "effect": effect
+        },
+        {
+            "id": "rule:manual-second",
+            "trigger": "manual",
+            "order": 4,
+            "effect": effect
+        }
+    ]);
+    let manual_roots = BTreeSet::from([
+        RuleId::parse("rule:manual-first").expect("fixture rule ID should be valid"),
+        RuleId::parse("rule:manual-second").expect("fixture rule ID should be valid"),
+    ]);
+
+    import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&manual_bundle).expect("fixture should serialize"),
+        &[],
+        &manual_roots,
+    )
+    .expect("manual roots do not execute as an automatic phase");
+
+    let mut partially_executable_bundle = manual_bundle;
+    for rule in partially_executable_bundle["rules"]
+        .as_array_mut()
+        .expect("rules should be an array")
+    {
+        rule["trigger"] = json!("dark_arts");
+    }
+    let single_root = BTreeSet::from([
+        RuleId::parse("rule:manual-first").expect("fixture rule ID should be valid")
+    ]);
+
+    import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&partially_executable_bundle).expect("fixture should serialize"),
+        &[],
+        &single_root,
+    )
+    .expect("a non-executable rule cannot make executable root order ambiguous");
+}
+
 fn bundle_with_setup_entity(
     kind: &str,
     required_functional_fields: &[&str],
@@ -196,6 +440,7 @@ fn bundle_with_setup_entity(
     };
     bundle["rules"] = json!([{
         "id": "rule:setup-entity",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -477,6 +722,7 @@ fn legacy_numeric_rule_without_a_game_setup_remains_publishable() {
     });
     bundle["rules"] = json!([{
         "id": "rule:cost",
+        "order": 0,
         "effect": { "type": "no_op" }
     }]);
 
@@ -919,6 +1165,36 @@ fn duplicate_catalog_id_prevents_manifest_publication() {
 }
 
 #[test]
+fn duplicate_rule_id_prevents_publication_across_semantic_phase_order() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([
+        {
+            "id": "rule:duplicate",
+            "trigger": "manual",
+            "order": 1,
+            "effect": { "type": "no_op" }
+        },
+        {
+            "id": "rule:between",
+            "trigger": "villains",
+            "order": 1,
+            "effect": { "type": "no_op" }
+        },
+        {
+            "id": "rule:duplicate",
+            "trigger": "dark_arts",
+            "order": 1,
+            "effect": { "type": "no_op" }
+        }
+    ]);
+
+    let failure = import_value(&bundle)
+        .expect_err("duplicate rule identity must not depend on canonical rule order");
+
+    assert!(failure.contains("duplicate rule ID rule:duplicate"));
+}
+
+#[test]
 fn unknown_entry_kind_prevents_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["entries"][0]["kind"] = json!("mystery_card");
@@ -961,6 +1237,29 @@ fn empty_or_relative_bundle_metadata_prevents_manifest_publication() {
         let failure = import_value(&bundle).expect_err("invalid metadata must fail closed");
 
         assert!(failure.contains(expected_message), "failure was: {failure}");
+    }
+}
+
+#[test]
+fn bundle_version_identifiers_are_bounded_to_256_bytes() {
+    for pointer in ["/content_version", "/ruleset_version"] {
+        let mut boundary = bundle_value();
+        *boundary
+            .pointer_mut(pointer)
+            .expect("version path should exist") = json!("v".repeat(256));
+        import_value(&boundary).expect("a 256-byte version identifier should remain valid");
+
+        let mut oversized = bundle_value();
+        *oversized
+            .pointer_mut(pointer)
+            .expect("version path should exist") = json!("v".repeat(257));
+        let failure =
+            import_value(&oversized).expect_err("an oversized version identifier must fail closed");
+
+        assert!(
+            failure.contains("at most 256 bytes"),
+            "failure was: {failure}"
+        );
     }
 }
 
@@ -1046,6 +1345,7 @@ fn candidate_source_cannot_self_validate_a_functional_definition() {
     require_effect(&mut bundle);
     bundle["rules"] = json!([{
         "id": "rule:candidate",
+        "order": 0,
         "effect": { "type": "no_op" }
     }]);
     bundle["entries"][0]["functional"] = json!({
@@ -1081,6 +1381,7 @@ fn a_no_op_rule_cannot_satisfy_a_required_functional_effect() {
         }));
     bundle["rules"] = json!([{
         "id": "rule:adapted",
+        "order": 0,
         "effect": { "type": "no_op" }
     }]);
     bundle["entries"][0]["functional"] = json!({
@@ -1111,6 +1412,7 @@ fn a_self_declared_validated_source_cannot_make_a_functional_field_playable() {
         }));
     bundle["rules"] = json!([{
         "id": "rule:validated",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1148,6 +1450,7 @@ fn an_external_trust_decision_alone_cannot_publish_a_discarded_rule() {
         }));
     bundle["rules"] = json!([{
         "id": "rule:validated",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1195,6 +1498,7 @@ fn a_trusted_rule_is_playable_only_when_the_runtime_declares_it_executable() {
         }));
     bundle["rules"] = json!([{
         "id": "rule:validated",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1271,6 +1575,7 @@ fn unknown_functional_provenance_prevents_manifest_publication() {
     require_effect(&mut bundle);
     bundle["rules"] = json!([{
         "id": "rule:known",
+        "order": 0,
         "effect": { "type": "no_op" }
     }]);
     bundle["entries"][0]["functional"] = json!({
@@ -1302,10 +1607,12 @@ fn cyclic_rules_prevent_manifest_publication() {
     bundle["rules"] = json!([
         {
             "id": "rule:first",
+            "order": 0,
             "effect": { "type": "reference", "rule": "rule:second" }
         },
         {
             "id": "rule:second",
+            "order": 0,
             "effect": { "type": "reference", "rule": "rule:first" }
         }
     ]);
@@ -1321,6 +1628,7 @@ fn choice_without_conclusions_prevents_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:invalid-choice",
+        "order": 0,
         "effect": { "type": "choice", "options": [] }
     }]);
 
@@ -1334,6 +1642,7 @@ fn participant_choice_audience_survives_the_closed_content_boundary() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:participant-choice",
+        "order": 0,
         "effect": {
             "type": "choice",
             "audience": "each_hero",
@@ -1406,6 +1715,7 @@ fn participant_choice_complexity_accounts_for_all_four_heroes() {
     });
     bundle["rules"] = json!([{
         "id": "rule:participant-choice-limit",
+        "order": 0,
         "effect": {
             "type": "choice",
             "audience": "each_hero",
@@ -1435,6 +1745,7 @@ fn executable_rule_ids_leave_room_for_the_deterministic_choice_suffix() {
     let rule_id = format!("rule:{}", "r".repeat(240));
     bundle["rules"] = json!([{
         "id": rule_id,
+        "order": 0,
         "effect": {
             "type": "choice",
             "options": [
@@ -1465,6 +1776,7 @@ fn invalid_selector_cardinality_prevents_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:invalid-cardinality",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1485,6 +1797,7 @@ fn selector_id_is_optional_and_preserved_without_normalization() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:target-id",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1544,6 +1857,7 @@ fn empty_selector_id_prevents_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:empty-target-id",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1565,6 +1879,7 @@ fn a_selector_id_cannot_describe_different_targets_within_one_rule() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:conflicting-target-id",
+        "order": 0,
         "effect": {
             "type": "sequence",
             "effects": [
@@ -1612,6 +1927,7 @@ fn operation_incompatible_with_its_zone_prevents_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:invalid-zone",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -1633,7 +1949,8 @@ fn closed_effect_ast_preserves_every_supported_construct_for_the_runtime() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:closed-language",
-        "trigger": "dark_arts_completed",
+        "trigger": "manual",
+        "order": 0,
         "cost": [{ "resource": "influence", "amount": 1 }],
         "effect": {
             "type": "sequence",
@@ -1714,7 +2031,7 @@ fn closed_effect_ast_preserves_every_supported_construct_for_the_runtime() {
 
     assert_eq!(manifest.rules.len(), 1);
     assert_eq!(manifest.rules[0].id, rule_id);
-    assert_eq!(manifest.rules[0].trigger, EffectTrigger::DarkArtsCompleted);
+    assert_eq!(manifest.rules[0].trigger, EffectTrigger::Manual);
 }
 
 #[test]
@@ -1722,6 +2039,7 @@ fn arbitrary_script_nodes_cannot_enter_the_effect_ast() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
         "id": "rule:script",
+        "order": 0,
         "effect": {
             "type": "script",
             "source": "state.players[0].attack = 999"
@@ -1754,6 +2072,7 @@ fn executable_effects_cannot_exceed_the_runtime_step_limit() {
     bundle["rules"] = json!([{
         "id": "rule:unbounded",
         "trigger": "dark_arts_completed",
+        "order": 0,
         "effect": effect
     }]);
     let rule_id = RuleId::parse("rule:unbounded").expect("fixture rule ID should be valid");
@@ -1766,6 +2085,131 @@ fn executable_effects_cannot_exceed_the_runtime_step_limit() {
     .expect_err("validated executable effects must always fit the runtime step bound");
 
     assert!(failure.to_string().contains("effect execution limit"));
+}
+
+#[test]
+fn executable_effects_cannot_exceed_the_runtime_outcome_limit() {
+    let mut bundle = bundle_value();
+    let target = json!({
+        "zone": "hero_hand",
+        "cardinality": { "min": 0, "max": 31 }
+    });
+    let branch = json!({
+        "type": "condition",
+        "condition": {
+            "type": "has_eligible_target",
+            "target": target.clone()
+        },
+        "then": { "type": "reference", "rule": "rule:outcome-leaf" },
+        "otherwise": { "type": "no_op" }
+    });
+    let choice = json!({
+        "type": "choice",
+        "options": [branch, { "type": "no_op" }]
+    });
+    let roll = json!({
+        "type": "roll",
+        "die": "d4",
+        "outcomes": [
+            choice,
+            { "type": "no_op" },
+            { "type": "no_op" },
+            { "type": "no_op" }
+        ]
+    });
+    bundle["rules"] = json!([
+        {
+            "id": "rule:outcome-root",
+            "trigger": "manual",
+            "order": 0,
+            "cost": [{ "resource": "influence", "amount": 1 }],
+            "effect": {
+                "type": "sequence",
+                "effects": [{
+                    "type": "repeat",
+                    "times": 8,
+                    "effect": {
+                        "type": "repeat",
+                        "times": 16,
+                        "effect": roll
+                    }
+                }]
+            }
+        },
+        {
+            "id": "rule:outcome-leaf",
+            "trigger": "manual",
+            "order": 1,
+            "effect": {
+                "type": "apply",
+                "target": target,
+                "operation": { "type": "discard" }
+            }
+        }
+    ]);
+    let root = RuleId::parse("rule:outcome-root").expect("fixture rule ID should be valid");
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([root]),
+    )
+    .expect_err("validated effects and their costs must fit the outcome bound");
+
+    assert!(failure.to_string().contains("effect outcome limit"));
+}
+
+#[test]
+fn automatic_phase_outcomes_share_one_snapshot_limit() {
+    let mut bundle = bundle_value();
+    let phase_effect = || {
+        json!({
+            "type": "repeat",
+            "times": 4,
+            "effect": {
+                "type": "repeat",
+                "times": 16,
+                "effect": {
+                    "type": "apply",
+                    "target": {
+                        "zone": "hero_hand",
+                        "cardinality": { "min": 0, "max": 32 }
+                    },
+                    "operation": { "type": "discard" }
+                }
+            }
+        })
+    };
+    bundle["rules"] = json!([
+        {
+            "id": "rule:dark-arts-outcomes",
+            "trigger": "dark_arts",
+            "order": 0,
+            "effect": phase_effect()
+        },
+        {
+            "id": "rule:villain-outcomes",
+            "trigger": "villains",
+            "order": 0,
+            "effect": {
+                "type": "sequence",
+                "effects": [phase_effect(), { "type": "no_op" }]
+            }
+        }
+    ]);
+    let roots = BTreeSet::from([
+        RuleId::parse("rule:dark-arts-outcomes").expect("fixture rule ID should be valid"),
+        RuleId::parse("rule:villain-outcomes").expect("fixture rule ID should be valid"),
+    ]);
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &roots,
+    )
+    .expect_err("Dark Arts and Villains outcomes must fit their shared snapshot bound");
+
+    assert!(failure.to_string().contains("effect outcome limit"));
 }
 
 #[test]

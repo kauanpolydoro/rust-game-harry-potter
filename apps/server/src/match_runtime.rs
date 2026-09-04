@@ -7,8 +7,9 @@ use axum::{
 };
 use game_domain::{
     ContentSelection, EffectDie, EffectRoller, GameCommand, GameCommandError, GameCommandInput,
-    HeroId, InitialGameState, LobbyParticipant, ParticipantRole, StartGameError, StartGameInput,
-    decide_game_command, initialize_game,
+    GameEngine, GameIntentError, GameIntentInput, HeroId, InitialGameState, LobbyParticipant,
+    ParticipantRole, PlayerIntent, StartGameError, StartGameInput, ValidatedGameRules,
+    decide_game_command,
 };
 use rand_chacha::{
     ChaCha20Rng,
@@ -33,12 +34,12 @@ mod realtime;
 
 use codec::{
     command_domain_state, decode_persisted_snapshot, persisted_after_decision, persisted_event,
-    persisted_snapshot, verify_persisted_snapshot,
+    persisted_snapshot, validate_persisted_json_size, verify_persisted_snapshot,
 };
 pub(crate) use projection::{GameProjectionResponse, projection_for_participant};
 
 const SEED_BYTES: usize = 32;
-const GAME_EVENT_VERSION: u16 = 3;
+const GAME_EVENT_VERSION: u16 = 4;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -62,7 +63,7 @@ struct StartGameRequest {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ExecuteGameCommandRequest {
-    CompleteDarkArts {
+    EndHeroActions {
         command_id: String,
         #[serde(deserialize_with = "positive_state_version")]
         expected_state_version: u64,
@@ -101,7 +102,7 @@ enum ExecuteGameCommandRequest {
 impl ExecuteGameCommandRequest {
     fn command_id(&self) -> &str {
         match self {
-            Self::CompleteDarkArts { command_id, .. }
+            Self::EndHeroActions { command_id, .. }
             | Self::ResolveChoice { command_id, .. }
             | Self::PlayCard { command_id, .. }
             | Self::AssignAttack { command_id, .. }
@@ -111,7 +112,7 @@ impl ExecuteGameCommandRequest {
 
     const fn expected_state_version(&self) -> u64 {
         match self {
-            Self::CompleteDarkArts {
+            Self::EndHeroActions {
                 expected_state_version,
                 ..
             }
@@ -136,7 +137,7 @@ impl ExecuteGameCommandRequest {
 
     const fn command_type(&self) -> PersistedGameCommandType {
         match self {
-            Self::CompleteDarkArts { .. } => PersistedGameCommandType::CompleteDarkArts,
+            Self::EndHeroActions { .. } => PersistedGameCommandType::EndHeroActions,
             Self::ResolveChoice { .. } => PersistedGameCommandType::ResolveChoice,
             Self::PlayCard { .. } => PersistedGameCommandType::PlayCard,
             Self::AssignAttack { .. } => PersistedGameCommandType::AssignAttack,
@@ -144,20 +145,26 @@ impl ExecuteGameCommandRequest {
         }
     }
 
-    fn domain_command(&self) -> GameCommand {
+    fn player_intent(&self) -> Option<PlayerIntent> {
         match self {
-            Self::CompleteDarkArts { .. } => GameCommand::CompleteDarkArts,
+            Self::EndHeroActions { .. } => Some(PlayerIntent::EndHeroActions),
             Self::ResolveChoice {
                 choice_id,
                 selected_options,
                 ..
-            } => GameCommand::ResolveChoice {
+            } => Some(PlayerIntent::ResolveChoice {
                 choice_id: choice_id.clone(),
                 selected_options: selected_options.clone(),
-            },
+            }),
+            Self::PlayCard { .. } | Self::AssignAttack { .. } | Self::AcquireCard { .. } => None,
+        }
+    }
+
+    fn game_command(&self) -> Option<GameCommand> {
+        match self {
             Self::PlayCard {
                 card_id, targets, ..
-            } => GameCommand::PlayCard {
+            } => Some(GameCommand::PlayCard {
                 card_id: card_id.clone(),
                 targets: targets
                     .iter()
@@ -166,28 +173,29 @@ impl ExecuteGameCommandRequest {
                         target_ids: target.target_ids.clone(),
                     })
                     .collect(),
-            },
+            }),
             Self::AssignAttack {
                 villain_id, amount, ..
-            } => GameCommand::AssignAttack {
+            } => Some(GameCommand::AssignAttack {
                 villain_id: villain_id.clone(),
                 amount: *amount,
-            },
-            Self::AcquireCard { card_id, .. } => GameCommand::AcquireCard {
+            }),
+            Self::AcquireCard { card_id, .. } => Some(GameCommand::AcquireCard {
                 card_id: card_id.clone(),
-            },
+            }),
+            Self::EndHeroActions { .. } | Self::ResolveChoice { .. } => None,
         }
     }
 
     fn canonical_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
         match self {
-            Self::CompleteDarkArts {
+            Self::EndHeroActions {
                 command_id,
                 expected_state_version,
-            } => serde_json::to_vec(&CanonicalCompleteDarkArtsCommandRequest {
+            } => serde_json::to_vec(&CanonicalEndHeroActionsCommandRequest {
                 command_id,
                 expected_state_version: *expected_state_version,
-                command_type: "complete_dark_arts",
+                command_type: "end_hero_actions",
             }),
             Self::ResolveChoice {
                 command_id,
@@ -240,7 +248,7 @@ impl ExecuteGameCommandRequest {
 }
 
 #[derive(Serialize)]
-struct CanonicalCompleteDarkArtsCommandRequest<'a> {
+struct CanonicalEndHeroActionsCommandRequest<'a> {
     command_id: &'a str,
     expected_state_version: u64,
     #[serde(rename = "type")]
@@ -338,9 +346,10 @@ struct RequestedTargetBinding {
     target_ids: Vec<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 enum PersistedGameCommandType {
-    CompleteDarkArts,
+    EndHeroActions,
     ResolveChoice,
     PlayCard,
     AssignAttack,
@@ -454,7 +463,7 @@ struct ExecuteGameCommandResponse {
 struct GameCommandReceipt {
     command_id: String,
     #[serde(rename = "type")]
-    command_type: String,
+    command_type: PersistedGameCommandType,
     status: &'static str,
     expected_state_version: i64,
     accepted_state_version: i64,
@@ -472,6 +481,14 @@ struct PersistedSnapshot {
     adventure_id: String,
     versions: PersistedVersions,
     turn: PersistedTurn,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queued_phases: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queued_effects: Option<Vec<PersistedQueuedEffect>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    decision_point: Option<PersistedDecisionPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_turn_steps: Option<Vec<PersistedTurnStep>>,
     participants: Vec<PersistedPlayer>,
     prng: PersistedPrng,
     #[serde(default, skip_serializing_if = "PersistedEffects::is_empty")]
@@ -545,11 +562,13 @@ struct PersistedEffectEntity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     influence_cost: Option<u16>,
     zone: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    zone_index: Option<u16>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     resources: BTreeMap<String, u16>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectOutcome {
     DieRolled {
@@ -585,7 +604,7 @@ enum PersistedEffectOutcome {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedEffectChoice {
     id: String,
@@ -598,7 +617,7 @@ struct PersistedEffectChoice {
     continuation: PersistedEffectContinuation,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedEffectContinuation {
     choice_cursor: PersistedEffectCursor,
@@ -606,14 +625,14 @@ struct PersistedEffectContinuation {
     steps_completed: usize,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedEffectCursor {
     rule_id: String,
     path: Vec<PersistedEffectPathSegment>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectPathSegment {
     ChoiceOption { index: u16 },
@@ -624,7 +643,7 @@ enum PersistedEffectPathSegment {
     SequenceEffect { index: u16 },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedQueuedEffect {
     Definition {
@@ -653,6 +672,53 @@ struct PersistedLegacyEffectChoice {
 enum PersistedEventChoice {
     Current(PersistedEffectChoice),
     Legacy(PersistedLegacyEffectChoice),
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PersistedDecisionPoint {
+    None,
+    Automatic,
+    PlayerIntent { responsible_position: u8 },
+    EffectChoice { choice: PersistedEffectChoice },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedTurnStep {
+    phase: String,
+    effects: Vec<PersistedEffectOutcome>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PersistedEndTurnOutcome {
+    CardMoved {
+        card_id: String,
+        from: String,
+        to: String,
+    },
+    PileShuffled {
+        owner_position: u8,
+        zone: String,
+        bottom_to_top: Vec<String>,
+    },
+    ResourceReset {
+        resource: String,
+        before: u16,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEngineControl {
+    status: String,
+    turn: u32,
+    phase: String,
+    active_position: u8,
+    queued_phases: Vec<String>,
+    queued_effects: Vec<PersistedQueuedEffect>,
+    decision_point: PersistedDecisionPoint,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -697,6 +763,12 @@ struct PersistedGameEvent {
     #[serde(default)]
     selected_options: Option<Vec<String>>,
     #[serde(default)]
+    end_turn: Option<Vec<PersistedEndTurnOutcome>>,
+    #[serde(default)]
+    steps: Option<Vec<PersistedTurnStep>>,
+    #[serde(default)]
+    control: Option<PersistedEngineControl>,
+    #[serde(default)]
     prng_counter: Option<u64>,
 }
 
@@ -716,15 +788,22 @@ impl ChaChaEffectRoller {
 
 impl EffectRoller for ChaChaEffectRoller {
     fn roll(&mut self, die: EffectDie) -> Option<u8> {
+        let sample = self.sample_below(u32::from(die.sides()))?;
+        u8::try_from(sample.checked_add(1)?).ok()
+    }
+
+    fn sample_below(&mut self, upper_exclusive: u32) -> Option<u32> {
+        if upper_exclusive == 0 {
+            return None;
+        }
         let mut generator = ChaCha20Rng::from_seed(self.seed);
         generator.set_stream(self.stream);
         self.stream = self.stream.checked_add(1)?;
-        let sides = u32::from(die.sides());
-        let unbiased_range = u32::MAX - (u32::MAX % sides);
+        let unbiased_range = u32::MAX - (u32::MAX % upper_exclusive);
         loop {
             let value = generator.next_u32();
             if value < unbiased_range {
-                return u8::try_from((value % sides) + 1).ok();
+                return Some(value % upper_exclusive);
             }
         }
     }
@@ -774,8 +853,17 @@ async fn start_game(
         return Err(ApiError::room_sealed());
     }
 
+    let effect_rules = state
+        .content
+        .effect_rules(&content.manifest_digest)
+        .ok_or_else(ApiError::internal)?;
+    let rules = ValidatedGameRules::new(effect_rules).map_err(|_| ApiError::internal())?;
+    let mut seed = [0_u8; SEED_BYTES];
+    getrandom::fill(&mut seed)
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    let mut random = ChaChaEffectRoller::new(&seed, 0)?;
     let (initial_state, stored_participants) =
-        initialize_persisted_game(&mut transaction, &actor, &content).await?;
+        initialize_persisted_game(&mut transaction, &actor, &content, &rules, &mut random).await?;
 
     let game_id = Uuid::new_v4();
     let claimed = postgres::claim_game_start(
@@ -804,10 +892,8 @@ async fn start_game(
     let snapshot = persisted_snapshot(&initial_state, &stored_participants);
     let snapshot_json = serde_json::to_string(&snapshot)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    validate_persisted_json_size(&snapshot_json)?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
-    let mut seed = [0_u8; SEED_BYTES];
-    getrandom::fill(&mut seed)
-        .map_err(|error| ApiError::internal_with("match application operation", error))?;
 
     postgres::persist_game(
         &mut transaction,
@@ -839,6 +925,8 @@ async fn initialize_persisted_game(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     actor: &StoredRoomActor,
     content: &SelectedContent,
+    rules: &ValidatedGameRules,
+    random: &mut ChaChaEffectRoller,
 ) -> Result<(InitialGameState, Vec<StoredRoomParticipant>), ApiError> {
     let stored_participants = postgres::room_participants(transaction, actor.room_id).await?;
     let participants = stored_participants
@@ -850,20 +938,24 @@ async fn initialize_persisted_game(
         .map(|participant| participant.position)
         .collect::<Vec<_>>();
     let initial_entities = content.initial_entities(&participant_positions);
-    let state = initialize_game(StartGameInput {
-        actor_role: participant_role(&actor.role)?,
-        participants: &participants,
-        content: ContentSelection {
-            adventure_id: &content.adventure_id,
-            content_version: &content.content_version,
-            ruleset_version: &content.ruleset_version,
-            manifest_digest: &content.manifest_digest,
-            manifest_version: content.manifest_version,
-            playable: content.playable,
-            initial_entities: &initial_entities,
-        },
-    })
-    .map_err(start_error)?;
+    let state = GameEngine::new(rules)
+        .start(
+            StartGameInput {
+                actor_role: participant_role(&actor.role)?,
+                participants: &participants,
+                content: ContentSelection {
+                    adventure_id: &content.adventure_id,
+                    content_version: &content.content_version,
+                    ruleset_version: &content.ruleset_version,
+                    manifest_digest: &content.manifest_digest,
+                    manifest_version: content.manifest_version,
+                    playable: content.playable,
+                    initial_entities: &initial_entities,
+                },
+            },
+            random,
+        )
+        .map_err(start_error)?;
     Ok((state, stored_participants))
 }
 
@@ -913,7 +1005,6 @@ async fn execute_game_command(
     let payload_digest = command_payload_digest(&request)?;
     let expected_state_version = request.expected_state_version();
     let command_type = request.command_type();
-    let command = request.domain_command();
     let mut transaction = state
         .database
         .begin()
@@ -941,7 +1032,7 @@ async fn execute_game_command(
         return Ok(no_store_json(
             StatusCode::OK,
             ExecuteGameCommandResponse {
-                receipt: receipt_response(receipt),
+                receipt: receipt_response(receipt)?,
                 projection,
             },
         ));
@@ -950,25 +1041,12 @@ async fn execute_game_command(
     let persisted = decode_persisted_snapshot(&stored.snapshot_json)?;
     verify_persisted_snapshot(&stored, &persisted)?;
     let current = command_domain_state(&persisted)?;
-    let effect_rules = state
-        .content
-        .effect_rules(&stored.manifest_digest)
-        .ok_or_else(ApiError::internal)?;
-    let mut die_roller = ChaChaEffectRoller::new(&stored.prng_seed, current.prng_counter())?;
-    let decision = decide_game_command(GameCommandInput {
-        state: &current,
-        actor_position: u8::try_from(stored.actor_position)
-            .map_err(|_| ApiError::game_action_not_allowed())?,
-        expected_state_version,
-        command,
-        effect_rules: &effect_rules,
-        die_roller: &mut die_roller,
-    })
-    .map_err(command_error)?;
+    let decision = decide_player_intent(&state, &stored, &current, &request)?;
 
     let next_snapshot = persisted_after_decision(&persisted, &decision.state);
     let snapshot_json = serde_json::to_string(&next_snapshot)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    validate_persisted_json_size(&snapshot_json)?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
     let (event_version, event_type, event_json) = persisted_event(decision.event)?;
     let receipt = postgres::persist_game_command(
@@ -1002,10 +1080,56 @@ async fn execute_game_command(
     Ok(no_store_json(
         StatusCode::OK,
         ExecuteGameCommandResponse {
-            receipt: receipt_response(receipt),
+            receipt: receipt_response(receipt)?,
             projection,
         },
     ))
+}
+
+fn decide_player_intent(
+    state: &AppState,
+    stored: &StoredCommandGame,
+    current: &InitialGameState,
+    request: &ExecuteGameCommandRequest,
+) -> Result<game_domain::GameIntentDecision, ApiError> {
+    let effect_rules = state
+        .content
+        .effect_rules(&stored.manifest_digest)
+        .ok_or_else(ApiError::internal)?;
+    let actor_position =
+        u8::try_from(stored.actor_position).map_err(|_| ApiError::game_action_not_allowed())?;
+    let mut random = ChaChaEffectRoller::new(&stored.prng_seed, current.prng_counter())?;
+    if let Some(intent) = request.player_intent() {
+        let rules = ValidatedGameRules::new(effect_rules).map_err(|_| ApiError::internal())?;
+        return GameEngine::new(&rules)
+            .decide(
+                GameIntentInput {
+                    state: current,
+                    actor_position,
+                    expected_state_version: request.expected_state_version(),
+                    intent,
+                },
+                &mut random,
+            )
+            .map_err(command_error);
+    }
+
+    let command = request
+        .game_command()
+        .ok_or_else(ApiError::game_action_not_allowed)?;
+    let decision = decide_game_command(GameCommandInput {
+        state: current,
+        actor_position,
+        expected_state_version: request.expected_state_version(),
+        command,
+        effect_rules: &effect_rules,
+        die_roller: &mut random,
+    })
+    .map_err(action_command_error)?;
+    Ok(game_domain::GameIntentDecision {
+        state: decision.state,
+        event: decision.event,
+    })
 }
 
 async fn command_result(
@@ -1025,7 +1149,7 @@ async fn command_result(
     Ok(no_store_json(
         StatusCode::OK,
         ExecuteGameCommandResponse {
-            receipt: receipt_response(receipt),
+            receipt: receipt_response(receipt)?,
             projection,
         },
     ))
@@ -1071,10 +1195,24 @@ fn start_error(error: StartGameError) -> ApiError {
         StartGameError::ContentNotPlayable
         | StartGameError::InvalidContentIdentity
         | StartGameError::InvalidInitialEntities => ApiError::content_not_playable(),
+        StartGameError::EffectExecutionFailed => ApiError::internal(),
     }
 }
 
-fn command_error(error: GameCommandError) -> ApiError {
+fn command_error(error: GameIntentError) -> ApiError {
+    match error {
+        GameIntentError::ActorNotChoiceResponsible => ApiError::choice_not_assigned(),
+        GameIntentError::StaleStateVersion => ApiError::stale_state_version(),
+        GameIntentError::ActorNotResponsible | GameIntentError::IntentNotLegal => {
+            ApiError::game_action_not_allowed()
+        }
+        GameIntentError::EffectExecutionFailed
+        | GameIntentError::RandomSourceFailed
+        | GameIntentError::VersionOverflow => ApiError::internal(),
+    }
+}
+
+fn action_command_error(error: GameCommandError) -> ApiError {
     match error {
         GameCommandError::ActorNotChoiceResponsible => ApiError::choice_not_assigned(),
         GameCommandError::StaleStateVersion => ApiError::stale_state_version(),
@@ -1089,7 +1227,7 @@ fn command_error(error: GameCommandError) -> ApiError {
 
 const fn command_type_name(command_type: PersistedGameCommandType) -> &'static str {
     match command_type {
-        PersistedGameCommandType::CompleteDarkArts => "complete_dark_arts",
+        PersistedGameCommandType::EndHeroActions => "end_hero_actions",
         PersistedGameCommandType::ResolveChoice => "resolve_choice",
         PersistedGameCommandType::PlayCard => "play_card",
         PersistedGameCommandType::AssignAttack => "assign_attack",
@@ -1097,31 +1235,117 @@ const fn command_type_name(command_type: PersistedGameCommandType) -> &'static s
     }
 }
 
-fn receipt_response(receipt: StoredCommandReceipt) -> GameCommandReceipt {
-    GameCommandReceipt {
+fn receipt_response(receipt: StoredCommandReceipt) -> Result<GameCommandReceipt, ApiError> {
+    let command_type = match receipt.command_type.as_str() {
+        "end_hero_actions" => PersistedGameCommandType::EndHeroActions,
+        "resolve_choice" => PersistedGameCommandType::ResolveChoice,
+        "play_card" => PersistedGameCommandType::PlayCard,
+        "assign_attack" => PersistedGameCommandType::AssignAttack,
+        "acquire_card" => PersistedGameCommandType::AcquireCard,
+        _ => return Err(ApiError::command_not_found()),
+    };
+    Ok(GameCommandReceipt {
         command_id: receipt.command_id.to_string(),
-        command_type: receipt.command_type,
+        command_type,
         status: "accepted",
         expected_state_version: receipt.expected_state_version,
         accepted_state_version: receipt.accepted_state_version,
         accepted_sequence: receipt.accepted_sequence,
         expires_at: receipt.expires_at,
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecuteGameCommandRequest, RequestedTargetBinding};
+    use super::*;
+
+    fn stored_receipt(command_type: &str) -> StoredCommandReceipt {
+        StoredCommandReceipt {
+            command_id: Uuid::nil(),
+            actor_participant_id: Uuid::nil(),
+            command_type: command_type.to_owned(),
+            expected_state_version: 1,
+            payload_digest:
+                "blake3:0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            accepted_state_version: 2,
+            accepted_sequence: 1,
+            expires_at: "2026-09-10T12:00:00Z".to_owned(),
+        }
+    }
+
+    fn roller(seed: &[u8; SEED_BYTES], stream: u64) -> ChaChaEffectRoller {
+        ChaChaEffectRoller::new(seed, stream).unwrap_or_else(|_| panic!("seed should be valid"))
+    }
 
     #[test]
-    fn command_digest_bytes_are_canonical_for_every_command_type() {
-        let complete = ExecuteGameCommandRequest::CompleteDarkArts {
+    fn chacha_sampling_consumes_exactly_one_stream_per_valid_request() {
+        let seed = [42_u8; SEED_BYTES];
+        let mut continuous = roller(&seed, 0);
+
+        let first = continuous
+            .sample_below(7)
+            .expect("a positive range should produce a sample");
+        let second = continuous
+            .sample_below(37)
+            .expect("a positive range should produce a sample");
+        let mut resumed = roller(&seed, 1);
+
+        assert!(first < 7);
+        assert_eq!(
+            second,
+            resumed
+                .sample_below(37)
+                .expect("the resumed stream should produce the next sample")
+        );
+    }
+
+    #[test]
+    fn die_roll_and_invalid_range_preserve_stream_semantics() {
+        let seed = [91_u8; SEED_BYTES];
+        let mut continuous = roller(&seed, 0);
+
+        assert!(continuous.sample_below(0).is_none());
+        let roll = continuous.roll(EffectDie::D6).expect("a die should roll");
+        let after_roll = continuous
+            .sample_below(19)
+            .expect("the next stream should produce a sample");
+        let mut resumed = roller(&seed, 1);
+
+        assert!((1..=6).contains(&roll));
+        assert_eq!(
+            after_roll,
+            resumed
+                .sample_below(19)
+                .expect("one roll should consume one stream")
+        );
+    }
+
+    #[test]
+    fn command_receipts_never_expose_a_legacy_command_type() {
+        assert!(receipt_response(stored_receipt("complete_dark_arts")).is_err());
+
+        let Ok(receipt) = receipt_response(stored_receipt("end_hero_actions")) else {
+            panic!("the current receipt type should be supported");
+        };
+        let serialized = serde_json::to_value(receipt).expect("the receipt should serialize");
+        assert_eq!(serialized["type"], "end_hero_actions");
+
+        let Ok(receipt) = receipt_response(stored_receipt("resolve_choice")) else {
+            panic!("the published choice command type should be supported");
+        };
+        let serialized = serde_json::to_value(receipt).expect("the receipt should serialize");
+        assert_eq!(serialized["type"], "resolve_choice");
+    }
+
+    #[test]
+    fn command_digest_bytes_are_canonical_for_every_current_command_type() {
+        let end_turn = ExecuteGameCommandRequest::EndHeroActions {
             command_id: "00000000-0000-0000-0000-000000000001".to_owned(),
             expected_state_version: 7,
         };
         assert_eq!(
-            complete.canonical_bytes().expect("complete must serialize"),
-            br#"{"command_id":"00000000-0000-0000-0000-000000000001","expected_state_version":7,"type":"complete_dark_arts"}"#
+            end_turn.canonical_bytes().expect("end turn must serialize"),
+            br#"{"command_id":"00000000-0000-0000-0000-000000000001","expected_state_version":7,"type":"end_hero_actions"}"#
         );
 
         let resolve = ExecuteGameCommandRequest::ResolveChoice {

@@ -358,6 +358,7 @@ fn compile_rule(
     Some(game_domain::EffectRule {
         id: rule.id.as_str().to_owned(),
         trigger: effect_trigger(rule.trigger),
+        order: rule.order,
         cost: rule
             .cost
             .iter()
@@ -489,7 +490,8 @@ fn effect_operation(operation: &Operation) -> game_domain::EffectOperation {
 
 const fn effect_trigger(trigger: EffectTrigger) -> game_domain::EffectTrigger {
     match trigger {
-        EffectTrigger::DarkArtsCompleted => game_domain::EffectTrigger::DarkArtsCompleted,
+        EffectTrigger::DarkArts => game_domain::EffectTrigger::DarkArts,
+        EffectTrigger::Villains => game_domain::EffectTrigger::Villains,
         EffectTrigger::Manual => game_domain::EffectTrigger::Manual,
     }
 }
@@ -532,5 +534,71 @@ const fn effect_game_outcome(outcome: GameOutcome) -> game_domain::EffectGameOut
     match outcome {
         GameOutcome::Lost => game_domain::EffectGameOutcome::Lost,
         GameOutcome::Won => game_domain::EffectGameOutcome::Won,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[test]
+    fn effect_rules_preserve_phase_triggers_and_order_values() {
+        let rules = [
+            ("rule:dark-arts", EffectTrigger::DarkArts, 7),
+            ("rule:villains", EffectTrigger::Villains, 11),
+            ("rule:manual", EffectTrigger::Manual, 13),
+        ]
+        .into_iter()
+        .map(|(id, trigger, order)| EffectRule {
+            id: game_content::RuleId::parse(id).expect("fixture rule ID should be valid"),
+            trigger,
+            order,
+            cost: Vec::new(),
+            effect: Effect::NoOp,
+        })
+        .collect::<Vec<_>>();
+        let executable_rules = rules.iter().map(|rule| rule.id.clone()).collect();
+        let catalog = ContentCatalog::new(vec![ContentManifest {
+            manifest_version: 2,
+            content_version: "fixture-v1".to_owned(),
+            ruleset_version: "fixture-rules-v1".to_owned(),
+            digest: "blake3:fixture".to_owned(),
+            record_count: 0,
+            card_count: 0,
+            playable: true,
+            gaps: Vec::new(),
+            entries: Vec::new(),
+            executable_rules,
+            rules,
+            game_setups: Vec::new(),
+            sources: Vec::new(),
+        }]);
+
+        let compiled = catalog
+            .effect_rules("blake3:fixture")
+            .expect("the fixture manifest should compile");
+        let compiled = compiled
+            .iter()
+            .map(|rule| (rule.id.as_str(), rule))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(compiled.len(), 3);
+        assert_eq!(
+            compiled["rule:dark-arts"].trigger,
+            game_domain::EffectTrigger::DarkArts
+        );
+        assert_eq!(compiled["rule:dark-arts"].order, 7);
+        assert_eq!(
+            compiled["rule:villains"].trigger,
+            game_domain::EffectTrigger::Villains
+        );
+        assert_eq!(compiled["rule:villains"].order, 11);
+        assert_eq!(
+            compiled["rule:manual"].trigger,
+            game_domain::EffectTrigger::Manual
+        );
+        assert_eq!(compiled["rule:manual"].order, 13);
     }
 }

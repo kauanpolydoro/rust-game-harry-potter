@@ -223,5 +223,5 @@ CREATE TABLE room_protection_requests (
 );
 
 UPDATE application_metadata
-SET value = '17'
+SET value = '18'
 WHERE key = 'schema_version';

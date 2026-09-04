@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-const MAX_CARD_INSTANCE_ID_LENGTH: usize = 256;
+const MAX_ID_BYTES: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CatalogId(String);
@@ -59,9 +59,6 @@ impl CardInstanceId {
     ///
     /// Returns an error when the identifier is empty, too long or not namespaced.
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
-        if value.chars().count() > MAX_CARD_INSTANCE_ID_LENGTH {
-            return Err(InvalidId);
-        }
         parse_namespaced_id(value).map(Self)
     }
 
@@ -121,7 +118,9 @@ pub struct InvalidId;
 
 impl fmt::Display for InvalidId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ID must contain a lowercase namespace and slug separated by one colon")
+        formatter.write_str(
+            "ID must be at most 256 bytes and contain a lowercase namespace and slug separated by one colon",
+        )
     }
 }
 
@@ -138,9 +137,33 @@ fn parse_namespaced_id(value: &str) -> Result<String, InvalidId> {
             })
     };
 
-    if parts.next().is_some() || !valid_part(namespace) || !valid_part(slug) {
+    if value.len() > MAX_ID_BYTES
+        || parts.next().is_some()
+        || !valid_part(namespace)
+        || !valid_part(slug)
+    {
         return Err(InvalidId);
     }
 
     Ok(value.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifiers_accept_256_bytes_and_reject_257_bytes() {
+        let accepted = format!("a:{}", "b".repeat(254));
+        let rejected = format!("a:{}", "b".repeat(255));
+
+        assert_eq!(accepted.len(), MAX_ID_BYTES);
+        assert_eq!(rejected.len(), MAX_ID_BYTES + 1);
+        assert!(CatalogId::parse(&accepted).is_ok());
+        assert!(CardInstanceId::parse(&accepted).is_ok());
+        assert!(RuleId::parse(&accepted).is_ok());
+        assert!(CatalogId::parse(&rejected).is_err());
+        assert!(CardInstanceId::parse(&rejected).is_err());
+        assert!(RuleId::parse(&rejected).is_err());
+    }
 }

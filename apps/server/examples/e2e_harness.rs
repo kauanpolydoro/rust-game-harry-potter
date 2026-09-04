@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 fn executable_fixture_manifest() -> ContentManifest {
     let entries = (0..171).map(fixture_entry).collect::<Vec<_>>();
     let bundle = serde_json::to_vec(&json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "content_version": "e2e-fixture-v1",
         "ruleset_version": "e2e-fixture-rules-v1",
         "locale": "en",
@@ -20,78 +20,7 @@ fn executable_fixture_manifest() -> ContentManifest {
             "uri": "https://example.invalid/e2e-fixture",
             "kind": "adaptation"
         }],
-        "rules": [{
-            "id": "rule:functional",
-            "trigger": "dark_arts_completed",
-            "cost": [{ "resource": "health", "amount": 1 }],
-            "effect": {
-                "type": "sequence",
-                "effects": [
-                    {
-                        "type": "apply",
-                        "target": {
-                            "zone": "heroes",
-                            "owner": "actor",
-                            "cardinality": { "min": 1, "max": 1 }
-                        },
-                        "operation": {
-                            "type": "modify_resource",
-                            "resource": "influence",
-                            "amount": 2
-                        }
-                    },
-                    {
-                        "type": "condition",
-                        "condition": {
-                            "type": "resource_at_least",
-                            "target": {
-                                "zone": "heroes",
-                                "owner": "actor",
-                                "cardinality": { "min": 1, "max": 1 }
-                            },
-                            "resource": "influence",
-                            "amount": 2
-                        },
-                        "then": {
-                            "type": "repeat",
-                            "times": 2,
-                            "effect": {
-                                "type": "apply",
-                                "target": {
-                                    "zone": "heroes",
-                                    "owner": "actor",
-                                    "cardinality": { "min": 1, "max": 1 }
-                                },
-                                "operation": {
-                                    "type": "modify_resource",
-                                    "resource": "attack",
-                                    "amount": 1
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "type": "roll",
-                        "die": "d4",
-                        "outcomes": [
-                            { "type": "no_op" },
-                            { "type": "no_op" },
-                            { "type": "no_op" },
-                            { "type": "no_op" }
-                        ]
-                    },
-                    {
-                        "type": "apply",
-                        "target": {
-                            "zone": "hero_hand",
-                            "owner": "actor",
-                            "cardinality": { "min": 1, "max": 1 }
-                        },
-                        "operation": { "type": "discard" }
-                    }
-                ]
-            }
-        }],
+        "rules": [automatic_effect_rule()],
         "entries": entries
     }))
     .expect("the E2E fixture must serialize");
@@ -108,6 +37,94 @@ fn executable_fixture_manifest() -> ContentManifest {
         ]),
     )
     .expect("the E2E fixture must import")
+}
+
+fn automatic_effect_rule() -> serde_json::Value {
+    json!({
+        "id": "rule:functional",
+        "trigger": "dark_arts",
+        "order": 1,
+        "effect": {
+            "type": "sequence",
+            "effects": [
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "heroes",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 }
+                    },
+                    "operation": {
+                        "type": "modify_resource",
+                        "resource": "health",
+                        "amount": -1
+                    }
+                },
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "heroes",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 }
+                    },
+                    "operation": {
+                        "type": "modify_resource",
+                        "resource": "influence",
+                        "amount": 2
+                    }
+                },
+                {
+                    "type": "condition",
+                    "condition": {
+                        "type": "resource_at_least",
+                        "target": {
+                            "zone": "heroes",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "resource": "influence",
+                        "amount": 2
+                    },
+                    "then": {
+                        "type": "repeat",
+                        "times": 2,
+                        "effect": {
+                            "type": "apply",
+                            "target": {
+                                "zone": "heroes",
+                                "owner": "actor",
+                                "cardinality": { "min": 1, "max": 1 }
+                            },
+                            "operation": {
+                                "type": "modify_resource",
+                                "resource": "attack",
+                                "amount": 1
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "roll",
+                    "die": "d4",
+                    "outcomes": [
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "no_op" }
+                    ]
+                },
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "hero_hand",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 }
+                    },
+                    "operation": { "type": "discard" }
+                }
+            ]
+        }
+    })
 }
 
 fn fixture_entry(index: usize) -> serde_json::Value {
