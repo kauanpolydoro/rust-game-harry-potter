@@ -25,11 +25,11 @@ function projection(stateVersion = 1): GameProjectionResponse {
       id: gameId,
       status: 'in_progress',
     },
-    legal_actions: ['play_card', 'assign_attack', 'acquire_card'],
+    legal_actions: ['end_hero_actions', 'play_card', 'assign_attack', 'acquire_card'],
     legal_intentions: {
       acquire_cards: [{ card_id: 'card:market-one', cost: 3 }],
       assign_attack: [{ max_amount: 2, villain_id: 'villain:one' }],
-      complete_dark_arts: false,
+      end_hero_actions: true,
       play_cards: [
         {
           card_id: 'card:starter-one',
@@ -44,6 +44,8 @@ function projection(stateVersion = 1): GameProjectionResponse {
         },
       ],
     },
+    queued_effect_count: 0,
+    queued_phases: ['end_turn'],
     participant,
     participants: [participant],
     snapshot: {
@@ -95,7 +97,7 @@ function projection(stateVersion = 1): GameProjectionResponse {
       play_area: [],
       villain_deck_count: 0,
     },
-    turn: { active_position: 1, number: 1, phase: 'hero_action' },
+    turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }
 }
 
@@ -114,7 +116,7 @@ function errorResponse(code: string) {
 
 function acceptedResponse(
   commandId: string,
-  type: 'complete_dark_arts' | 'play_card' | 'assign_attack' | 'acquire_card',
+  type: 'end_hero_actions' | 'play_card' | 'assign_attack' | 'acquire_card',
 ) {
   return {
     projection: projection(2),

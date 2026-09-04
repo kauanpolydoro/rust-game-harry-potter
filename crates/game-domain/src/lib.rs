@@ -15,14 +15,17 @@ pub use effects::{
     EffectEntityPlacement, EffectExecutionError, EffectGameOutcome, EffectNoOpReason,
     EffectOperation, EffectOutcome, EffectPathSegment, EffectResource, EffectResourceCost,
     EffectRoller, EffectRule, EffectSelector, EffectStop, EffectTargetBinding, EffectTargetOwner,
-    EffectTrigger, EffectWorld, EffectZone, PendingEffectChoice, PendingEffectChoiceKind,
-    QueuedEffect, effect_action_is_affordable,
+    EffectTrigger, EffectWorld, EffectZone, MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH,
+    MAX_EFFECT_ROLL_INDEX, PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect,
+    effect_action_is_affordable,
 };
 
-pub const SNAPSHOT_VERSION: u16 = 2;
+pub const SNAPSHOT_VERSION: u16 = 3;
+const PARTICIPANT_CHOICE_SNAPSHOT_VERSION: u16 = 2;
 const LEGACY_SNAPSHOT_VERSION: u16 = 1;
 pub const INITIAL_STATE_VERSION: u64 = 1;
 pub const INITIAL_SEQUENCE: u64 = 0;
+pub const MAX_TURN_STEPS: usize = 3;
 pub const PRNG_ALGORITHM: &str = "chacha20-v1";
 pub const SHUFFLE_ALGORITHM: &str = "fisher-yates-v1";
 pub const SAMPLING_ALGORITHM: &str = "rejection-sampling-v1";
@@ -138,7 +141,13 @@ pub struct InitialGameState {
     effect_world: EffectWorld,
     last_effects: Vec<EffectOutcome>,
     pending_choice: Option<PendingEffectChoice>,
+    queued_phases: Vec<GamePhase>,
+    queued_effects: Vec<QueuedEffect>,
+    decision_point: Option<DecisionPoint>,
+    last_turn_steps: Vec<TurnStep>,
 }
+
+pub type GameState = InitialGameState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
@@ -150,7 +159,436 @@ pub enum GameStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GamePhase {
     DarkArts,
-    HeroAction,
+    Villains,
+    HeroActions,
+    EndTurn,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionPoint {
+    Automatic,
+    PlayerIntent { responsible_position: u8 },
+    EffectChoice(PendingEffectChoice),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnStep {
+    phase: GamePhase,
+    effects: Vec<EffectOutcome>,
+}
+
+impl TurnStep {
+    #[must_use]
+    pub fn new(phase: GamePhase, effects: Vec<EffectOutcome>) -> Self {
+        Self { phase, effects }
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> GamePhase {
+        self.phase
+    }
+
+    #[must_use]
+    pub fn effects(&self) -> &[EffectOutcome] {
+        &self.effects
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayerIntent {
+    EndHeroActions,
+    ResolveChoice {
+        choice_id: String,
+        selected_options: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerIntentType {
+    EndHeroActions,
+    ResolveChoice,
+}
+
+#[derive(Clone)]
+pub struct GameIntentInput<'a> {
+    pub state: &'a InitialGameState,
+    pub actor_position: u8,
+    pub expected_state_version: u64,
+    pub intent: PlayerIntent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameIntentDecision {
+    pub state: InitialGameState,
+    pub event: GameEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndTurnOutcome {
+    CardMoved {
+        card_id: String,
+        from: EffectZone,
+        to: EffectZone,
+    },
+    PileShuffled {
+        owner_position: u8,
+        zone: EffectZone,
+        bottom_to_top: Vec<String>,
+    },
+    ResourceReset {
+        resource: EffectResource,
+        before: u16,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineControl {
+    pub status: GameStatus,
+    pub turn: u32,
+    pub phase: GamePhase,
+    pub active_position: u8,
+    pub queued_phases: Vec<GamePhase>,
+    pub queued_effects: Vec<QueuedEffect>,
+    pub decision_point: Option<DecisionPoint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameIntentError {
+    StaleStateVersion,
+    ActorNotResponsible,
+    ActorNotChoiceResponsible,
+    IntentNotLegal,
+    EffectExecutionFailed,
+    RandomSourceFailed,
+    VersionOverflow,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedGameRules {
+    effect_rules: Vec<EffectRule>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidatedGameRulesError {
+    AutomaticRuleHasCost,
+    DuplicatePhaseOrder,
+    DuplicateRuleId,
+}
+
+impl ValidatedGameRules {
+    /// Orders validated effect roots independently from their declaration order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when two roots occupy the same position in one automatic phase.
+    pub fn new(mut effect_rules: Vec<EffectRule>) -> Result<Self, ValidatedGameRulesError> {
+        let mut rule_ids = BTreeSet::new();
+        if effect_rules
+            .iter()
+            .any(|rule| !rule_ids.insert(rule.id.as_str()))
+        {
+            return Err(ValidatedGameRulesError::DuplicateRuleId);
+        }
+        if effect_rules.iter().any(|rule| {
+            matches!(
+                rule.trigger,
+                EffectTrigger::DarkArts | EffectTrigger::Villains
+            ) && !rule.cost.is_empty()
+        }) {
+            return Err(ValidatedGameRulesError::AutomaticRuleHasCost);
+        }
+        effect_rules.sort_by(|left, right| {
+            effect_trigger_order(left.trigger)
+                .cmp(&effect_trigger_order(right.trigger))
+                .then(left.order.cmp(&right.order))
+                .then(left.id.cmp(&right.id))
+        });
+        if effect_rules.windows(2).any(|pair| {
+            pair[0].trigger == pair[1].trigger
+                && pair[0].order == pair[1].order
+                && matches!(
+                    pair[0].trigger,
+                    EffectTrigger::DarkArts | EffectTrigger::Villains
+                )
+        }) {
+            return Err(ValidatedGameRulesError::DuplicatePhaseOrder);
+        }
+        Ok(Self { effect_rules })
+    }
+
+    #[must_use]
+    pub fn effect_rules(&self) -> &[EffectRule] {
+        &self.effect_rules
+    }
+}
+
+const fn effect_trigger_order(trigger: EffectTrigger) -> u8 {
+    match trigger {
+        EffectTrigger::DarkArts | EffectTrigger::DarkArtsCompleted => 0,
+        EffectTrigger::Villains => 1,
+        EffectTrigger::Manual => 2,
+    }
+}
+
+pub struct GameEngine<'rules> {
+    rules: &'rules ValidatedGameRules,
+}
+
+impl<'rules> GameEngine<'rules> {
+    #[must_use]
+    pub const fn new(rules: &'rules ValidatedGameRules) -> Self {
+        Self { rules }
+    }
+
+    /// Starts a game and resolves mandatory phases until a human decision or terminal state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the lobby is invalid or validated effects cannot be executed.
+    pub fn start(
+        &self,
+        input: StartGameInput<'_>,
+        roller: &mut dyn EffectRoller,
+    ) -> Result<InitialGameState, StartGameError> {
+        let state = initialize_game(input)?;
+        settle_initial_turn(state, self.rules.effect_rules(), roller)
+    }
+
+    #[must_use]
+    pub fn legal_intent_types(
+        &self,
+        state: &InitialGameState,
+        actor_position: u8,
+    ) -> Vec<PlayerIntentType> {
+        if state.status != GameStatus::InProgress {
+            return Vec::new();
+        }
+
+        match state.decision_point.as_ref() {
+            Some(DecisionPoint::PlayerIntent {
+                responsible_position,
+            }) if state.phase == GamePhase::HeroActions
+                && *responsible_position == actor_position =>
+            {
+                vec![PlayerIntentType::EndHeroActions]
+            }
+            Some(DecisionPoint::EffectChoice(choice))
+                if choice.responsible_position == actor_position
+                    && state.pending_choice.as_ref() == Some(choice) =>
+            {
+                vec![PlayerIntentType::ResolveChoice]
+            }
+            Some(
+                DecisionPoint::Automatic
+                | DecisionPoint::PlayerIntent { .. }
+                | DecisionPoint::EffectChoice(_),
+            )
+            | None => Vec::new(),
+        }
+    }
+
+    /// Accepts one free player intent and advances all mandatory work that follows it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error without mutating the supplied state when the version, actor, intent,
+    /// persisted state, or random stream is invalid.
+    pub fn decide(
+        &self,
+        input: GameIntentInput<'_>,
+        random: &mut dyn EffectRoller,
+    ) -> Result<GameIntentDecision, GameIntentError> {
+        if input.expected_state_version != input.state.state_version {
+            return Err(GameIntentError::StaleStateVersion);
+        }
+
+        match input.intent {
+            PlayerIntent::EndHeroActions => {
+                if input.state.decision_point
+                    != Some(DecisionPoint::PlayerIntent {
+                        responsible_position: input.actor_position,
+                    })
+                {
+                    return Err(GameIntentError::ActorNotResponsible);
+                }
+                self.end_hero_actions(input.state, input.actor_position, random)
+            }
+            PlayerIntent::ResolveChoice {
+                choice_id,
+                selected_options,
+            } => self.resolve_choice(
+                input.state,
+                input.actor_position,
+                choice_id,
+                &selected_options,
+                random,
+            ),
+        }
+    }
+
+    fn resolve_choice(
+        &self,
+        current: &InitialGameState,
+        actor_position: u8,
+        choice_id: String,
+        selected_options: &[String],
+        random: &mut dyn EffectRoller,
+    ) -> Result<GameIntentDecision, GameIntentError> {
+        if current.status != GameStatus::InProgress {
+            return Err(GameIntentError::IntentNotLegal);
+        }
+        let pending = current
+            .pending_choice
+            .as_ref()
+            .filter(|pending| {
+                matches!(
+                    current.decision_point.as_ref(),
+                    Some(DecisionPoint::EffectChoice(decision)) if decision == *pending
+                ) && current.queued_effects.as_slice() == pending.continuation.queue.as_slice()
+            })
+            .ok_or(GameIntentError::IntentNotLegal)?;
+        if actor_position != pending.responsible_position {
+            return Err(GameIntentError::ActorNotChoiceResponsible);
+        }
+        if choice_id != pending.id {
+            return Err(GameIntentError::IntentNotLegal);
+        }
+        let selected_options =
+            effects::normalize_effect_choice_selection(pending, selected_options)
+                .ok_or(GameIntentError::IntentNotLegal)?;
+        let sequence = current
+            .sequence
+            .checked_add(1)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        let state_version = current
+            .state_version
+            .checked_add(1)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        let choice_cause = pending.cause.clone();
+        let phase = current.phase;
+        let mut next = current.clone();
+        let resolution = effects::resume_effects(
+            &mut next.effect_world,
+            pending,
+            &selected_options,
+            self.rules.effect_rules(),
+            random,
+        )
+        .map_err(game_intent_effect_error)?;
+        next.prng_counter = next
+            .prng_counter
+            .checked_add(resolution.rolls_consumed)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        next.last_effects
+            .extend(resolution.outcomes.iter().cloned());
+        if next.last_effects.len() > 4_096 {
+            return Err(GameIntentError::EffectExecutionFailed);
+        }
+        append_phase_effects(&mut next.last_turn_steps, phase, &resolution.outcomes);
+        let mut steps = vec![TurnStep::new(phase, resolution.outcomes)];
+
+        match resolution.stop {
+            EffectStop::Choice(choice) => {
+                if resolution.queue != choice.continuation.queue {
+                    return Err(GameIntentError::EffectExecutionFailed);
+                }
+                next.queued_effects.clone_from(&choice.continuation.queue);
+                next.pending_choice = Some(choice.clone());
+                next.decision_point = Some(DecisionPoint::EffectChoice(choice));
+            }
+            EffectStop::Stable => {
+                advance_after_automatic_phase(&mut next);
+                steps.extend(
+                    settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
+                        .map_err(game_intent_effect_error)?,
+                );
+            }
+            EffectStop::Terminal(outcome) => finish_terminal_state(&mut next, outcome),
+        }
+        next.sequence = sequence;
+        next.state_version = state_version;
+
+        let event = GameEvent::ChoiceResolved {
+            sequence,
+            state_version,
+            turn: current.turn,
+            actor_position,
+            choice_id,
+            choice_cause,
+            selected_options,
+            steps,
+            control: EngineControl::from_state(&next),
+            prng_counter: next.prng_counter,
+        };
+        Ok(GameIntentDecision { state: next, event })
+    }
+
+    fn end_hero_actions(
+        &self,
+        current: &InitialGameState,
+        actor_position: u8,
+        random: &mut dyn EffectRoller,
+    ) -> Result<GameIntentDecision, GameIntentError> {
+        let sequence = current
+            .sequence
+            .checked_add(1)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        let state_version = current
+            .state_version
+            .checked_add(1)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        let mut next = current.clone();
+        next.phase = GamePhase::EndTurn;
+        next.queued_phases.clear();
+        next.queued_effects.clear();
+        next.pending_choice = None;
+        next.decision_point = Some(DecisionPoint::Automatic);
+        next.last_effects.clear();
+        next.last_turn_steps = vec![TurnStep {
+            phase: GamePhase::EndTurn,
+            effects: Vec::new(),
+        }];
+
+        let (end_turn, samples_consumed) =
+            perform_end_turn(&mut next.effect_world, actor_position, random)?;
+        next.prng_counter = next
+            .prng_counter
+            .checked_add(samples_consumed)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        let player_index = next
+            .players
+            .iter()
+            .position(|player| player.position == actor_position)
+            .ok_or(GameIntentError::ActorNotResponsible)?;
+        let next_player_index = (player_index + 1) % next.players.len();
+        next.active_position = next.players[next_player_index].position;
+        next.turn = next
+            .turn
+            .checked_add(1)
+            .ok_or(GameIntentError::VersionOverflow)?;
+        next.phase = GamePhase::DarkArts;
+        next.queued_phases = vec![
+            GamePhase::Villains,
+            GamePhase::HeroActions,
+            GamePhase::EndTurn,
+        ];
+        settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
+            .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+        next.sequence = sequence;
+        next.state_version = state_version;
+
+        let event = GameEvent::TurnCompleted {
+            sequence,
+            state_version,
+            turn: current.turn,
+            actor_position,
+            end_turn,
+            steps: next.last_turn_steps.clone(),
+            control: EngineControl::from_state(&next),
+            prng_counter: next.prng_counter,
+        };
+        Ok(GameIntentDecision { state: next, event })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,8 +685,18 @@ pub enum GameEvent {
         choice_id: String,
         choice_cause: String,
         selected_options: Vec<String>,
-        effects: Vec<EffectOutcome>,
-        stop: EffectStop,
+        steps: Vec<TurnStep>,
+        control: EngineControl,
+        prng_counter: u64,
+    },
+    TurnCompleted {
+        sequence: u64,
+        state_version: u64,
+        turn: u32,
+        actor_position: u8,
+        end_turn: Vec<EndTurnOutcome>,
+        steps: Vec<TurnStep>,
+        control: EngineControl,
         prng_counter: u64,
     },
     CardPlayed {
@@ -349,6 +797,10 @@ pub struct GameStateRestoreInput<'a> {
     pub effect_world: EffectWorld,
     pub last_effects: Vec<EffectOutcome>,
     pub pending_choice: Option<PendingEffectChoice>,
+    pub queued_phases: Vec<GamePhase>,
+    pub queued_effects: Vec<QueuedEffect>,
+    pub decision_point: Option<DecisionPoint>,
+    pub last_turn_steps: Vec<TurnStep>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -359,6 +811,7 @@ pub enum GameStateRestoreError {
     InvalidContentIdentity,
     UnsupportedAlgorithm,
     InvalidPlayers,
+    InvalidControlState,
 }
 
 impl std::fmt::Display for GameStateRestoreError {
@@ -370,6 +823,7 @@ impl std::fmt::Display for GameStateRestoreError {
             Self::InvalidContentIdentity => "content identity is invalid",
             Self::UnsupportedAlgorithm => "persisted algorithm is not supported",
             Self::InvalidPlayers => "persisted players violate game invariants",
+            Self::InvalidControlState => "persisted engine control violates game invariants",
         })
     }
 }
@@ -476,6 +930,26 @@ impl InitialGameState {
     pub const fn pending_choice(&self) -> Option<&PendingEffectChoice> {
         self.pending_choice.as_ref()
     }
+
+    #[must_use]
+    pub fn queued_phases(&self) -> &[GamePhase] {
+        &self.queued_phases
+    }
+
+    #[must_use]
+    pub fn queued_effects(&self) -> &[QueuedEffect] {
+        &self.queued_effects
+    }
+
+    #[must_use]
+    pub const fn decision_point(&self) -> Option<&DecisionPoint> {
+        self.decision_point.as_ref()
+    }
+
+    #[must_use]
+    pub fn last_turn_steps(&self) -> &[TurnStep] {
+        &self.last_turn_steps
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,6 +963,7 @@ pub enum StartGameError {
     ParticipantNotReady,
     ContentNotPlayable,
     InvalidContentIdentity,
+    EffectExecutionFailed,
     InvalidInitialEntities,
 }
 
@@ -529,14 +1004,7 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         return Err(StartGameError::InvalidPositions);
     }
 
-    let heroes = input
-        .participants
-        .iter()
-        .map(|participant| participant.hero.ok_or(StartGameError::MissingHero))
-        .collect::<Result<Vec<_>, _>>()?;
-    if heroes.iter().copied().collect::<BTreeSet<_>>().len() != heroes.len() {
-        return Err(StartGameError::DuplicateHero);
-    }
+    let players = initial_players(input.participants)?;
     if input
         .participants
         .iter()
@@ -556,16 +1024,6 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         return Err(StartGameError::InvalidContentIdentity);
     }
 
-    let mut players = input
-        .participants
-        .iter()
-        .zip(heroes)
-        .map(|(participant, hero)| InitialPlayer {
-            position: participant.position,
-            hero,
-        })
-        .collect::<Vec<_>>();
-    players.sort_by_key(|player| player.position);
     let effect_world = EffectWorld::new(
         players
             .iter()
@@ -603,8 +1061,274 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         effect_world,
         last_effects: Vec::new(),
         pending_choice: None,
+        queued_phases: vec![
+            GamePhase::Villains,
+            GamePhase::HeroActions,
+            GamePhase::EndTurn,
+        ],
+        queued_effects: Vec::new(),
+        decision_point: Some(DecisionPoint::Automatic),
+        last_turn_steps: Vec::new(),
         players,
     })
+}
+
+fn initial_players(
+    participants: &[LobbyParticipant],
+) -> Result<Vec<InitialPlayer>, StartGameError> {
+    let heroes = participants
+        .iter()
+        .map(|participant| participant.hero.ok_or(StartGameError::MissingHero))
+        .collect::<Result<Vec<_>, _>>()?;
+    if heroes.iter().copied().collect::<BTreeSet<_>>().len() != heroes.len() {
+        return Err(StartGameError::DuplicateHero);
+    }
+
+    let mut players = participants
+        .iter()
+        .zip(heroes)
+        .map(|(participant, hero)| InitialPlayer {
+            position: participant.position,
+            hero,
+        })
+        .collect::<Vec<_>>();
+    players.sort_by_key(|player| player.position);
+    Ok(players)
+}
+
+fn settle_initial_turn(
+    mut state: InitialGameState,
+    rules: &[EffectRule],
+    roller: &mut dyn EffectRoller,
+) -> Result<InitialGameState, StartGameError> {
+    settle_automatic_phases(&mut state, rules, roller)
+        .map_err(|_| StartGameError::EffectExecutionFailed)?;
+    Ok(state)
+}
+
+fn settle_automatic_phases(
+    state: &mut InitialGameState,
+    rules: &[EffectRule],
+    roller: &mut dyn EffectRoller,
+) -> Result<Vec<TurnStep>, EffectExecutionError> {
+    let mut all_effects = std::mem::take(&mut state.last_effects);
+    let mut history = std::mem::take(&mut state.last_turn_steps);
+    let mut resolved_steps = Vec::new();
+
+    loop {
+        let (phase, trigger) = match state.phase {
+            GamePhase::DarkArts => (GamePhase::DarkArts, EffectTrigger::DarkArts),
+            GamePhase::Villains => (GamePhase::Villains, EffectTrigger::Villains),
+            GamePhase::HeroActions | GamePhase::EndTurn => {
+                state.last_effects = all_effects;
+                state.last_turn_steps = history;
+                return Ok(resolved_steps);
+            }
+        };
+        let resolution = effects::execute_effects(
+            &mut state.effect_world,
+            state.active_position,
+            rules,
+            trigger,
+            roller,
+        )?;
+        let effects::EffectResolution {
+            outcomes,
+            stop,
+            rolls_consumed,
+            queue,
+        } = resolution;
+        state.prng_counter = state
+            .prng_counter
+            .checked_add(rolls_consumed)
+            .ok_or(EffectExecutionError::InvalidDefinition)?;
+        all_effects.extend(outcomes.iter().cloned());
+        if all_effects.len() > 4_096 {
+            return Err(EffectExecutionError::StepLimitExceeded);
+        }
+        let step = TurnStep::new(phase, outcomes);
+        history.push(step.clone());
+        resolved_steps.push(step);
+        match stop {
+            EffectStop::Choice(choice) => {
+                if queue != choice.continuation.queue {
+                    return Err(EffectExecutionError::InvalidDefinition);
+                }
+                state.queued_effects.clone_from(&choice.continuation.queue);
+                state.pending_choice = Some(choice.clone());
+                state.decision_point = Some(DecisionPoint::EffectChoice(choice));
+                state.last_effects = all_effects;
+                state.last_turn_steps = history;
+                return Ok(resolved_steps);
+            }
+            EffectStop::Terminal(outcome) => {
+                finish_terminal_state(state, outcome);
+                state.last_effects = all_effects;
+                state.last_turn_steps = history;
+                return Ok(resolved_steps);
+            }
+            EffectStop::Stable => advance_after_automatic_phase(state),
+        }
+    }
+}
+
+fn advance_after_automatic_phase(state: &mut InitialGameState) {
+    state.pending_choice = None;
+    state.queued_effects.clear();
+    match state.phase {
+        GamePhase::DarkArts => {
+            state.phase = GamePhase::Villains;
+            state.queued_phases = vec![GamePhase::HeroActions, GamePhase::EndTurn];
+            state.decision_point = Some(DecisionPoint::Automatic);
+        }
+        GamePhase::Villains => {
+            state.phase = GamePhase::HeroActions;
+            state.queued_phases = vec![GamePhase::EndTurn];
+            state.decision_point = Some(DecisionPoint::PlayerIntent {
+                responsible_position: state.active_position,
+            });
+        }
+        GamePhase::HeroActions => {
+            state.queued_phases = vec![GamePhase::EndTurn];
+            state.decision_point = Some(DecisionPoint::PlayerIntent {
+                responsible_position: state.active_position,
+            });
+        }
+        GamePhase::EndTurn => {}
+    }
+}
+
+fn finish_terminal_state(state: &mut InitialGameState, outcome: EffectGameOutcome) {
+    state.status = match outcome {
+        EffectGameOutcome::Lost => GameStatus::Lost,
+        EffectGameOutcome::Won => GameStatus::Won,
+    };
+    state.pending_choice = None;
+    state.decision_point = None;
+    state.queued_phases.clear();
+    state.queued_effects.clear();
+}
+
+fn append_phase_effects(history: &mut Vec<TurnStep>, phase: GamePhase, effects: &[EffectOutcome]) {
+    if let Some(step) = history.last_mut().filter(|step| step.phase == phase) {
+        step.effects.extend_from_slice(effects);
+    } else {
+        history.push(TurnStep::new(phase, effects.to_vec()));
+    }
+}
+
+const fn game_intent_effect_error(error: EffectExecutionError) -> GameIntentError {
+    match error {
+        EffectExecutionError::InvalidChoice
+        | EffectExecutionError::InvalidTargetSelection
+        | EffectExecutionError::UnaffordableCost => GameIntentError::IntentNotLegal,
+        EffectExecutionError::InvalidDefinition
+        | EffectExecutionError::InvalidRoll
+        | EffectExecutionError::StepLimitExceeded => GameIntentError::EffectExecutionFailed,
+    }
+}
+
+impl EngineControl {
+    fn from_state(state: &InitialGameState) -> Self {
+        Self {
+            status: state.status,
+            turn: state.turn,
+            phase: state.phase,
+            active_position: state.active_position,
+            queued_phases: state.queued_phases.clone(),
+            queued_effects: state.queued_effects.clone(),
+            decision_point: state.decision_point.clone(),
+        }
+    }
+}
+
+fn perform_end_turn(
+    world: &mut EffectWorld,
+    actor_position: u8,
+    random: &mut dyn EffectRoller,
+) -> Result<(Vec<EndTurnOutcome>, u64), GameIntentError> {
+    let mut outcomes = Vec::new();
+    for from in [EffectZone::HeroPlayArea, EffectZone::HeroHand] {
+        for card_id in world.card_ids_in_zone(actor_position, from) {
+            world
+                .move_card(&card_id, from, EffectZone::HeroDiscardPile)
+                .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+            outcomes.push(EndTurnOutcome::CardMoved {
+                card_id,
+                from,
+                to: EffectZone::HeroDiscardPile,
+            });
+        }
+    }
+
+    for resource in [EffectResource::Attack, EffectResource::Influence] {
+        let before = world
+            .hero_resource(actor_position, resource)
+            .ok_or(GameIntentError::EffectExecutionFailed)?;
+        world
+            .reset_hero_resource(actor_position, resource, before)
+            .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+        outcomes.push(EndTurnOutcome::ResourceReset { resource, before });
+    }
+
+    let mut samples_consumed = 0_u64;
+    while world
+        .card_ids_in_zone(actor_position, EffectZone::HeroHand)
+        .len()
+        < 5
+    {
+        if let Some(card_id) = world.top_card_id(actor_position, EffectZone::HeroDrawPile) {
+            world
+                .move_card(&card_id, EffectZone::HeroDrawPile, EffectZone::HeroHand)
+                .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+            outcomes.push(EndTurnOutcome::CardMoved {
+                card_id,
+                from: EffectZone::HeroDrawPile,
+                to: EffectZone::HeroHand,
+            });
+            continue;
+        }
+
+        let mut shuffled = world.card_ids_in_zone(actor_position, EffectZone::HeroDiscardPile);
+        if shuffled.is_empty() {
+            break;
+        }
+        for index in (1..shuffled.len()).rev() {
+            let upper_exclusive =
+                u32::try_from(index + 1).map_err(|_| GameIntentError::EffectExecutionFailed)?;
+            let selected = random
+                .sample_below(upper_exclusive)
+                .ok_or(GameIntentError::RandomSourceFailed)?;
+            let selected =
+                usize::try_from(selected).map_err(|_| GameIntentError::RandomSourceFailed)?;
+            if selected > index {
+                return Err(GameIntentError::RandomSourceFailed);
+            }
+            shuffled.swap(index, selected);
+            samples_consumed = samples_consumed
+                .checked_add(1)
+                .ok_or(GameIntentError::VersionOverflow)?;
+        }
+        for card_id in &shuffled {
+            world
+                .move_card(
+                    card_id,
+                    EffectZone::HeroDiscardPile,
+                    EffectZone::HeroDrawPile,
+                )
+                .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+        }
+        world
+            .set_card_order(actor_position, EffectZone::HeroDrawPile, &shuffled)
+            .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+        outcomes.push(EndTurnOutcome::PileShuffled {
+            owner_position: actor_position,
+            zone: EffectZone::HeroDrawPile,
+            bottom_to_top: shuffled,
+        });
+    }
+
+    Ok((outcomes, samples_consumed))
 }
 
 /// Restores a persisted game only when every currently supported invariant is
@@ -618,6 +1342,7 @@ pub fn restore_game_state(
     input: GameStateRestoreInput<'_>,
 ) -> Result<InitialGameState, GameStateRestoreError> {
     let supported_snapshot = input.snapshot_version == SNAPSHOT_VERSION
+        || input.snapshot_version == PARTICIPANT_CHOICE_SNAPSHOT_VERSION
         || (input.snapshot_version == LEGACY_SNAPSHOT_VERSION && input.pending_choice.is_none());
     if !supported_snapshot {
         return Err(GameStateRestoreError::UnsupportedSnapshotVersion);
@@ -674,10 +1399,17 @@ pub fn restore_game_state(
             .as_ref()
             .is_some_and(|choice| !choice.is_valid_for_positions(&participant_positions))
         || (input.pending_choice.is_some()
-            && (input.status != GameStatus::InProgress || input.phase != GamePhase::DarkArts))
+            && (input.status != GameStatus::InProgress
+                || !matches!(input.phase, GamePhase::DarkArts | GamePhase::Villains)))
     {
         return Err(GameStateRestoreError::InvalidPlayers);
     }
+    if !restored_control_is_valid(&input) {
+        return Err(GameStateRestoreError::InvalidControlState);
+    }
+
+    let mut players = input.players;
+    players.sort_by_key(InitialPlayer::position);
 
     Ok(InitialGameState {
         snapshot_version: SNAPSHOT_VERSION,
@@ -696,11 +1428,95 @@ pub fn restore_game_state(
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: input.prng_counter,
-        players: input.players,
+        players,
         effect_world: input.effect_world,
         last_effects: input.last_effects,
         pending_choice: input.pending_choice,
+        queued_phases: input.queued_phases,
+        queued_effects: input.queued_effects,
+        decision_point: input.decision_point,
+        last_turn_steps: input.last_turn_steps,
     })
+}
+
+fn restored_control_is_valid(input: &GameStateRestoreInput<'_>) -> bool {
+    if input.queued_phases.len() > 3
+        || input.queued_effects.len() > 4_096
+        || input.last_effects.len() > 4_096
+        || input.last_turn_steps.len() > MAX_TURN_STEPS
+        || input
+            .last_turn_steps
+            .iter()
+            .any(|step| step.effects.len() > 4_096)
+        || (!input.last_turn_steps.is_empty()
+            && input.last_effects
+                != input
+                    .last_turn_steps
+                    .iter()
+                    .flat_map(|step| step.effects.iter().cloned())
+                    .collect::<Vec<_>>())
+        || input
+            .queued_effects
+            .iter()
+            .any(|queued| !queued.is_valid_for_positions(&participant_positions(input)))
+        || input
+            .pending_choice
+            .as_ref()
+            .is_some_and(|choice| !choice.is_valid_for_positions(&participant_positions(input)))
+    {
+        return false;
+    }
+    if input.status != GameStatus::InProgress {
+        return input.pending_choice.is_none()
+            && input.queued_phases.is_empty()
+            && input.queued_effects.is_empty()
+            && input.decision_point.is_none();
+    }
+    match input.phase {
+        GamePhase::DarkArts => {
+            input.queued_phases
+                == [
+                    GamePhase::Villains,
+                    GamePhase::HeroActions,
+                    GamePhase::EndTurn,
+                ]
+                && automatic_decision_is_valid(input)
+        }
+        GamePhase::Villains => {
+            input.queued_phases == [GamePhase::HeroActions, GamePhase::EndTurn]
+                && automatic_decision_is_valid(input)
+        }
+        GamePhase::HeroActions => {
+            input.queued_phases == [GamePhase::EndTurn]
+                && input.queued_effects.is_empty()
+                && input.pending_choice.is_none()
+                && input.decision_point
+                    == Some(DecisionPoint::PlayerIntent {
+                        responsible_position: input.active_position,
+                    })
+        }
+        GamePhase::EndTurn => {
+            input.queued_phases.is_empty()
+                && input.queued_effects.is_empty()
+                && input.pending_choice.is_none()
+                && input.decision_point == Some(DecisionPoint::Automatic)
+        }
+    }
+}
+
+fn participant_positions(input: &GameStateRestoreInput<'_>) -> Vec<u8> {
+    input.players.iter().map(InitialPlayer::position).collect()
+}
+
+fn automatic_decision_is_valid(input: &GameStateRestoreInput<'_>) -> bool {
+    match (&input.pending_choice, &input.decision_point) {
+        (None, Some(DecisionPoint::Automatic)) => input.queued_effects.is_empty(),
+        (Some(choice), Some(DecisionPoint::EffectChoice(decision))) => {
+            choice == decision
+                && input.queued_effects.as_slice() == choice.continuation.queue.as_slice()
+        }
+        _ => false,
+    }
 }
 
 fn valid_blake3_digest(value: &str) -> bool {
@@ -847,6 +1663,36 @@ fn decide_choice_response(
     )
     .map_err(game_command_effect_error)?;
     let prng_counter = next_prng_counter(state, resolution.rolls_consumed)?;
+    let mut control = EngineControl::from_state(state);
+    let mut steps = vec![TurnStep::new(state.phase, resolution.outcomes)];
+    match &resolution.stop {
+        EffectStop::Choice(choice) => {
+            control
+                .queued_effects
+                .clone_from(&choice.continuation.queue);
+            control.decision_point = Some(DecisionPoint::EffectChoice(choice.clone()));
+        }
+        EffectStop::Stable => {
+            if state.phase == GamePhase::DarkArts {
+                steps.push(TurnStep::new(GamePhase::Villains, Vec::new()));
+            }
+            control.phase = GamePhase::HeroActions;
+            control.queued_phases = vec![GamePhase::EndTurn];
+            control.queued_effects.clear();
+            control.decision_point = Some(DecisionPoint::PlayerIntent {
+                responsible_position: state.active_position,
+            });
+        }
+        EffectStop::Terminal(outcome) => {
+            control.status = match outcome {
+                EffectGameOutcome::Lost => GameStatus::Lost,
+                EffectGameOutcome::Won => GameStatus::Won,
+            };
+            control.queued_phases.clear();
+            control.queued_effects.clear();
+            control.decision_point = None;
+        }
+    }
     finish_game_command(
         state,
         GameEvent::ChoiceResolved {
@@ -857,8 +1703,8 @@ fn decide_choice_response(
             choice_id,
             choice_cause: pending.cause.clone(),
             selected_options,
-            effects: resolution.outcomes,
-            stop: resolution.stop,
+            steps,
+            control,
             prng_counter,
         },
     )
@@ -1297,6 +2143,15 @@ pub fn legal_game_intentions(
         };
     }
 
+    if state.phase != GamePhase::HeroActions
+        || state.decision_point
+            != Some(DecisionPoint::PlayerIntent {
+                responsible_position: actor_position,
+            })
+    {
+        return LegalGameIntentions::default();
+    }
+
     legal_hero_action_intentions(state, actor_position, effect_rules)
 }
 
@@ -1425,6 +2280,7 @@ fn legal_acquisitions(state: &InitialGameState, actor_position: u8) -> Vec<Legal
 /// require a connected participant. Availability remains an application-layer
 /// concern and must never change the rule decision itself.
 #[must_use]
+#[cfg(test)]
 pub fn required_participant_for_decision(
     state: &InitialGameState,
     effect_rules: &[EffectRule],
@@ -1445,6 +2301,68 @@ pub fn required_participant_for_decision(
         })
 }
 
+#[derive(Clone, Copy)]
+struct GameEventMetadata {
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+}
+
+impl GameEvent {
+    const fn metadata(&self) -> GameEventMetadata {
+        match self {
+            Self::DarkArtsCompleted {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::ChoiceResolved {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::TurnCompleted {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::CardPlayed {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::AttackAssigned {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            }
+            | Self::CardAcquired {
+                sequence,
+                state_version,
+                turn,
+                actor_position,
+                ..
+            } => GameEventMetadata {
+                sequence: *sequence,
+                state_version: *state_version,
+                turn: *turn,
+                actor_position: *actor_position,
+            },
+        }
+    }
+}
+
 /// Applies one official event to a game state using the same transition as a
 /// live command decision.
 ///
@@ -1458,27 +2376,9 @@ pub fn apply_game_event(
 ) -> Result<InitialGameState, GameEventError> {
     let metadata = event.metadata();
     match event {
-        GameEvent::DarkArtsCompleted {
-            effects,
-            stop,
-            prng_counter,
-            ..
-        } => apply_dark_arts_completed(state, metadata.with_effects(effects, stop, *prng_counter)),
-        GameEvent::ChoiceResolved {
-            choice_id,
-            choice_cause,
-            selected_options,
-            effects,
-            stop,
-            prng_counter,
-            ..
-        } => apply_choice_resolved(
-            state,
-            choice_id,
-            choice_cause,
-            selected_options,
-            metadata.with_effects(effects, stop, *prng_counter),
-        ),
+        GameEvent::DarkArtsCompleted { .. } => apply_dark_arts_completed_event(state, event),
+        GameEvent::ChoiceResolved { .. } => apply_choice_resolved_event(state, event),
+        GameEvent::TurnCompleted { .. } => apply_turn_completed_event(state, event),
         GameEvent::CardPlayed {
             card_id,
             targets,
@@ -1518,206 +2418,646 @@ pub fn apply_game_event(
     }
 }
 
-#[derive(Clone, Copy)]
-struct EffectEventTransition<'a> {
-    sequence: u64,
-    state_version: u64,
-    turn: u32,
-    actor_position: u8,
-    effects: &'a [EffectOutcome],
-    stop: &'a EffectStop,
-    prng_counter: u64,
-}
-
-#[derive(Clone, Copy)]
-struct GameEventMetadata {
-    sequence: u64,
-    state_version: u64,
-    turn: u32,
-    actor_position: u8,
-}
-
-impl GameEvent {
-    const fn metadata(&self) -> GameEventMetadata {
-        match self {
-            Self::DarkArtsCompleted {
-                sequence,
-                state_version,
-                turn,
-                actor_position,
-                ..
-            }
-            | Self::ChoiceResolved {
-                sequence,
-                state_version,
-                turn,
-                actor_position,
-                ..
-            }
-            | Self::CardPlayed {
-                sequence,
-                state_version,
-                turn,
-                actor_position,
-                ..
-            }
-            | Self::AttackAssigned {
-                sequence,
-                state_version,
-                turn,
-                actor_position,
-                ..
-            }
-            | Self::CardAcquired {
-                sequence,
-                state_version,
-                turn,
-                actor_position,
-                ..
-            } => GameEventMetadata {
-                sequence: *sequence,
-                state_version: *state_version,
-                turn: *turn,
-                actor_position: *actor_position,
-            },
-        }
-    }
-}
-
-impl GameEventMetadata {
-    const fn with_effects<'a>(
-        self,
-        effects: &'a [EffectOutcome],
-        stop: &'a EffectStop,
-        prng_counter: u64,
-    ) -> EffectEventTransition<'a> {
-        EffectEventTransition {
-            sequence: self.sequence,
-            state_version: self.state_version,
-            turn: self.turn,
-            actor_position: self.actor_position,
-            effects,
-            stop,
-            prng_counter,
-        }
-    }
-}
-
-fn apply_dark_arts_completed(
+fn apply_dark_arts_completed_event(
     state: &InitialGameState,
-    transition: EffectEventTransition<'_>,
+    event: &GameEvent,
 ) -> Result<InitialGameState, GameEventError> {
+    let GameEvent::DarkArtsCompleted {
+        sequence,
+        state_version,
+        turn,
+        actor_position,
+        effects,
+        stop,
+        prng_counter,
+    } = event
+    else {
+        return Err(GameEventError::EventNotApplicable);
+    };
+    validate_legacy_effect_event_metadata(
+        state,
+        *sequence,
+        *state_version,
+        *turn,
+        *actor_position,
+    )?;
+    let positions = state
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    if !effects::effect_transition_is_valid(effects, stop, &positions) {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    validate_effect_prng_counter(state.prng_counter, effects, *prng_counter)?;
+
+    let mut next = state.clone();
+    effects::apply_effect_outcomes(&mut next.effect_world, effects)
+        .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    next.sequence = *sequence;
+    next.state_version = *state_version;
+    next.prng_counter = *prng_counter;
+    next.last_effects.clone_from(effects);
+    next.last_turn_steps = vec![TurnStep::new(GamePhase::DarkArts, effects.clone())];
+    apply_legacy_effect_stop(&mut next, stop);
+    Ok(next)
+}
+
+fn validate_legacy_effect_event_metadata(
+    state: &InitialGameState,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+) -> Result<(), GameEventError> {
     if state.status != GameStatus::InProgress
         || state.phase != GamePhase::DarkArts
         || state.pending_choice.is_some()
     {
         return Err(GameEventError::EventNotApplicable);
     }
-    if transition.actor_position != state.active_position {
+    if actor_position != state.active_position {
         return Err(GameEventError::ActorNotActive);
     }
-    apply_effect_event_transition(state, transition)
+    validate_next_event_metadata(state, sequence, state_version, turn)
 }
 
-fn apply_choice_resolved(
+fn apply_legacy_effect_stop(state: &mut InitialGameState, stop: &EffectStop) {
+    match stop {
+        EffectStop::Choice(choice) => {
+            state.queued_phases = vec![
+                GamePhase::Villains,
+                GamePhase::HeroActions,
+                GamePhase::EndTurn,
+            ];
+            state.queued_effects.clone_from(&choice.continuation.queue);
+            state.pending_choice = Some(choice.clone());
+            state.decision_point = Some(DecisionPoint::EffectChoice(choice.clone()));
+        }
+        EffectStop::Stable => {
+            state.phase = GamePhase::HeroActions;
+            state.queued_phases = vec![GamePhase::EndTurn];
+            state.queued_effects.clear();
+            state.pending_choice = None;
+            state.decision_point = Some(DecisionPoint::PlayerIntent {
+                responsible_position: state.active_position,
+            });
+        }
+        EffectStop::Terminal(outcome) => finish_terminal_state(state, *outcome),
+    }
+}
+
+fn apply_choice_resolved_event(
     state: &InitialGameState,
-    choice_id: &str,
-    choice_cause: &str,
-    selected_options: &[String],
-    transition: EffectEventTransition<'_>,
+    event: &GameEvent,
 ) -> Result<InitialGameState, GameEventError> {
+    let GameEvent::ChoiceResolved {
+        sequence,
+        state_version,
+        turn,
+        actor_position,
+        choice_id,
+        choice_cause,
+        selected_options,
+        steps,
+        control,
+        prng_counter,
+    } = event
+    else {
+        return Err(GameEventError::EventNotApplicable);
+    };
     if state.status != GameStatus::InProgress {
         return Err(GameEventError::EventNotApplicable);
     }
     let pending = state
         .pending_choice
         .as_ref()
+        .filter(|pending| {
+            matches!(
+                state.decision_point.as_ref(),
+                Some(DecisionPoint::EffectChoice(decision)) if decision == *pending
+            ) && state.queued_effects.as_slice() == pending.continuation.queue.as_slice()
+        })
         .ok_or(GameEventError::EventNotApplicable)?;
-    if transition.actor_position != pending.responsible_position {
+    if *actor_position != pending.responsible_position {
         return Err(GameEventError::ActorNotChoiceResponsible);
     }
     let normalized = effects::normalize_effect_choice_selection(pending, selected_options)
         .ok_or(GameEventError::EffectTransitionInvalid)?;
-    if choice_id != pending.id || choice_cause != pending.cause || normalized != selected_options {
+    if choice_id != &pending.id
+        || choice_cause != &pending.cause
+        || normalized.as_slice() != selected_options
+    {
         return Err(GameEventError::EffectTransitionInvalid);
     }
-    apply_effect_event_transition(state, transition)
+    validate_next_event_metadata(state, *sequence, *state_version, *turn)?;
+    validate_choice_steps(state, steps, control)?;
+    let incremental_effects = steps
+        .iter()
+        .flat_map(|step| step.effects.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    validate_effect_prng_counter(state.prng_counter, &incremental_effects, *prng_counter)?;
+
+    let mut next = state.clone();
+    for step in steps {
+        effects::apply_effect_outcomes(&mut next.effect_world, &step.effects)
+            .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+        append_phase_effects(&mut next.last_turn_steps, step.phase, &step.effects);
+        next.last_effects.extend(step.effects.iter().cloned());
+    }
+    if next.last_effects.len() > 4_096 {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    next.sequence = *sequence;
+    next.state_version = *state_version;
+    next.prng_counter = *prng_counter;
+    apply_engine_control(&mut next, control);
+    Ok(next)
 }
 
-fn apply_effect_event_transition(
+fn validate_choice_steps(
     state: &InitialGameState,
-    transition: EffectEventTransition<'_>,
-) -> Result<InitialGameState, GameEventError> {
-    if transition.turn != state.turn {
+    steps: &[TurnStep],
+    control: &EngineControl,
+) -> Result<(), GameEventError> {
+    let phases = steps.iter().map(TurnStep::phase).collect::<Vec<_>>();
+    let valid_phases = match state.phase {
+        GamePhase::DarkArts => matches!(
+            phases.as_slice(),
+            [GamePhase::DarkArts] | [GamePhase::DarkArts, GamePhase::Villains]
+        ),
+        GamePhase::Villains => phases.as_slice() == [GamePhase::Villains],
+        GamePhase::HeroActions => phases.as_slice() == [GamePhase::HeroActions],
+        GamePhase::EndTurn => false,
+    };
+    if !valid_phases
+        || control.turn != state.turn
+        || control.active_position != state.active_position
+    {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+
+    let positions = state
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    for (index, step) in steps.iter().enumerate() {
+        let is_last = index + 1 == steps.len();
+        let stop = if is_last {
+            effect_stop_from_control(control)
+        } else {
+            EffectStop::Stable
+        };
+        if !effects::effect_transition_is_valid(&step.effects, &stop, &positions) {
+            return Err(GameEventError::EffectTransitionInvalid);
+        }
+    }
+    if !choice_control_matches_steps(control, &phases, &positions) {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    Ok(())
+}
+
+fn effect_stop_from_control(control: &EngineControl) -> EffectStop {
+    match (&control.decision_point, control.status) {
+        (Some(DecisionPoint::EffectChoice(choice)), GameStatus::InProgress) => {
+            EffectStop::Choice(choice.clone())
+        }
+        (_, GameStatus::Lost) => EffectStop::Terminal(EffectGameOutcome::Lost),
+        (_, GameStatus::Won) => EffectStop::Terminal(EffectGameOutcome::Won),
+        _ => EffectStop::Stable,
+    }
+}
+
+fn choice_control_matches_steps(
+    control: &EngineControl,
+    phases: &[GamePhase],
+    participant_positions: &[u8],
+) -> bool {
+    let last_phase = phases.last().copied();
+    match (control.status, &control.decision_point) {
+        (
+            GameStatus::InProgress,
+            Some(DecisionPoint::PlayerIntent {
+                responsible_position,
+            }),
+        ) => {
+            control.phase == GamePhase::HeroActions
+                && control.queued_phases == [GamePhase::EndTurn]
+                && control.queued_effects.is_empty()
+                && *responsible_position == control.active_position
+                && (phases == [GamePhase::HeroActions]
+                    || phases == [GamePhase::Villains]
+                    || phases == [GamePhase::DarkArts, GamePhase::Villains])
+        }
+        (GameStatus::InProgress, Some(DecisionPoint::EffectChoice(choice))) => {
+            last_phase == Some(control.phase)
+                && matches!(
+                    control.phase,
+                    GamePhase::DarkArts | GamePhase::Villains | GamePhase::HeroActions
+                )
+                && queued_phases_match_phase(control.phase, &control.queued_phases)
+                && choice.is_valid_for_positions(participant_positions)
+                && control.queued_effects.as_slice() == choice.continuation.queue.as_slice()
+        }
+        (GameStatus::Lost | GameStatus::Won, None) => {
+            last_phase == Some(control.phase)
+                && matches!(
+                    control.phase,
+                    GamePhase::DarkArts | GamePhase::Villains | GamePhase::HeroActions
+                )
+                && control.queued_phases.is_empty()
+                && control.queued_effects.is_empty()
+        }
+        _ => false,
+    }
+}
+
+fn queued_phases_match_phase(phase: GamePhase, queued_phases: &[GamePhase]) -> bool {
+    match phase {
+        GamePhase::DarkArts => {
+            queued_phases
+                == [
+                    GamePhase::Villains,
+                    GamePhase::HeroActions,
+                    GamePhase::EndTurn,
+                ]
+        }
+        GamePhase::Villains => queued_phases == [GamePhase::HeroActions, GamePhase::EndTurn],
+        GamePhase::HeroActions => queued_phases == [GamePhase::EndTurn],
+        GamePhase::EndTurn => queued_phases.is_empty(),
+    }
+}
+
+fn validate_next_event_metadata(
+    state: &InitialGameState,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+) -> Result<(), GameEventError> {
+    if turn != state.turn {
         return Err(GameEventError::TurnMismatch);
     }
-    let expected_sequence = state
-        .sequence
-        .checked_add(1)
-        .ok_or(GameEventError::VersionOverflow)?;
-    if transition.sequence != expected_sequence {
+    if state.sequence.checked_add(1) != Some(sequence) {
         return Err(GameEventError::SequenceMismatch);
     }
-    let expected_state_version = state
-        .state_version
-        .checked_add(1)
-        .ok_or(GameEventError::VersionOverflow)?;
-    if transition.state_version != expected_state_version {
+    if state.state_version.checked_add(1) != Some(state_version) {
         return Err(GameEventError::StateVersionMismatch);
     }
+    Ok(())
+}
+
+fn validate_effect_prng_counter(
+    previous_counter: u64,
+    effects: &[EffectOutcome],
+    next_counter: u64,
+) -> Result<(), GameEventError> {
+    let rolls = effects
+        .iter()
+        .filter(|outcome| matches!(outcome, EffectOutcome::DieRolled { .. }))
+        .count();
+    let consumed = u64::try_from(rolls).map_err(|_| GameEventError::VersionOverflow)?;
+    if previous_counter.checked_add(consumed) != Some(next_counter) {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    Ok(())
+}
+
+fn apply_turn_completed_event(
+    state: &InitialGameState,
+    event: &GameEvent,
+) -> Result<InitialGameState, GameEventError> {
+    let GameEvent::TurnCompleted {
+        sequence,
+        state_version,
+        turn,
+        actor_position,
+        end_turn,
+        steps,
+        control,
+        prng_counter,
+    } = event
+    else {
+        return Err(GameEventError::EventNotApplicable);
+    };
+    validate_turn_event_metadata(
+        state,
+        *sequence,
+        *state_version,
+        *turn,
+        *actor_position,
+        control,
+    )?;
     let participant_positions = state
         .players
         .iter()
         .map(InitialPlayer::position)
         .collect::<Vec<_>>();
-    if !effects::effect_transition_is_valid(
-        transition.effects,
-        transition.stop,
-        &participant_positions,
-    ) {
-        return Err(GameEventError::EffectTransitionInvalid);
+    validate_turn_steps(steps, control, &participant_positions)?;
+
+    let mut next = state.clone();
+    apply_end_turn_outcomes(&mut next.effect_world, *actor_position, end_turn)?;
+    for step in steps.iter().skip(1) {
+        effects::apply_effect_outcomes(&mut next.effect_world, &step.effects)
+            .map_err(|_| GameEventError::EffectTransitionInvalid)?;
     }
-    let rolled = transition
-        .effects
-        .iter()
-        .filter(|outcome| matches!(outcome, EffectOutcome::DieRolled { .. }))
-        .count();
-    let expected_prng_counter = state
-        .prng_counter
-        .checked_add(u64::try_from(rolled).map_err(|_| GameEventError::VersionOverflow)?)
-        .ok_or(GameEventError::VersionOverflow)?;
-    if transition.prng_counter != expected_prng_counter {
+    let consumed = random_samples_consumed(end_turn, steps)?;
+    if state.prng_counter.checked_add(consumed) != Some(*prng_counter) {
         return Err(GameEventError::EffectTransitionInvalid);
     }
 
-    let mut next = state.clone();
-    effects::apply_effect_outcomes(&mut next.effect_world, transition.effects)
-        .map_err(|_| GameEventError::EffectTransitionInvalid)?;
     validate_effect_world(&next)?;
-    next.sequence = transition.sequence;
-    next.state_version = transition.state_version;
-    next.prng_counter = transition.prng_counter;
-    next.last_effects = transition.effects.to_vec();
-    apply_effect_stop(&mut next, transition.stop);
+    next.sequence = *sequence;
+    next.state_version = *state_version;
+    next.prng_counter = *prng_counter;
+    apply_engine_control(&mut next, control);
+    next.last_effects = steps
+        .iter()
+        .skip(1)
+        .flat_map(|step| step.effects.iter().cloned())
+        .collect();
+    next.last_turn_steps.clone_from(steps);
     Ok(next)
+}
+
+fn validate_turn_event_metadata(
+    state: &InitialGameState,
+    sequence: u64,
+    state_version: u64,
+    turn: u32,
+    actor_position: u8,
+    control: &EngineControl,
+) -> Result<(), GameEventError> {
+    if state.status != GameStatus::InProgress
+        || state.phase != GamePhase::HeroActions
+        || state.pending_choice.is_some()
+        || state.decision_point
+            != Some(DecisionPoint::PlayerIntent {
+                responsible_position: actor_position,
+            })
+    {
+        return Err(GameEventError::EventNotApplicable);
+    }
+    if actor_position != state.active_position {
+        return Err(GameEventError::ActorNotActive);
+    }
+    if turn != state.turn {
+        return Err(GameEventError::TurnMismatch);
+    }
+    if state.sequence.checked_add(1) != Some(sequence) {
+        return Err(GameEventError::SequenceMismatch);
+    }
+    if state.state_version.checked_add(1) != Some(state_version) {
+        return Err(GameEventError::StateVersionMismatch);
+    }
+    let expected_turn = state
+        .turn
+        .checked_add(1)
+        .ok_or(GameEventError::VersionOverflow)?;
+    let player_index = state
+        .players
+        .iter()
+        .position(|player| player.position == actor_position)
+        .ok_or(GameEventError::ActorNotActive)?;
+    let expected_active = state.players[(player_index + 1) % state.players.len()].position;
+    if control.turn != expected_turn || control.active_position != expected_active {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    Ok(())
+}
+
+fn random_samples_consumed(
+    end_turn: &[EndTurnOutcome],
+    steps: &[TurnStep],
+) -> Result<u64, GameEventError> {
+    end_turn
+        .iter()
+        .map(|outcome| match outcome {
+            EndTurnOutcome::PileShuffled { bottom_to_top, .. } => {
+                bottom_to_top.len().saturating_sub(1)
+            }
+            EndTurnOutcome::CardMoved { .. } | EndTurnOutcome::ResourceReset { .. } => 0,
+        })
+        .chain(
+            steps
+                .iter()
+                .flat_map(|step| &step.effects)
+                .map(|outcome| usize::from(matches!(outcome, EffectOutcome::DieRolled { .. }))),
+        )
+        .try_fold(0_u64, |total, consumed| {
+            total
+                .checked_add(u64::try_from(consumed).map_err(|_| GameEventError::VersionOverflow)?)
+                .ok_or(GameEventError::VersionOverflow)
+        })
+}
+
+fn apply_engine_control(state: &mut InitialGameState, control: &EngineControl) {
+    state.status = control.status;
+    state.turn = control.turn;
+    state.phase = control.phase;
+    state.active_position = control.active_position;
+    state.queued_phases.clone_from(&control.queued_phases);
+    state.queued_effects.clone_from(&control.queued_effects);
+    state.decision_point.clone_from(&control.decision_point);
+    state.pending_choice = match &control.decision_point {
+        Some(DecisionPoint::EffectChoice(choice)) => Some(choice.clone()),
+        Some(DecisionPoint::Automatic | DecisionPoint::PlayerIntent { .. }) | None => None,
+    };
+}
+
+fn validate_turn_steps(
+    steps: &[TurnStep],
+    control: &EngineControl,
+    participant_positions: &[u8],
+) -> Result<(), GameEventError> {
+    let phases = steps.iter().map(TurnStep::phase).collect::<Vec<_>>();
+    if !matches!(
+        phases.as_slice(),
+        [GamePhase::EndTurn, GamePhase::DarkArts]
+            | [GamePhase::EndTurn, GamePhase::DarkArts, GamePhase::Villains]
+    ) || !steps.first().is_some_and(|step| step.effects.is_empty())
+    {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    for (index, step) in steps.iter().enumerate().skip(1) {
+        let is_last = index + 1 == steps.len();
+        let stop = if is_last {
+            effect_stop_from_control(control)
+        } else {
+            EffectStop::Stable
+        };
+        if !effects::effect_transition_is_valid(&step.effects, &stop, participant_positions) {
+            return Err(GameEventError::EffectTransitionInvalid);
+        }
+    }
+    if !event_control_matches_steps(control, &phases, participant_positions) {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    Ok(())
+}
+
+fn event_control_matches_steps(
+    control: &EngineControl,
+    phases: &[GamePhase],
+    participant_positions: &[u8],
+) -> bool {
+    let last_phase = phases.last().copied();
+    match (control.status, &control.decision_point) {
+        (
+            GameStatus::InProgress,
+            Some(DecisionPoint::PlayerIntent {
+                responsible_position,
+            }),
+        ) => {
+            phases.len() == 3
+                && control.phase == GamePhase::HeroActions
+                && control.queued_phases == [GamePhase::EndTurn]
+                && control.queued_effects.is_empty()
+                && *responsible_position == control.active_position
+        }
+        (GameStatus::InProgress, Some(DecisionPoint::EffectChoice(choice))) => {
+            last_phase == Some(control.phase)
+                && queued_phases_match_phase(control.phase, &control.queued_phases)
+                && choice.is_valid_for_positions(participant_positions)
+                && control.queued_effects.as_slice() == choice.continuation.queue.as_slice()
+        }
+        (GameStatus::Lost | GameStatus::Won, None) => {
+            last_phase == Some(control.phase)
+                && matches!(control.phase, GamePhase::DarkArts | GamePhase::Villains)
+                && control.queued_phases.is_empty()
+                && control.queued_effects.is_empty()
+        }
+        _ => false,
+    }
+}
+
+fn apply_end_turn_outcomes(
+    world: &mut EffectWorld,
+    actor_position: u8,
+    outcomes: &[EndTurnOutcome],
+) -> Result<(), GameEventError> {
+    let mut supplied = outcomes.iter();
+    for from in [EffectZone::HeroPlayArea, EffectZone::HeroHand] {
+        for card_id in world.card_ids_in_zone(actor_position, from) {
+            expect_end_turn_outcome(
+                &mut supplied,
+                &EndTurnOutcome::CardMoved {
+                    card_id: card_id.clone(),
+                    from,
+                    to: EffectZone::HeroDiscardPile,
+                },
+            )?;
+            world
+                .move_card(&card_id, from, EffectZone::HeroDiscardPile)
+                .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+        }
+    }
+
+    for resource in [EffectResource::Attack, EffectResource::Influence] {
+        let before = world
+            .hero_resource(actor_position, resource)
+            .ok_or(GameEventError::EffectTransitionInvalid)?;
+        expect_end_turn_outcome(
+            &mut supplied,
+            &EndTurnOutcome::ResourceReset { resource, before },
+        )?;
+        world
+            .reset_hero_resource(actor_position, resource, before)
+            .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    }
+
+    while world
+        .card_ids_in_zone(actor_position, EffectZone::HeroHand)
+        .len()
+        < 5
+    {
+        if let Some(card_id) = world.top_card_id(actor_position, EffectZone::HeroDrawPile) {
+            expect_end_turn_outcome(
+                &mut supplied,
+                &EndTurnOutcome::CardMoved {
+                    card_id: card_id.clone(),
+                    from: EffectZone::HeroDrawPile,
+                    to: EffectZone::HeroHand,
+                },
+            )?;
+            world
+                .move_card(&card_id, EffectZone::HeroDrawPile, EffectZone::HeroHand)
+                .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+            continue;
+        }
+
+        let mut current = world.card_ids_in_zone(actor_position, EffectZone::HeroDiscardPile);
+        if current.is_empty() {
+            break;
+        }
+        let Some(EndTurnOutcome::PileShuffled {
+            owner_position,
+            zone,
+            bottom_to_top,
+        }) = supplied.next()
+        else {
+            return Err(GameEventError::EffectTransitionInvalid);
+        };
+        if *owner_position != actor_position || *zone != EffectZone::HeroDrawPile {
+            return Err(GameEventError::EffectTransitionInvalid);
+        }
+        let mut ordered = bottom_to_top.clone();
+        current.sort();
+        ordered.sort();
+        if current != ordered || bottom_to_top.is_empty() {
+            return Err(GameEventError::EffectTransitionInvalid);
+        }
+        for card_id in bottom_to_top {
+            world
+                .move_card(
+                    card_id,
+                    EffectZone::HeroDiscardPile,
+                    EffectZone::HeroDrawPile,
+                )
+                .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+        }
+        world
+            .set_card_order(actor_position, EffectZone::HeroDrawPile, bottom_to_top)
+            .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    }
+
+    if supplied.next().is_some() {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    Ok(())
+}
+
+fn expect_end_turn_outcome(
+    supplied: &mut std::slice::Iter<'_, EndTurnOutcome>,
+    expected: &EndTurnOutcome,
+) -> Result<(), GameEventError> {
+    if supplied.next() == Some(expected) {
+        Ok(())
+    } else {
+        Err(GameEventError::EffectTransitionInvalid)
+    }
 }
 
 fn apply_effect_stop(state: &mut InitialGameState, stop: &EffectStop) {
     match stop {
         EffectStop::Choice(choice) => {
+            state.queued_phases = vec![GamePhase::EndTurn];
+            state.queued_effects.clone_from(&choice.continuation.queue);
             state.pending_choice = Some(choice.clone());
+            state.decision_point = Some(DecisionPoint::EffectChoice(choice.clone()));
         }
         EffectStop::Stable => {
-            state.phase = GamePhase::HeroAction;
+            state.phase = GamePhase::HeroActions;
+            state.queued_phases = vec![GamePhase::EndTurn];
+            state.queued_effects.clear();
             state.pending_choice = None;
+            state.decision_point = Some(DecisionPoint::PlayerIntent {
+                responsible_position: state.active_position,
+            });
         }
-        EffectStop::Terminal(outcome) => {
-            state.status = match outcome {
-                EffectGameOutcome::Lost => GameStatus::Lost,
-                EffectGameOutcome::Won => GameStatus::Won,
-            };
-            state.pending_choice = None;
-        }
+        EffectStop::Terminal(outcome) => finish_terminal_state(state, *outcome),
     }
 }
 
@@ -1731,7 +3071,7 @@ fn apply_card_played_event(
     prng_counter: u64,
 ) -> Result<InitialGameState, GameEventError> {
     if state.status != GameStatus::InProgress
-        || state.phase != GamePhase::HeroAction
+        || state.phase != GamePhase::HeroActions
         || state.pending_choice.is_some()
     {
         return Err(GameEventError::EventNotApplicable);
@@ -1799,7 +3139,15 @@ fn apply_card_played_event(
     next.sequence = metadata.sequence;
     next.state_version = metadata.state_version;
     next.prng_counter = prng_counter;
-    next.last_effects = event_effects.to_vec();
+    next.last_effects.extend_from_slice(event_effects);
+    if next.last_effects.len() > 4_096 {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    append_phase_effects(
+        &mut next.last_turn_steps,
+        GamePhase::HeroActions,
+        event_effects,
+    );
     apply_effect_stop(&mut next, stop);
     Ok(next)
 }
@@ -1812,7 +3160,7 @@ fn apply_attack_assigned_event(
     event_effects: &[EffectOutcome],
 ) -> Result<InitialGameState, GameEventError> {
     if state.status != GameStatus::InProgress
-        || state.phase != GamePhase::HeroAction
+        || state.phase != GamePhase::HeroActions
         || state.pending_choice.is_some()
         || amount == 0
     {
@@ -1854,7 +3202,15 @@ fn apply_attack_assigned_event(
     validate_effect_world(&next)?;
     next.sequence = metadata.sequence;
     next.state_version = metadata.state_version;
-    next.last_effects = event_effects.to_vec();
+    next.last_effects.extend_from_slice(event_effects);
+    if next.last_effects.len() > 4_096 {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    append_phase_effects(
+        &mut next.last_turn_steps,
+        GamePhase::HeroActions,
+        event_effects,
+    );
     Ok(next)
 }
 
@@ -1867,7 +3223,7 @@ fn apply_card_acquired_event(
     event_effects: &[EffectOutcome],
 ) -> Result<InitialGameState, GameEventError> {
     if state.status != GameStatus::InProgress
-        || state.phase != GamePhase::HeroAction
+        || state.phase != GamePhase::HeroActions
         || state.pending_choice.is_some()
     {
         return Err(GameEventError::EventNotApplicable);
@@ -1922,7 +3278,15 @@ fn apply_card_acquired_event(
     validate_effect_world(&next)?;
     next.sequence = metadata.sequence;
     next.state_version = metadata.state_version;
-    next.last_effects = event_effects.to_vec();
+    next.last_effects.extend_from_slice(event_effects);
+    if next.last_effects.len() > 4_096 {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+    append_phase_effects(
+        &mut next.last_turn_steps,
+        GamePhase::HeroActions,
+        event_effects,
+    );
     Ok(next)
 }
 
@@ -2015,12 +3379,21 @@ mod tests {
 
     struct ScriptedRoller {
         rolls: VecDeque<u8>,
+        samples: VecDeque<u32>,
     }
 
     impl ScriptedRoller {
         fn new(rolls: &[u8]) -> Self {
             Self {
                 rolls: rolls.iter().copied().collect(),
+                samples: VecDeque::new(),
+            }
+        }
+
+        fn with_samples(samples: &[u32]) -> Self {
+            Self {
+                rolls: VecDeque::new(),
+                samples: samples.iter().copied().collect(),
             }
         }
     }
@@ -2028,6 +3401,12 @@ mod tests {
     impl EffectRoller for ScriptedRoller {
         fn roll(&mut self, _die: EffectDie) -> Option<u8> {
             self.rolls.pop_front()
+        }
+
+        fn sample_below(&mut self, upper_exclusive: u32) -> Option<u32> {
+            self.samples
+                .pop_front()
+                .filter(|sample| *sample < upper_exclusive)
         }
     }
 
@@ -2097,7 +3476,278 @@ mod tests {
             effect_world: state.effect_world().clone(),
             last_effects: state.last_effects().to_vec(),
             pending_choice: state.pending_choice().cloned(),
+            queued_phases: state.queued_phases().to_vec(),
+            queued_effects: state.queued_effects().to_vec(),
+            decision_point: state.decision_point().cloned(),
+            last_turn_steps: state.last_turn_steps().to_vec(),
         }
+    }
+
+    fn four_participants() -> Vec<LobbyParticipant> {
+        [
+            (ParticipantRole::Host, HeroId::Harry),
+            (ParticipantRole::Guest, HeroId::Hermione),
+            (ParticipantRole::Guest, HeroId::Neville),
+            (ParticipantRole::Guest, HeroId::Ron),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (role, hero))| LobbyParticipant {
+            role,
+            position: u8::try_from(index + 1).expect("four fixture positions fit in u8"),
+            hero: Some(hero),
+            ready: true,
+        })
+        .collect()
+    }
+
+    fn ordered_automatic_rules() -> Vec<EffectRule> {
+        vec![
+            automatic_resource_rule(
+                "rule:dark-arts:second",
+                EffectTrigger::DarkArts,
+                2,
+                EffectResource::Attack,
+                1,
+            ),
+            automatic_resource_rule(
+                "rule:villains:first",
+                EffectTrigger::Villains,
+                1,
+                EffectResource::Influence,
+                1,
+            ),
+            automatic_resource_rule(
+                "rule:dark-arts:first",
+                EffectTrigger::DarkArts,
+                1,
+                EffectResource::Health,
+                -1,
+            ),
+            automatic_resource_rule(
+                "rule:villains:second",
+                EffectTrigger::Villains,
+                2,
+                EffectResource::Health,
+                -1,
+            ),
+        ]
+    }
+
+    fn automatic_resource_rule(
+        id: &str,
+        trigger: EffectTrigger,
+        order: u16,
+        resource: EffectResource,
+        amount: i16,
+    ) -> EffectRule {
+        EffectRule {
+            id: id.to_owned(),
+            trigger,
+            order,
+            cost: Vec::new(),
+            effect: EffectDefinition::Apply {
+                target: actor_selector(EffectZone::Heroes),
+                operation: EffectOperation::ModifyResource { resource, amount },
+            },
+        }
+    }
+
+    fn interrupted_sequence_rules() -> Vec<EffectRule> {
+        vec![
+            EffectRule {
+                id: "rule:dark-arts:choice".to_owned(),
+                trigger: EffectTrigger::DarkArts,
+                order: 1,
+                cost: Vec::new(),
+                effect: EffectDefinition::Sequence {
+                    effects: vec![
+                        EffectDefinition::Apply {
+                            target: actor_selector(EffectZone::Heroes),
+                            operation: EffectOperation::ModifyResource {
+                                resource: EffectResource::Attack,
+                                amount: 1,
+                            },
+                        },
+                        EffectDefinition::Choice {
+                            audience: EffectChoiceAudience::Actor,
+                            options: vec![
+                                EffectDefinition::NoOp,
+                                EffectDefinition::Apply {
+                                    target: actor_selector(EffectZone::Heroes),
+                                    operation: EffectOperation::ModifyResource {
+                                        resource: EffectResource::Health,
+                                        amount: -1,
+                                    },
+                                },
+                            ],
+                        },
+                        EffectDefinition::Apply {
+                            target: actor_selector(EffectZone::Heroes),
+                            operation: EffectOperation::ModifyResource {
+                                resource: EffectResource::Influence,
+                                amount: 1,
+                            },
+                        },
+                    ],
+                },
+            },
+            EffectRule {
+                id: "rule:dark-arts:after-choice".to_owned(),
+                trigger: EffectTrigger::DarkArts,
+                order: 2,
+                cost: Vec::new(),
+                effect: EffectDefinition::NoOp,
+            },
+        ]
+    }
+
+    fn each_hero_automatic_rules() -> ValidatedGameRules {
+        ValidatedGameRules::new(vec![
+            EffectRule {
+                id: "rule:dark-arts:each-hero".to_owned(),
+                trigger: EffectTrigger::DarkArts,
+                order: 1,
+                cost: Vec::new(),
+                effect: EffectDefinition::Choice {
+                    audience: EffectChoiceAudience::EachHero,
+                    options: vec![
+                        EffectDefinition::Apply {
+                            target: actor_selector(EffectZone::Heroes),
+                            operation: EffectOperation::ModifyResource {
+                                resource: EffectResource::Attack,
+                                amount: 1,
+                            },
+                        },
+                        EffectDefinition::NoOp,
+                    ],
+                },
+            },
+            automatic_resource_rule(
+                "rule:villains:after-choices",
+                EffectTrigger::Villains,
+                1,
+                EffectResource::Influence,
+                1,
+            ),
+        ])
+        .expect("the participant-choice rules should be valid")
+    }
+
+    fn resolve_first_pending_option(
+        engine: &GameEngine<'_>,
+        state: &InitialGameState,
+        actor_position: u8,
+    ) -> Result<GameIntentDecision, GameIntentError> {
+        let choice = state
+            .pending_choice()
+            .expect("the fixture should have a pending choice");
+        let mut random = ScriptedRoller::new(&[]);
+        engine.decide(
+            GameIntentInput {
+                state,
+                actor_position,
+                expected_state_version: state.state_version(),
+                intent: PlayerIntent::ResolveChoice {
+                    choice_id: choice.id.clone(),
+                    selected_options: vec![choice.options[0].clone()],
+                },
+            },
+            &mut random,
+        )
+    }
+
+    fn snapshot_restore_input(state: &InitialGameState) -> GameStateRestoreInput<'_> {
+        GameStateRestoreInput {
+            snapshot_version: state.snapshot_version(),
+            state_version: state.state_version(),
+            sequence: state.sequence(),
+            status: state.status(),
+            turn: state.turn(),
+            phase: state.phase(),
+            active_position: state.active_position(),
+            adventure_id: state.adventure_id(),
+            content_version: state.content_version(),
+            ruleset_version: state.ruleset_version(),
+            manifest_digest: state.manifest_digest(),
+            manifest_version: state.manifest_version(),
+            prng_algorithm: state.prng_algorithm(),
+            shuffle_algorithm: state.shuffle_algorithm(),
+            sampling_algorithm: state.sampling_algorithm(),
+            prng_counter: state.prng_counter(),
+            players: state.players().to_vec(),
+            effect_world: state.effect_world().clone(),
+            last_effects: state.last_effects().to_vec(),
+            pending_choice: state.pending_choice().cloned(),
+            queued_phases: state.queued_phases().to_vec(),
+            queued_effects: state.queued_effects().to_vec(),
+            decision_point: state.decision_point().cloned(),
+            last_turn_steps: state.last_turn_steps().to_vec(),
+        }
+    }
+
+    fn restore_snapshot(state: &InitialGameState) -> InitialGameState {
+        restore_game_state(snapshot_restore_input(state))
+            .expect("the valid snapshot should restore")
+    }
+
+    fn hero_actions_card_fixture(started: &InitialGameState) -> InitialGameState {
+        let world = EffectWorld::new(vec![
+            EffectEntityPlacement::new(
+                EffectEntity::hero(1)
+                    .with_resource(EffectResource::Attack, 2)
+                    .with_resource(EffectResource::Influence, 3),
+                EffectZone::Heroes,
+            ),
+            EffectEntityPlacement::new(EffectEntity::hero(2), EffectZone::Heroes),
+            EffectEntityPlacement::new(
+                EffectEntity::new("played", Some(1)),
+                EffectZone::HeroPlayArea,
+            ),
+            EffectEntityPlacement::new(EffectEntity::new("hand-a", Some(1)), EffectZone::HeroHand),
+            EffectEntityPlacement::new(EffectEntity::new("hand-b", Some(1)), EffectZone::HeroHand),
+            EffectEntityPlacement::new(
+                EffectEntity::new("draw-bottom", Some(1)),
+                EffectZone::HeroDrawPile,
+            ),
+            EffectEntityPlacement::new(
+                EffectEntity::new("draw-top", Some(1)),
+                EffectZone::HeroDrawPile,
+            ),
+            EffectEntityPlacement::new(
+                EffectEntity::new("discarded", Some(1)),
+                EffectZone::HeroDiscardPile,
+            ),
+        ]);
+        restore_game_state(GameStateRestoreInput {
+            snapshot_version: started.snapshot_version(),
+            state_version: started.state_version(),
+            sequence: started.sequence(),
+            status: started.status(),
+            turn: started.turn(),
+            phase: started.phase(),
+            active_position: started.active_position(),
+            adventure_id: started.adventure_id(),
+            content_version: started.content_version(),
+            ruleset_version: started.ruleset_version(),
+            manifest_digest: started.manifest_digest(),
+            manifest_version: started.manifest_version(),
+            prng_algorithm: started.prng_algorithm(),
+            shuffle_algorithm: started.shuffle_algorithm(),
+            sampling_algorithm: started.sampling_algorithm(),
+            prng_counter: started.prng_counter(),
+            players: started.players().to_vec(),
+            effect_world: world,
+            last_effects: started.last_effects().to_vec(),
+            pending_choice: None,
+            queued_phases: vec![GamePhase::EndTurn],
+            queued_effects: Vec::new(),
+            decision_point: Some(DecisionPoint::PlayerIntent {
+                responsible_position: 1,
+            }),
+            last_turn_steps: started.last_turn_steps().to_vec(),
+        })
+        .expect("the hero-actions fixture should restore")
     }
 
     #[test]
@@ -2259,7 +3909,7 @@ mod tests {
 
         assert_eq!(initial.phase, GamePhase::DarkArts);
         assert_eq!(initial.state_version, 1);
-        assert_eq!(decision.state.phase, GamePhase::HeroAction);
+        assert_eq!(decision.state.phase, GamePhase::HeroActions);
         assert_eq!(decision.state.state_version, 2);
         assert_eq!(decision.state.sequence, 1);
         assert_eq!(decision.state.prng_counter, 0);
@@ -2285,6 +3935,496 @@ mod tests {
         assert_eq!(
             required_participant_for_decision(&decision.state, &[]),
             None
+        );
+    }
+
+    #[test]
+    fn game_start_resolves_dark_arts_and_villains_in_declared_order_before_player_intent() {
+        let participants = valid_participants();
+        let rules = ValidatedGameRules::new(ordered_automatic_rules())
+            .expect("the fixture rules should have an unambiguous phase order");
+        let engine = GameEngine::new(&rules);
+        let mut random = ScriptedRoller::new(&[]);
+
+        let state = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut random,
+            )
+            .expect("automatic phases should reach the first player intent");
+
+        assert_eq!(state.phase(), GamePhase::HeroActions);
+        assert_eq!(
+            state.decision_point(),
+            Some(&DecisionPoint::PlayerIntent {
+                responsible_position: 1,
+            })
+        );
+        assert_eq!(state.queued_phases(), &[GamePhase::EndTurn]);
+        assert_eq!(
+            state
+                .last_turn_steps()
+                .iter()
+                .map(TurnStep::phase)
+                .collect::<Vec<_>>(),
+            [GamePhase::DarkArts, GamePhase::Villains]
+        );
+        assert_eq!(
+            state
+                .last_turn_steps()
+                .iter()
+                .flat_map(TurnStep::effects)
+                .map(EffectOutcome::rule_id)
+                .collect::<Vec<_>>(),
+            [
+                "rule:dark-arts:first",
+                "rule:dark-arts:second",
+                "rule:villains:first",
+                "rule:villains:second",
+            ]
+        );
+        assert_eq!(
+            engine.legal_intent_types(&state, 1),
+            vec![PlayerIntentType::EndHeroActions]
+        );
+        assert!(engine.legal_intent_types(&state, 2).is_empty());
+        assert_eq!(
+            state
+                .effect_world()
+                .hero_resource(1, EffectResource::Health),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn player_intents_reject_stale_versions_and_non_responsible_players() {
+        let participants = valid_participants();
+        let rules = ValidatedGameRules::new(Vec::new()).expect("empty rules should be valid");
+        let engine = GameEngine::new(&rules);
+        let mut start_random = ScriptedRoller::new(&[]);
+        let state = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut start_random,
+            )
+            .expect("automatic phases should reach hero actions");
+
+        let mut unauthorized_random = ScriptedRoller::new(&[]);
+        assert_eq!(
+            engine.decide(
+                GameIntentInput {
+                    state: &state,
+                    actor_position: 2,
+                    expected_state_version: state.state_version(),
+                    intent: PlayerIntent::EndHeroActions,
+                },
+                &mut unauthorized_random,
+            ),
+            Err(GameIntentError::ActorNotResponsible)
+        );
+        let mut stale_random = ScriptedRoller::new(&[]);
+        assert_eq!(
+            engine.decide(
+                GameIntentInput {
+                    state: &state,
+                    actor_position: 1,
+                    expected_state_version: state.state_version() - 1,
+                    intent: PlayerIntent::EndHeroActions,
+                },
+                &mut stale_random,
+            ),
+            Err(GameIntentError::StaleStateVersion)
+        );
+        assert_eq!(state.turn(), 1);
+        assert_eq!(state.active_position(), 1);
+    }
+
+    #[test]
+    fn end_turn_handoff_wraps_from_the_last_position_to_the_first() {
+        let participants = four_participants();
+        let rules = ValidatedGameRules::new(Vec::new()).expect("empty rules should be valid");
+        let engine = GameEngine::new(&rules);
+        let mut start_random = ScriptedRoller::new(&[]);
+        let started = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut start_random,
+            )
+            .expect("automatic phases should reach hero actions");
+        let state = restore_game_state(GameStateRestoreInput {
+            snapshot_version: started.snapshot_version(),
+            state_version: started.state_version(),
+            sequence: started.sequence(),
+            status: started.status(),
+            turn: started.turn(),
+            phase: started.phase(),
+            active_position: 4,
+            adventure_id: started.adventure_id(),
+            content_version: started.content_version(),
+            ruleset_version: started.ruleset_version(),
+            manifest_digest: started.manifest_digest(),
+            manifest_version: started.manifest_version(),
+            prng_algorithm: started.prng_algorithm(),
+            shuffle_algorithm: started.shuffle_algorithm(),
+            sampling_algorithm: started.sampling_algorithm(),
+            prng_counter: started.prng_counter(),
+            players: started.players().to_vec(),
+            effect_world: started.effect_world().clone(),
+            last_effects: started.last_effects().to_vec(),
+            pending_choice: None,
+            queued_phases: vec![GamePhase::EndTurn],
+            queued_effects: Vec::new(),
+            decision_point: Some(DecisionPoint::PlayerIntent {
+                responsible_position: 4,
+            }),
+            last_turn_steps: started.last_turn_steps().to_vec(),
+        })
+        .expect("the last participant should be a valid responsible actor");
+        let mut random = ScriptedRoller::new(&[]);
+
+        let decision = engine
+            .decide(
+                GameIntentInput {
+                    state: &state,
+                    actor_position: 4,
+                    expected_state_version: state.state_version(),
+                    intent: PlayerIntent::EndHeroActions,
+                },
+                &mut random,
+            )
+            .expect("the last participant should hand off to the first");
+
+        assert_eq!(decision.state.turn(), 2);
+        assert_eq!(decision.state.active_position(), 1);
+        assert_eq!(decision.state.phase(), GamePhase::HeroActions);
+    }
+
+    #[test]
+    fn restored_player_order_cannot_change_the_circular_handoff() {
+        let participants = four_participants();
+        let rules = ValidatedGameRules::new(Vec::new()).expect("empty rules should be valid");
+        let engine = GameEngine::new(&rules);
+        let mut start_random = ScriptedRoller::new(&[]);
+        let started = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut start_random,
+            )
+            .expect("automatic phases should reach hero actions");
+        let mut shuffled_players = started.players().to_vec();
+        shuffled_players.swap(1, 2);
+        let state = restore_game_state(GameStateRestoreInput {
+            snapshot_version: started.snapshot_version(),
+            state_version: started.state_version(),
+            sequence: started.sequence(),
+            status: started.status(),
+            turn: started.turn(),
+            phase: started.phase(),
+            active_position: 1,
+            adventure_id: started.adventure_id(),
+            content_version: started.content_version(),
+            ruleset_version: started.ruleset_version(),
+            manifest_digest: started.manifest_digest(),
+            manifest_version: started.manifest_version(),
+            prng_algorithm: started.prng_algorithm(),
+            shuffle_algorithm: started.shuffle_algorithm(),
+            sampling_algorithm: started.sampling_algorithm(),
+            prng_counter: started.prng_counter(),
+            players: shuffled_players,
+            effect_world: started.effect_world().clone(),
+            last_effects: started.last_effects().to_vec(),
+            pending_choice: None,
+            queued_phases: vec![GamePhase::EndTurn],
+            queued_effects: Vec::new(),
+            decision_point: Some(DecisionPoint::PlayerIntent {
+                responsible_position: 1,
+            }),
+            last_turn_steps: started.last_turn_steps().to_vec(),
+        })
+        .expect("player storage order must not redefine table order");
+        assert_eq!(
+            state
+                .players()
+                .iter()
+                .map(InitialPlayer::position)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
+
+        let mut random = ScriptedRoller::new(&[]);
+        let decision = engine
+            .decide(
+                GameIntentInput {
+                    state: &state,
+                    actor_position: 1,
+                    expected_state_version: state.state_version(),
+                    intent: PlayerIntent::EndHeroActions,
+                },
+                &mut random,
+            )
+            .expect("position two must follow position one");
+
+        assert_eq!(decision.state.active_position(), 2);
+    }
+
+    #[test]
+    fn snapshot_round_trip_preserves_the_fifo_after_an_effect_choice() {
+        let participants = valid_participants();
+        let rules = ValidatedGameRules::new(interrupted_sequence_rules())
+            .expect("the fixture rules should be ordered");
+        let engine = GameEngine::new(&rules);
+        let mut random = ScriptedRoller::new(&[]);
+        let state = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut random,
+            )
+            .expect("the automatic phase should stop at its choice");
+
+        assert_eq!(state.phase(), GamePhase::DarkArts);
+        assert!(matches!(
+            state.decision_point(),
+            Some(DecisionPoint::EffectChoice(choice))
+                if choice.continuation.choice_cursor.rule_id == "rule:dark-arts:choice"
+                    && choice.continuation.choice_cursor.path
+                        == [EffectPathSegment::SequenceEffect(1)]
+        ));
+        assert_eq!(
+            state
+                .queued_effects()
+                .iter()
+                .map(|queued| (queued.rule_id(), queued.path()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "rule:dark-arts:choice",
+                    &[EffectPathSegment::SequenceEffect(2)][..],
+                ),
+                ("rule:dark-arts:after-choice", &[][..]),
+            ]
+        );
+        assert_eq!(
+            state.queued_phases(),
+            &[
+                GamePhase::Villains,
+                GamePhase::HeroActions,
+                GamePhase::EndTurn,
+            ]
+        );
+
+        let restored = restore_snapshot(&state);
+
+        assert_eq!(restored, state);
+    }
+
+    #[test]
+    fn game_engine_resolves_each_hero_choices_in_position_order_then_runs_villains() {
+        let participants = valid_participants();
+        let rules = each_hero_automatic_rules();
+        let engine = GameEngine::new(&rules);
+        let mut random = ScriptedRoller::new(&[]);
+        let initial = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut random,
+            )
+            .expect("the turn should stop for the first participant");
+        let first = initial
+            .pending_choice()
+            .expect("position one should receive the first choice");
+        assert_eq!(first.responsible_position, 1);
+
+        let first_decision = resolve_first_pending_option(&engine, &initial, 1)
+            .expect("position one should resolve its assigned choice");
+        assert_eq!(
+            apply_game_event(&initial, &first_decision.event),
+            Ok(first_decision.state.clone())
+        );
+        let second = first_decision
+            .state
+            .pending_choice()
+            .expect("position two should receive the next choice");
+        assert_eq!(second.responsible_position, 2);
+        assert_eq!(first_decision.state.active_position(), 1);
+        assert_eq!(
+            first_decision
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Attack),
+            Some(1)
+        );
+        let GameEvent::ChoiceResolved { steps, control, .. } = &first_decision.event else {
+            panic!("the engine should publish a choice event");
+        };
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].phase(), GamePhase::DarkArts);
+        assert!(matches!(
+            control.decision_point,
+            Some(DecisionPoint::EffectChoice(ref choice)) if choice.responsible_position == 2
+        ));
+
+        assert_eq!(
+            resolve_first_pending_option(&engine, &first_decision.state, 1),
+            Err(GameIntentError::ActorNotChoiceResponsible)
+        );
+
+        let completed = resolve_first_pending_option(&engine, &first_decision.state, 2)
+            .expect("position two should complete the participant sequence");
+        assert_eq!(
+            apply_game_event(&first_decision.state, &completed.event),
+            Ok(completed.state.clone())
+        );
+
+        assert_eq!(completed.state.phase(), GamePhase::HeroActions);
+        assert_eq!(completed.state.active_position(), 1);
+        assert_eq!(
+            completed
+                .state
+                .effect_world()
+                .hero_resource(2, EffectResource::Attack),
+            Some(1)
+        );
+        assert_eq!(
+            completed
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Influence),
+            Some(1)
+        );
+        let GameEvent::ChoiceResolved { steps, .. } = &completed.event else {
+            panic!("the engine should publish the final choice event");
+        };
+        assert_eq!(
+            steps.iter().map(TurnStep::phase).collect::<Vec<_>>(),
+            [GamePhase::DarkArts, GamePhase::Villains]
+        );
+        assert_eq!(completed.state.last_turn_steps().len(), 2);
+    }
+
+    #[test]
+    fn legal_intent_types_expose_effect_choice_only_to_its_current_responsible_participant() {
+        let participants = valid_participants();
+        let rules = each_hero_automatic_rules();
+        let engine = GameEngine::new(&rules);
+        let mut random = ScriptedRoller::new(&[]);
+        let active_choice_state = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut random,
+            )
+            .expect("the active participant should receive the first choice");
+        let active_choice = active_choice_state
+            .pending_choice()
+            .expect("the first choice should be pending");
+
+        assert_eq!(active_choice_state.active_position(), 1);
+        assert_eq!(active_choice.responsible_position, 1);
+        assert_eq!(
+            engine.legal_intent_types(&active_choice_state, 1),
+            vec![PlayerIntentType::ResolveChoice]
+        );
+        assert!(
+            engine
+                .legal_intent_types(&active_choice_state, 2)
+                .is_empty()
+        );
+
+        let other_choice_state = resolve_first_pending_option(&engine, &active_choice_state, 1)
+            .expect("the first resolution should advance to the other participant")
+            .state;
+        let other_choice = other_choice_state
+            .pending_choice()
+            .expect("the other participant's choice should be pending");
+
+        assert_eq!(other_choice_state.active_position(), 1);
+        assert_eq!(other_choice.responsible_position, 2);
+        assert!(engine.legal_intent_types(&other_choice_state, 1).is_empty());
+        assert_eq!(
+            engine.legal_intent_types(&other_choice_state, 2),
+            vec![PlayerIntentType::ResolveChoice]
+        );
+    }
+
+    #[test]
+    fn restored_continuations_and_history_must_match_the_active_turn() {
+        let participants = valid_participants();
+        let rules = ValidatedGameRules::new(interrupted_sequence_rules())
+            .expect("the fixture rules should be ordered");
+        let engine = GameEngine::new(&rules);
+        let mut random = ScriptedRoller::new(&[]);
+        let state = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut random,
+            )
+            .expect("the automatic phase should stop at its choice");
+
+        let mut wrong_actor = snapshot_restore_input(&state);
+        let queued = wrong_actor
+            .queued_effects
+            .first()
+            .expect("the interrupted sequence must preserve its queue");
+        wrong_actor.queued_effects[0] = QueuedEffect::Definition {
+            cursor: EffectCursor {
+                rule_id: queued.rule_id().to_owned(),
+                path: queued.path().to_vec(),
+            },
+            actor_position: 2,
+        };
+        assert_eq!(
+            restore_game_state(wrong_actor),
+            Err(GameStateRestoreError::InvalidControlState)
+        );
+
+        let mut incomplete_history = snapshot_restore_input(&state);
+        incomplete_history.last_effects.clear();
+        assert_eq!(
+            restore_game_state(incomplete_history),
+            Err(GameStateRestoreError::InvalidControlState)
+        );
+
+        let mut wrong_choice_actor = snapshot_restore_input(&state);
+        let choice = wrong_choice_actor
+            .pending_choice
+            .as_mut()
+            .expect("the interrupted sequence must preserve its choice");
+        choice.responsible_position = 3;
+        wrong_choice_actor.decision_point = Some(DecisionPoint::EffectChoice(choice.clone()));
+        assert_eq!(
+            restore_game_state(wrong_choice_actor),
+            Err(GameStateRestoreError::InvalidPlayers)
         );
     }
 
@@ -2361,6 +4501,12 @@ mod tests {
         let effects = [each_hero_choice_rule()];
         let pending = decide_without_rolls(&initial, 1, GameCommand::CompleteDarkArts, &effects)
             .expect("the effect should produce a pending choice");
+        let restored_pending = restore_game_state(restore_input(
+            &pending.state,
+            PARTICIPANT_CHOICE_SNAPSHOT_VERSION,
+        ))
+        .expect("a version two participant choice should remain resumable");
+        assert_eq!(restored_pending, pending.state);
         assert_eq!(
             restore_game_state(restore_input(&pending.state, 1)),
             Err(GameStateRestoreError::UnsupportedSnapshotVersion)
@@ -2418,6 +4564,90 @@ mod tests {
     }
 
     #[test]
+    fn persisted_effect_cursor_indices_match_the_transport_bounds() {
+        let participants = valid_participants();
+        let initial = initialize_game(StartGameInput {
+            actor_role: ParticipantRole::Host,
+            participants: &participants,
+            content: CONTENT,
+        })
+        .expect("the complete lobby should start");
+        let effects = [each_hero_choice_rule()];
+        let pending = decide_without_rolls(&initial, 1, GameCommand::CompleteDarkArts, &effects)
+            .expect("the effect should produce a pending choice");
+
+        for (segment, should_restore) in [
+            (
+                EffectPathSegment::ChoiceOption(MAX_EFFECT_BRANCH_INDEX),
+                true,
+            ),
+            (
+                EffectPathSegment::SequenceEffect(MAX_EFFECT_BRANCH_INDEX),
+                true,
+            ),
+            (EffectPathSegment::RollOutcome(MAX_EFFECT_ROLL_INDEX), true),
+            (
+                EffectPathSegment::ChoiceOption(MAX_EFFECT_BRANCH_INDEX + 1),
+                false,
+            ),
+            (
+                EffectPathSegment::SequenceEffect(MAX_EFFECT_BRANCH_INDEX + 1),
+                false,
+            ),
+            (
+                EffectPathSegment::RollOutcome(MAX_EFFECT_ROLL_INDEX + 1),
+                false,
+            ),
+        ] {
+            let mut candidate = pending.state.clone();
+            let choice = candidate
+                .pending_choice
+                .as_mut()
+                .expect("the fixture choice should remain pending");
+            choice.continuation.choice_cursor.path = vec![segment];
+            candidate.decision_point = Some(DecisionPoint::EffectChoice(choice.clone()));
+
+            assert_eq!(
+                restore_game_state(restore_input(&candidate, SNAPSHOT_VERSION)).is_ok(),
+                should_restore,
+                "unexpected restore result for {segment:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn persisted_turn_history_uses_the_same_three_step_limit_as_the_transport() {
+        let participants = valid_participants();
+        let rules = ValidatedGameRules::new(Vec::new()).expect("empty rules should be valid");
+        let mut random = ScriptedRoller::new(&[]);
+        let state = GameEngine::new(&rules)
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut random,
+            )
+            .expect("automatic phases should reach the first player intent");
+        let mut invalid = state.clone();
+        let extra_step = TurnStep::new(GamePhase::DarkArts, Vec::new());
+        while invalid.last_turn_steps.len() <= MAX_TURN_STEPS {
+            invalid.last_turn_steps.push(extra_step.clone());
+        }
+        invalid.last_effects = invalid
+            .last_turn_steps
+            .iter()
+            .flat_map(|step| step.effects.iter().cloned())
+            .collect();
+
+        assert_eq!(
+            restore_game_state(restore_input(&invalid, SNAPSHOT_VERSION)),
+            Err(GameStateRestoreError::InvalidControlState)
+        );
+    }
+
+    #[test]
     fn persisted_choice_requires_an_in_progress_dark_arts_stop() {
         let participants = valid_participants();
         let initial = initialize_game(StartGameInput {
@@ -2438,7 +4668,7 @@ mod tests {
         );
 
         let mut wrong_phase = pending.state;
-        wrong_phase.phase = GamePhase::HeroAction;
+        wrong_phase.phase = GamePhase::HeroActions;
         assert_eq!(
             restore_game_state(restore_input(&wrong_phase, SNAPSHOT_VERSION)),
             Err(GameStateRestoreError::InvalidPlayers)
@@ -2509,6 +4739,14 @@ mod tests {
                 ),
                 last_effects: Vec::new(),
                 pending_choice: None,
+                queued_phases: vec![
+                    GamePhase::Villains,
+                    GamePhase::HeroActions,
+                    GamePhase::EndTurn,
+                ],
+                queued_effects: Vec::new(),
+                decision_point: Some(DecisionPoint::Automatic),
+                last_turn_steps: Vec::new(),
             })
         };
 
@@ -2537,6 +4775,7 @@ mod tests {
         EffectRule {
             id: "rule:synthetic".to_owned(),
             trigger: EffectTrigger::DarkArtsCompleted,
+            order: 0,
             cost,
             effect,
         }
@@ -2649,7 +4888,7 @@ mod tests {
         })
         .expect("the validated effect should resolve to a stable point");
 
-        assert_eq!(decision.state.phase(), GamePhase::HeroAction);
+        assert_eq!(decision.state.phase(), GamePhase::HeroActions);
         assert_eq!(decision.state.prng_counter(), 1);
         assert_eq!(
             decision
@@ -2772,7 +5011,7 @@ mod tests {
         })
         .expect("an impossible mandatory target should not block resolution");
 
-        assert_eq!(no_op.state.phase(), GamePhase::HeroAction);
+        assert_eq!(no_op.state.phase(), GamePhase::HeroActions);
         assert!(matches!(
             no_op.state.last_effects(),
             [EffectOutcome::NoOp {
@@ -2978,7 +5217,7 @@ mod tests {
                 .hero_resource(1, EffectResource::Influence),
             Some(1)
         );
-        assert_eq!(stable.state.phase(), GamePhase::HeroAction);
+        assert_eq!(stable.state.phase(), GamePhase::HeroActions);
         assert!(stable.state.pending_choice().is_none());
         assert_eq!(
             apply_game_event(&pending.state, &stable.event)
@@ -3135,7 +5374,7 @@ mod tests {
         )
         .expect("the delegated participant should resolve the second choice");
 
-        assert_eq!(stable.state.phase(), GamePhase::HeroAction);
+        assert_eq!(stable.state.phase(), GamePhase::HeroActions);
         assert!(stable.state.pending_choice().is_none());
         assert_eq!(
             stable
@@ -3270,5 +5509,294 @@ mod tests {
                 Err(GameEventError::EffectTransitionInvalid)
             );
         }
+    }
+
+    fn assert_end_turn_replay_rejects_noncanonical_payloads(
+        state: &InitialGameState,
+        valid_event: &GameEvent,
+    ) {
+        let mut omitted_end_turn = valid_event.clone();
+        let GameEvent::TurnCompleted { end_turn, .. } = &mut omitted_end_turn else {
+            panic!("ending Hero actions must create a turn-completed event");
+        };
+        end_turn.clear();
+        assert_eq!(
+            apply_game_event(state, &omitted_end_turn),
+            Err(GameEventError::EffectTransitionInvalid)
+        );
+
+        let mut reordered_end_turn = valid_event.clone();
+        let GameEvent::TurnCompleted { end_turn, .. } = &mut reordered_end_turn else {
+            panic!("ending Hero actions must create a turn-completed event");
+        };
+        end_turn.swap(0, 1);
+        assert_eq!(
+            apply_game_event(state, &reordered_end_turn),
+            Err(GameEventError::EffectTransitionInvalid)
+        );
+
+        let mut invalid_control = valid_event.clone();
+        let GameEvent::TurnCompleted { control, .. } = &mut invalid_control else {
+            panic!("ending Hero actions must create a turn-completed event");
+        };
+        control.phase = GamePhase::DarkArts;
+        control.queued_phases = vec![
+            GamePhase::Villains,
+            GamePhase::HeroActions,
+            GamePhase::EndTurn,
+        ];
+        control.decision_point = Some(DecisionPoint::Automatic);
+        assert_eq!(
+            apply_game_event(state, &invalid_control),
+            Err(GameEventError::EffectTransitionInvalid)
+        );
+    }
+
+    #[test]
+    fn ending_hero_actions_discards_replenishes_and_passes_the_turn_circularly() {
+        let participants = valid_participants();
+        let rules = ValidatedGameRules::new(Vec::new()).expect("empty rules should be valid");
+        let engine = GameEngine::new(&rules);
+        let mut start_random = ScriptedRoller::new(&[]);
+        let started = engine
+            .start(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: CONTENT,
+                },
+                &mut start_random,
+            )
+            .expect("the automatic phases should settle");
+        let state = hero_actions_card_fixture(&started);
+        let mut random = ScriptedRoller::with_samples(&[2, 1, 1]);
+
+        let decision = engine
+            .decide(
+                GameIntentInput {
+                    state: &state,
+                    actor_position: 1,
+                    expected_state_version: 1,
+                    intent: PlayerIntent::EndHeroActions,
+                },
+                &mut random,
+            )
+            .expect("the active hero should end their actions");
+
+        assert_eq!(decision.state.turn(), 2);
+        assert_eq!(decision.state.active_position(), 2);
+        assert_eq!(decision.state.phase(), GamePhase::HeroActions);
+        assert_eq!(
+            decision
+                .state
+                .last_turn_steps()
+                .iter()
+                .map(TurnStep::phase)
+                .collect::<Vec<_>>(),
+            [GamePhase::EndTurn, GamePhase::DarkArts, GamePhase::Villains]
+        );
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .cards_in_zone(1, EffectZone::HeroHand),
+            ["draw-top", "draw-bottom", "hand-a", "played", "hand-b"]
+        );
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .cards_in_zone(1, EffectZone::HeroDrawPile),
+            ["discarded"]
+        );
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Attack),
+            Some(0)
+        );
+        assert_eq!(
+            decision
+                .state
+                .effect_world()
+                .hero_resource(1, EffectResource::Influence),
+            Some(0)
+        );
+        assert_eq!(
+            apply_game_event(&state, &decision.event),
+            Ok(decision.state)
+        );
+        assert_end_turn_replay_rejects_noncanonical_payloads(&state, &decision.event);
+    }
+
+    #[test]
+    fn mandatory_phase_roots_cannot_charge_a_player_or_share_identity() {
+        let automatic_with_cost = EffectRule {
+            id: "rule:automatic".to_owned(),
+            trigger: EffectTrigger::DarkArts,
+            order: 1,
+            cost: vec![EffectResourceCost {
+                resource: EffectResource::Influence,
+                amount: 1,
+            }],
+            effect: EffectDefinition::NoOp,
+        };
+        assert_eq!(
+            ValidatedGameRules::new(vec![automatic_with_cost]),
+            Err(ValidatedGameRulesError::AutomaticRuleHasCost)
+        );
+
+        let duplicate = EffectRule {
+            id: "rule:duplicate".to_owned(),
+            trigger: EffectTrigger::Manual,
+            order: 1,
+            cost: Vec::new(),
+            effect: EffectDefinition::NoOp,
+        };
+        assert_eq!(
+            ValidatedGameRules::new(vec![duplicate.clone(), duplicate]),
+            Err(ValidatedGameRulesError::DuplicateRuleId)
+        );
+    }
+
+    #[test]
+    fn current_phase_choices_use_bounded_ids_while_legacy_choices_keep_their_identity() {
+        let long_rule_id = "r".repeat(256);
+        let current_effect_choice = [EffectRule {
+            id: long_rule_id.clone(),
+            trigger: EffectTrigger::DarkArts,
+            order: 0,
+            cost: Vec::new(),
+            effect: EffectDefinition::Choice {
+                audience: EffectChoiceAudience::Actor,
+                options: vec![EffectDefinition::NoOp, EffectDefinition::NoOp],
+            },
+        }];
+        let mut world = EffectWorld::new(vec![
+            EffectEntityPlacement::new(EffectEntity::hero(1), EffectZone::Heroes),
+            EffectEntityPlacement::new(EffectEntity::hero(2), EffectZone::Heroes),
+        ]);
+        let mut roller = ScriptedRoller::new(&[]);
+        let resolution = effects::execute_effects(
+            &mut world,
+            1,
+            &current_effect_choice,
+            EffectTrigger::DarkArts,
+            &mut roller,
+        )
+        .expect("a current effect choice should resolve to a bounded decision point");
+        let EffectStop::Choice(effect_choice) = resolution.stop else {
+            panic!("the effect should stop at its explicit choice");
+        };
+        assert_eq!(effect_choice.id, "choice:effect:0");
+        assert!(effect_choice.id.len() <= 256);
+        assert_eq!(effect_choice.cause, long_rule_id);
+
+        let current_target_choice = [EffectRule {
+            id: "rule:current-target".to_owned(),
+            trigger: EffectTrigger::Villains,
+            order: 0,
+            cost: Vec::new(),
+            effect: EffectDefinition::Apply {
+                target: EffectSelector {
+                    id: Some("target:any-hero".to_owned()),
+                    zone: EffectZone::Heroes,
+                    owner: EffectTargetOwner::Any,
+                    min: 1,
+                    max: 1,
+                    eligibility: Vec::new(),
+                },
+                operation: EffectOperation::ModifyResource {
+                    resource: EffectResource::Attack,
+                    amount: 1,
+                },
+            },
+        }];
+        let mut roller = ScriptedRoller::new(&[]);
+        let resolution = effects::execute_effects(
+            &mut world,
+            1,
+            &current_target_choice,
+            EffectTrigger::Villains,
+            &mut roller,
+        )
+        .expect("a current target choice should resolve to a bounded decision point");
+        let EffectStop::Choice(target_choice) = resolution.stop else {
+            panic!("multiple targets should require a target choice");
+        };
+        assert_eq!(target_choice.id, "choice:target:0");
+        assert!(target_choice.id.len() <= 256);
+
+        let legacy_rule = [EffectRule {
+            id: "rule:legacy".to_owned(),
+            trigger: EffectTrigger::DarkArtsCompleted,
+            order: 0,
+            cost: Vec::new(),
+            effect: EffectDefinition::Choice {
+                audience: EffectChoiceAudience::Actor,
+                options: vec![EffectDefinition::NoOp, EffectDefinition::NoOp],
+            },
+        }];
+        let mut roller = ScriptedRoller::new(&[]);
+        let resolution = effects::execute_effects(
+            &mut world,
+            1,
+            &legacy_rule,
+            EffectTrigger::DarkArtsCompleted,
+            &mut roller,
+        )
+        .expect("the legacy decision harness should still expose its replay identity");
+        let EffectStop::Choice(legacy_choice) = resolution.stop else {
+            panic!("the legacy effect should stop at its explicit choice");
+        };
+        assert_eq!(legacy_choice.id, "rule:legacy:effect:0");
+    }
+
+    #[test]
+    fn outcome_overflow_fails_without_mutating_the_effect_world() {
+        let mut entities = vec![EffectEntityPlacement::new(
+            EffectEntity::hero(1),
+            EffectZone::Heroes,
+        )];
+        entities.extend((0..32).map(|index| {
+            EffectEntityPlacement::new(
+                EffectEntity::new(format!("villain:{index:02}"), None)
+                    .with_resource(EffectResource::Health, 200),
+                EffectZone::ActiveVillains,
+            )
+        }));
+        let mut world = EffectWorld::new(entities);
+        let original = world.clone();
+        let rules = [EffectRule {
+            id: "rule:outcome-overflow".to_owned(),
+            trigger: EffectTrigger::Manual,
+            order: 0,
+            cost: Vec::new(),
+            effect: EffectDefinition::Repeat {
+                times: 129,
+                effect: Box::new(EffectDefinition::Apply {
+                    target: EffectSelector {
+                        id: Some("target:all-villains".to_owned()),
+                        zone: EffectZone::ActiveVillains,
+                        owner: EffectTargetOwner::Any,
+                        min: 1,
+                        max: 32,
+                        eligibility: Vec::new(),
+                    },
+                    operation: EffectOperation::ModifyResource {
+                        resource: EffectResource::Health,
+                        amount: -1,
+                    },
+                }),
+            },
+        }];
+        let mut roller = ScriptedRoller::new(&[]);
+
+        assert_eq!(
+            effects::execute_effects(&mut world, 1, &rules, EffectTrigger::Manual, &mut roller,),
+            Err(EffectExecutionError::StepLimitExceeded)
+        );
+        assert_eq!(world, original);
     }
 }

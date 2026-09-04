@@ -154,8 +154,8 @@ async fn migration_0016_upgrades_existing_recovery_credentials() {
         observation.rejected_lifecycle_constraint.as_deref(),
         Some("recovery_credentials_lifecycle_consistent")
     );
-    assert_eq!(observation.applied_version, 16);
-    assert_eq!(observation.schema_version, "16");
+    assert_eq!(observation.applied_version, 17);
+    assert_eq!(observation.schema_version, "17");
 }
 
 async fn exercise_upgrade(database: &PgPool) -> TestResult<UpgradeObservation> {

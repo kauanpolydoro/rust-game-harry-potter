@@ -25,6 +25,10 @@ impl EffectRoller for ScriptedRoller {
     fn roll(&mut self, _die: game_domain::EffectDie) -> Option<u8> {
         self.rolls.pop_front()
     }
+
+    fn sample_below(&mut self, upper_bound: u32) -> Option<u32> {
+        (upper_bound > 0).then_some(0)
+    }
 }
 
 fn participants() -> Vec<LobbyParticipant> {
@@ -127,6 +131,7 @@ fn resource_rule(
     EffectRule {
         id: id.to_owned(),
         trigger: EffectTrigger::Manual,
+        order: 0,
         cost: vec![],
         effect: EffectDefinition::Apply {
             target: single_target_selector(selector_id, EffectZone::Heroes, owner),
@@ -286,7 +291,7 @@ fn playing_an_owned_card_moves_only_that_instance_and_resolves_its_bound_target(
 }
 
 #[test]
-fn playing_a_conditional_card_accepts_all_announced_targets_and_uses_only_the_selected_branch() {
+fn playing_a_conditional_card_uses_only_the_selected_branch() {
     let entities = vec![starter_card(
         "instance:conditional-spell",
         "starter:conditional-spell",
@@ -294,38 +299,7 @@ fn playing_a_conditional_card_accepts_all_announced_targets_and_uses_only_the_se
         "rule:conditional-spell",
         EffectZone::HeroHand,
     )];
-    let rules = vec![EffectRule {
-        id: "rule:conditional-spell".to_owned(),
-        trigger: EffectTrigger::Manual,
-        cost: vec![],
-        effect: EffectDefinition::Condition {
-            condition: EffectCondition::HasEligibleTarget {
-                target: single_target_selector(None, EffectZone::Heroes, EffectTargetOwner::Actor),
-            },
-            then: Box::new(EffectDefinition::Apply {
-                target: single_target_selector(
-                    Some("target:eligible-branch"),
-                    EffectZone::Heroes,
-                    EffectTargetOwner::Any,
-                ),
-                operation: EffectOperation::ModifyResource {
-                    resource: EffectResource::Influence,
-                    amount: 2,
-                },
-            }),
-            otherwise: Some(Box::new(EffectDefinition::Apply {
-                target: single_target_selector(
-                    Some("target:ineligible-branch"),
-                    EffectZone::Heroes,
-                    EffectTargetOwner::Any,
-                ),
-                operation: EffectOperation::ModifyResource {
-                    resource: EffectResource::Attack,
-                    amount: 3,
-                },
-            })),
-        },
-    }];
+    let rules = vec![conditional_card_rule()];
     let state = advance_to_hero_action(&entities, &rules);
     let intentions = legal_game_intentions(&state, 1, &rules);
     let target_slots = &intentions.playable_cards[0].target_slots;
@@ -393,6 +367,42 @@ fn playing_a_conditional_card_accepts_all_announced_targets_and_uses_only_the_se
     );
 }
 
+fn conditional_card_rule() -> EffectRule {
+    EffectRule {
+        id: "rule:conditional-spell".to_owned(),
+        trigger: EffectTrigger::Manual,
+        order: 0,
+        cost: vec![],
+        effect: EffectDefinition::Condition {
+            condition: EffectCondition::HasEligibleTarget {
+                target: single_target_selector(None, EffectZone::Heroes, EffectTargetOwner::Actor),
+            },
+            then: Box::new(EffectDefinition::Apply {
+                target: single_target_selector(
+                    Some("target:eligible-branch"),
+                    EffectZone::Heroes,
+                    EffectTargetOwner::Any,
+                ),
+                operation: EffectOperation::ModifyResource {
+                    resource: EffectResource::Influence,
+                    amount: 2,
+                },
+            }),
+            otherwise: Some(Box::new(EffectDefinition::Apply {
+                target: single_target_selector(
+                    Some("target:ineligible-branch"),
+                    EffectZone::Heroes,
+                    EffectTargetOwner::Any,
+                ),
+                operation: EffectOperation::ModifyResource {
+                    resource: EffectResource::Attack,
+                    amount: 3,
+                },
+            })),
+        },
+    }
+}
+
 #[test]
 fn playing_a_card_can_pause_for_and_resume_an_effect_choice() {
     let entities = vec![starter_card(
@@ -405,6 +415,7 @@ fn playing_a_card_can_pause_for_and_resume_an_effect_choice() {
     let rules = vec![EffectRule {
         id: "rule:choice-spell".to_owned(),
         trigger: EffectTrigger::Manual,
+        order: 0,
         cost: vec![],
         effect: EffectDefinition::Choice {
             audience: EffectChoiceAudience::Actor,
@@ -505,6 +516,7 @@ fn playable_card_targets_are_planned_after_the_card_enters_the_play_area() {
     let rules = vec![EffectRule {
         id: "rule:self-discard".to_owned(),
         trigger: EffectTrigger::Manual,
+        order: 0,
         cost: vec![],
         effect: EffectDefinition::Apply {
             target: single_target_selector(
@@ -577,6 +589,7 @@ fn assigning_attack_spends_the_hero_resource_and_leaves_a_zero_health_villain_ac
     let rules = vec![EffectRule {
         id: "rule:synthetic-attack".to_owned(),
         trigger: EffectTrigger::Manual,
+        order: 0,
         cost: vec![],
         effect: EffectDefinition::Apply {
             target: EffectSelector {

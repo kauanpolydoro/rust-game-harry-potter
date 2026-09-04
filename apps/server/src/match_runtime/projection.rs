@@ -1,14 +1,14 @@
 use game_domain::{
     EffectChangeCause, EffectDie, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
-    EffectResource, EffectZone, GameCommandType, GameStatus, InitialGameState, LegalGameIntentions,
-    PendingEffectChoiceKind, legal_game_commands, legal_game_intentions,
+    EffectResource, EffectZone, GameEngine, GameStatus, InitialGameState, LegalGameIntentions,
+    PendingEffectChoiceKind, PlayerIntentType, ValidatedGameRules, legal_game_intentions,
 };
 use serde::Serialize;
 use uuid::Uuid;
 
 use super::{
     StoredRoomParticipant, codec::command_domain_state, codec::decode_persisted_snapshot,
-    codec::verify_persisted_snapshot, hero_name, postgres,
+    codec::game_phase_name, codec::verify_persisted_snapshot, hero_name, postgres,
 };
 use crate::{AppState, http_support::ApiError};
 
@@ -23,6 +23,8 @@ pub(crate) struct GameProjectionResponse {
     legal_intentions: LegalIntentionsSummary,
     table: TableSummary,
     choice: ChoiceSummary,
+    queued_phases: Vec<String>,
+    queued_effect_count: usize,
     effects: EffectResolutionSummary,
 }
 
@@ -154,7 +156,7 @@ struct GameResources {
 
 #[derive(Serialize)]
 struct LegalIntentionsSummary {
-    complete_dark_arts: bool,
+    end_hero_actions: bool,
     play_cards: Vec<LegalPlayCardSummary>,
     assign_attack: Vec<LegalAttackSummary>,
     acquire_cards: Vec<LegalAcquisitionSummary>,
@@ -251,16 +253,18 @@ pub(crate) async fn projection_for_participant(
         .content
         .effect_rules(&game.manifest_digest)
         .ok_or_else(ApiError::internal)?;
-    let (legal_commands, legal_intentions) = if game.expired {
+    let rules = ValidatedGameRules::new(effect_rules.clone()).map_err(|_| ApiError::internal())?;
+    let (player_intents, legal_intentions) = if game.expired {
         (Vec::new(), LegalGameIntentions::default())
     } else {
         (
-            legal_game_commands(&domain_state, actor_position, &effect_rules),
+            GameEngine::new(&rules).legal_intent_types(&domain_state, actor_position),
             legal_game_intentions(&domain_state, actor_position, &effect_rules),
         )
     };
-    let legal_actions = legal_action_names(&legal_commands, &legal_intentions);
+    let legal_actions = legal_action_names(&player_intents, &legal_intentions);
     let legal_intentions_summary = legal_intentions_summary(
+        &player_intents,
         &legal_intentions,
         &domain_state,
         &participants,
@@ -302,9 +306,9 @@ pub(crate) async fn projection_for_participant(
             },
         },
         turn: TurnSummary {
-            number: persisted.turn.number,
-            phase: persisted.turn.phase,
-            active_position: persisted.turn.active_position,
+            number: domain_state.turn(),
+            phase: game_phase_name(domain_state.phase()).to_owned(),
+            active_position: domain_state.active_position(),
         },
         participant: game_participant(current, &domain_state)?,
         participants: participants
@@ -315,40 +319,47 @@ pub(crate) async fn projection_for_participant(
         legal_intentions: legal_intentions_summary,
         table,
         choice: choice_summary(&domain_state),
-        effects: EffectResolutionSummary {
-            status: if domain_state.pending_choice().is_some() {
-                "choice"
-            } else if domain_state.status() != GameStatus::InProgress {
-                "terminal"
-            } else if domain_state.last_effects().is_empty() {
-                "idle"
-            } else {
-                "resolved"
-            },
-            outcomes: domain_state
-                .last_effects()
-                .iter()
-                .map(effect_outcome_summary)
-                .collect(),
-        },
+        queued_phases: domain_state
+            .queued_phases()
+            .iter()
+            .map(|phase| game_phase_name(*phase).to_owned())
+            .collect(),
+        queued_effect_count: domain_state.queued_effects().len(),
+        effects: effect_resolution_summary(&domain_state),
     }))
 }
 
+fn effect_resolution_summary(state: &InitialGameState) -> EffectResolutionSummary {
+    let status = if state.pending_choice().is_some() {
+        "choice"
+    } else if state.status() != GameStatus::InProgress {
+        "terminal"
+    } else if state.last_effects().is_empty() {
+        "idle"
+    } else {
+        "resolved"
+    };
+    EffectResolutionSummary {
+        status,
+        outcomes: state
+            .last_effects()
+            .iter()
+            .map(effect_outcome_summary)
+            .collect(),
+    }
+}
+
 fn legal_action_names(
-    commands: &[GameCommandType],
+    player_intents: &[PlayerIntentType],
     intentions: &LegalGameIntentions,
 ) -> Vec<String> {
-    let mut actions = commands
+    let mut actions = player_intents
         .iter()
-        .map(|command| match command {
-            GameCommandType::CompleteDarkArts => "complete_dark_arts".to_owned(),
-            GameCommandType::ResolveChoice => "resolve_choice".to_owned(),
+        .map(|intent| match intent {
+            PlayerIntentType::EndHeroActions => "end_hero_actions".to_owned(),
+            PlayerIntentType::ResolveChoice => "resolve_choice".to_owned(),
         })
         .collect::<Vec<_>>();
-    if intentions.complete_dark_arts && !actions.iter().any(|action| action == "complete_dark_arts")
-    {
-        actions.push("complete_dark_arts".to_owned());
-    }
     if !intentions.playable_cards.is_empty() {
         actions.push("play_card".to_owned());
     }
@@ -362,6 +373,7 @@ fn legal_action_names(
 }
 
 fn legal_intentions_summary(
+    player_intents: &[PlayerIntentType],
     intentions: &LegalGameIntentions,
     domain_state: &InitialGameState,
     participants: &[StoredRoomParticipant],
@@ -369,7 +381,7 @@ fn legal_intentions_summary(
     manifest_digest: &str,
 ) -> LegalIntentionsSummary {
     LegalIntentionsSummary {
-        complete_dark_arts: intentions.complete_dark_arts,
+        end_hero_actions: player_intents.contains(&PlayerIntentType::EndHeroActions),
         play_cards: intentions
             .playable_cards
             .iter()

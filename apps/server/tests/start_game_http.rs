@@ -76,6 +76,94 @@ fn each_hero_choice_manifest() -> ContentManifest {
     })))
 }
 
+fn functional_effect_rule() -> Value {
+    json!({
+        "id": "rule:functional",
+        "trigger": "dark_arts",
+        "order": 1,
+        "effect": {
+            "type": "sequence",
+            "effects": [
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "heroes",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 }
+                    },
+                    "operation": {
+                        "type": "modify_resource",
+                        "resource": "health",
+                        "amount": -1
+                    }
+                },
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "heroes",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 }
+                    },
+                    "operation": {
+                        "type": "modify_resource",
+                        "resource": "influence",
+                        "amount": 2
+                    }
+                },
+                {
+                    "type": "condition",
+                    "condition": {
+                        "type": "resource_at_least",
+                        "target": {
+                            "zone": "heroes",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "resource": "influence",
+                        "amount": 2
+                    },
+                    "then": {
+                        "type": "repeat",
+                        "times": 2,
+                        "effect": {
+                            "type": "apply",
+                            "target": {
+                                "zone": "heroes",
+                                "owner": "actor",
+                                "cardinality": { "min": 1, "max": 1 }
+                            },
+                            "operation": {
+                                "type": "modify_resource",
+                                "resource": "attack",
+                                "amount": 1
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "roll",
+                    "die": "d4",
+                    "outcomes": [
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "no_op" }
+                    ]
+                },
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "hero_hand",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 }
+                    },
+                    "operation": { "type": "discard" }
+                }
+            ]
+        }
+    })
+}
+
 fn playable_manifest_variant(effect_override: Option<Value>) -> ContentManifest {
     import_playable_candidate(&playable_candidate(effect_override), &["rule:functional"])
 }
@@ -83,7 +171,7 @@ fn playable_manifest_variant(effect_override: Option<Value>) -> ContentManifest 
 fn playable_candidate(effect_override: Option<Value>) -> Value {
     let entries = (0..171).map(playable_fixture_entry).collect::<Vec<_>>();
     let mut candidate = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "content_version": "fixture-v1",
         "ruleset_version": "fixture-rules-v1",
         "locale": "en",
@@ -92,78 +180,7 @@ fn playable_candidate(effect_override: Option<Value>) -> Value {
             "uri": "https://example.invalid/fixture",
             "kind": "adaptation"
         }],
-        "rules": [{
-            "id": "rule:functional",
-            "trigger": "dark_arts_completed",
-            "cost": [{ "resource": "health", "amount": 1 }],
-            "effect": {
-                "type": "sequence",
-                "effects": [
-                    {
-                        "type": "apply",
-                        "target": {
-                            "zone": "heroes",
-                            "owner": "actor",
-                            "cardinality": { "min": 1, "max": 1 }
-                        },
-                        "operation": {
-                            "type": "modify_resource",
-                            "resource": "influence",
-                            "amount": 2
-                        }
-                    },
-                    {
-                        "type": "condition",
-                        "condition": {
-                            "type": "resource_at_least",
-                            "target": {
-                                "zone": "heroes",
-                                "owner": "actor",
-                                "cardinality": { "min": 1, "max": 1 }
-                            },
-                            "resource": "influence",
-                            "amount": 2
-                        },
-                        "then": {
-                            "type": "repeat",
-                            "times": 2,
-                            "effect": {
-                                "type": "apply",
-                                "target": {
-                                    "zone": "heroes",
-                                    "owner": "actor",
-                                    "cardinality": { "min": 1, "max": 1 }
-                                },
-                                "operation": {
-                                    "type": "modify_resource",
-                                    "resource": "attack",
-                                    "amount": 1
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "type": "roll",
-                        "die": "d4",
-                        "outcomes": [
-                            { "type": "no_op" },
-                            { "type": "no_op" },
-                            { "type": "no_op" },
-                            { "type": "no_op" }
-                        ]
-                    },
-                    {
-                        "type": "apply",
-                        "target": {
-                            "zone": "hero_hand",
-                            "owner": "actor",
-                            "cardinality": { "min": 1, "max": 1 }
-                        },
-                        "operation": { "type": "discard" }
-                    }
-                ]
-            }
-        }],
+        "rules": [functional_effect_rule()],
         "entries": entries
     });
     if let Some(effect) = effect_override {
@@ -194,6 +211,7 @@ fn optional_target_manifest() -> ContentManifest {
     candidate["rules"][1] = json!({
         "id": "rule:optional-card",
         "trigger": "manual",
+        "order": 0,
         "effect": {
             "type": "apply",
             "target": {
@@ -240,6 +258,7 @@ fn gameplay_rules() -> Value {
         {
             "id": "rule:functional",
             "trigger": "dark_arts_completed",
+            "order": 0,
             "effect": {
                 "type": "apply",
                 "target": {
@@ -257,6 +276,7 @@ fn gameplay_rules() -> Value {
         {
             "id": "rule:starter-resources",
             "trigger": "manual",
+            "order": 0,
             "effect": {
                 "type": "sequence",
                 "effects": [
@@ -294,6 +314,7 @@ fn gameplay_rules() -> Value {
         {
             "id": "rule:card-effect",
             "trigger": "manual",
+            "order": 1,
             "effect": {
                 "type": "apply",
                 "target": {
@@ -545,86 +566,58 @@ async fn insert_test_event(
     command_id: uuid::Uuid,
     actor_id: uuid::Uuid,
 ) {
+    let (actor_position, prng_counter) = sqlx::query_as::<_, (i16, i64)>(
+        r"
+        SELECT participants.position, games.prng_counter
+        FROM participants
+        JOIN games ON games.room_id = participants.room_id
+        WHERE participants.id = $1
+          AND games.id = $2
+        ",
+    )
+    .bind(actor_id)
+    .bind(game_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .expect("the integrity event actor and random counter must be queryable");
+    let payload = test_turn_completed_payload(
+        1,
+        2,
+        u8::try_from(actor_position).expect("the actor position must fit in u8"),
+        u64::try_from(prng_counter).expect("the random counter must be non-negative"),
+    );
     sqlx::query(
         r"
-        INSERT INTO game_events (
-            game_id,
-            room_id,
-            sequence,
-            event_type,
-            command_id,
-            actor_participant_id,
-            state_version,
-            payload
-        )
-        VALUES (
-            $1,
-            $2,
-            1,
-            'dark_arts_completed',
-            $3,
-            $4,
-            2,
-            jsonb_build_object(
-                'event_version', 1,
-                'type', 'dark_arts_completed',
-                'sequence', 1,
-                'state_version', 2,
-                'turn', 1,
-                'actor_position', 1
+        UPDATE games
+        SET state_version = ($2 ->> 'state_version')::BIGINT,
+            sequence = ($2 ->> 'sequence')::BIGINT,
+            snapshot = snapshot || jsonb_build_object(
+                'snapshot_version', 3,
+                'state_version', $2 -> 'state_version',
+                'sequence', $2 -> 'sequence',
+                'turn', jsonb_build_object(
+                    'number', $2 -> 'control' -> 'turn',
+                    'phase', $2 -> 'control' -> 'phase',
+                    'active_position', $2 -> 'control' -> 'active_position'
+                ),
+                'queued_phases', $2 -> 'control' -> 'queued_phases',
+                'queued_effects', $2 -> 'control' -> 'queued_effects',
+                'decision_point', $2 -> 'control' -> 'decision_point',
+                'last_turn_steps', $2 -> 'steps',
+                'effects', (snapshot -> 'effects') || jsonb_build_object(
+                    'outcomes', '[]'::jsonb,
+                    'choice', 'null'::jsonb
+                )
             )
-        )
+        WHERE id = $1
         ",
     )
     .bind(game_id)
-    .bind(room_id)
-    .bind(command_id)
-    .bind(actor_id)
+    .bind(&payload)
     .execute(&mut **transaction)
     .await
-    .expect("the official event must be inserted for the integrity test");
-}
-
-fn v3_pairing_payload(event_type: &str) -> Value {
-    let mut payload = json!({
-        "event_version": 3,
-        "type": event_type,
-        "sequence": 1,
-        "state_version": 2,
-        "turn": 1,
-        "actor_position": 1,
-        "effects": [],
-        "effect_stop": "stable",
-        "choice": null,
-        "prng_counter": 0
-    });
-    if event_type == "choice_resolved" {
-        payload["choice_id"] = json!("choice:pairing");
-        payload["choice_cause"] = json!("rule:functional");
-        payload["selected_options"] = json!([]);
-    }
-    payload
-}
-
-async fn assert_v3_choice_payload_rejected(
-    room: &ReadyRoom,
-    game_id: uuid::Uuid,
-    room_id: uuid::Uuid,
-    actor_id: uuid::Uuid,
-    payload: Value,
-    description: &str,
-) {
-    let mut transaction = room
-        .database
-        .begin()
-        .await
-        .expect("the invalid v3 choice transaction must start");
-    sqlx::query("UPDATE games SET sequence = 2, state_version = 3 WHERE id = $1")
-        .bind(game_id)
-        .execute(&mut *transaction)
-        .await
-        .expect("the test cursor must advance inside the transaction");
-    let error = sqlx::query(
+    .expect("the integrity fixture snapshot must match the event control envelope");
+    sqlx::query(
         r"
         INSERT INTO game_events (
             game_id,
@@ -637,27 +630,456 @@ async fn assert_v3_choice_payload_rejected(
             state_version,
             payload
         )
-        VALUES ($1, $2, 2, 3, 'dark_arts_completed', $3, $4, 3, $5)
+        VALUES (
+            $1,
+            $2,
+            1,
+            4,
+            'turn_completed',
+            $3,
+            $4,
+            2,
+            $5
+        )
         ",
     )
     .bind(game_id)
     .bind(room_id)
-    .bind(uuid::Uuid::new_v4())
+    .bind(command_id)
     .bind(actor_id)
     .bind(payload)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await
-    .expect_err(description);
+    .expect("the official event must be inserted for the integrity test");
+}
+
+async fn assert_v3_choice_payload_rejected(room: &ReadyRoom, payload: Value, description: &str) {
+    let accepted = sqlx::query_scalar::<_, bool>(
+        r"
+        SELECT valid_legacy_game_event_for_replay(
+            3::SMALLINT,
+            'dark_arts_completed',
+            $1,
+            1::BIGINT,
+            2::BIGINT,
+            1::SMALLINT
+        )
+        ",
+    )
+    .bind(payload)
+    .fetch_one(&room.database)
+    .await
+    .unwrap_or_else(|error| panic!("the v3 replay validator must evaluate {description}: {error}"));
+    assert!(!accepted, "the v3 replay validator accepted {description}");
+}
+
+fn test_turn_completed_payload(
+    sequence: u64,
+    state_version: u64,
+    actor_position: u8,
+    prng_counter: u64,
+) -> Value {
+    json!({
+        "event_version": 4,
+        "type": "turn_completed",
+        "sequence": sequence,
+        "state_version": state_version,
+        "turn": 1,
+        "actor_position": actor_position,
+        "end_turn": [
+            { "type": "resource_reset", "resource": "attack", "before": 0 },
+            { "type": "resource_reset", "resource": "influence", "before": 0 }
+        ],
+        "steps": [
+            { "phase": "end_turn", "effects": [] },
+            { "phase": "dark_arts", "effects": [] },
+            { "phase": "villains", "effects": [] }
+        ],
+        "control": {
+            "status": "in_progress",
+            "turn": 2,
+            "phase": "hero_actions",
+            "active_position": 2,
+            "queued_phases": ["end_turn"],
+            "queued_effects": [],
+            "decision_point": {
+                "type": "player_intent",
+                "responsible_position": 2
+            }
+        },
+        "prng_counter": prng_counter
+    })
+}
+
+async fn insert_cloned_game_snapshot(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    source_room_code: &str,
+    target_room_code: &str,
+    snapshot: &Value,
+) -> Result<(), sqlx::Error> {
+    let serialized = serde_json::to_string(snapshot).expect("the cloned snapshot must serialize");
+    let state_digest = format!("blake3:{}", blake3::hash(serialized.as_bytes()).to_hex());
+    sqlx::query(
+        r"
+        INSERT INTO games (
+            id,
+            room_id,
+            started_by_participant_id,
+            status,
+            adventure_id,
+            adventure_name,
+            manifest_digest,
+            manifest_version,
+            content_version,
+            ruleset_version,
+            snapshot_version,
+            state_version,
+            sequence,
+            state_digest,
+            snapshot,
+            prng_algorithm,
+            prng_seed,
+            prng_counter,
+            shuffle_algorithm,
+            sampling_algorithm
+        )
+        SELECT
+            $3,
+            target_room.id,
+            target_host.id,
+            $5 ->> 'status',
+            source.adventure_id,
+            source.adventure_name,
+            source.manifest_digest,
+            source.manifest_version,
+            source.content_version,
+            source.ruleset_version,
+            ($5 ->> 'snapshot_version')::SMALLINT,
+            ($5 ->> 'state_version')::BIGINT,
+            ($5 ->> 'sequence')::BIGINT,
+            $4,
+            $5,
+            source.prng_algorithm,
+            source.prng_seed,
+            ($5 -> 'prng' ->> 'counter')::BIGINT,
+            source.shuffle_algorithm,
+            source.sampling_algorithm
+        FROM games AS source
+        JOIN rooms AS source_room ON source_room.id = source.room_id
+        JOIN rooms AS target_room ON target_room.code = $2
+        JOIN participants AS target_host
+          ON target_host.room_id = target_room.id
+         AND target_host.role = 'host'
+        WHERE source_room.code = $1
+        ",
+    )
+    .bind(source_room_code)
+    .bind(target_room_code)
+    .bind(uuid::Uuid::new_v4())
+    .bind(state_digest)
+    .bind(snapshot)
+    .execute(&mut **transaction)
+    .await
+    .map(|_| ())
+}
+
+async fn advance_cloned_game_snapshot(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_room_code: &str,
+    snapshot: &Value,
+) {
+    let serialized = serde_json::to_string(snapshot).expect("the cloned snapshot must serialize");
+    let state_digest = format!("blake3:{}", blake3::hash(serialized.as_bytes()).to_hex());
+    sqlx::query(
+        r"
+        UPDATE games
+        SET status = $2 ->> 'status',
+            snapshot_version = ($2 ->> 'snapshot_version')::SMALLINT,
+            state_version = ($2 ->> 'state_version')::BIGINT,
+            sequence = ($2 ->> 'sequence')::BIGINT,
+            state_digest = $3,
+            snapshot = $2,
+            prng_counter = ($2 -> 'prng' ->> 'counter')::BIGINT
+        FROM rooms
+        WHERE games.room_id = rooms.id
+          AND rooms.code = $1
+        ",
+    )
+    .bind(target_room_code)
+    .bind(snapshot)
+    .bind(state_digest)
+    .execute(&mut **transaction)
+    .await
+    .expect("the cloned game must advance to the committed source snapshot");
+}
+
+struct V4EventFixture {
+    initial_snapshot: Value,
+    snapshot: Value,
+    event_version: i16,
+    event_type: String,
+    sequence: i64,
+    state_version: i64,
+    payload: Value,
+}
+
+struct ClonedEventContext {
+    game: uuid::Uuid,
+    room: uuid::Uuid,
+    actor: uuid::Uuid,
+}
+
+async fn v4_event_fixture_for_target(
+    source: &ReadyRoom,
+    target: &ReadyRoom,
+    source_initial_snapshot: &Value,
+) -> V4EventFixture {
+    let (mut snapshot, event_version, event_type, sequence, state_version, payload) =
+        sqlx::query_as::<_, (Value, i16, String, i64, i64, Value)>(
+            r"
+            SELECT
+                games.snapshot,
+                events.event_version,
+                events.event_type,
+                events.sequence,
+                events.state_version,
+                events.payload
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            JOIN game_events AS events ON events.game_id = games.id
+            WHERE rooms.code = $1
+            ORDER BY events.sequence DESC
+            LIMIT 1
+            ",
+        )
+        .bind(&source.room_code)
+        .fetch_one(&source.database)
+        .await
+        .expect("the source v4 event and committed snapshot must be queryable");
+    let target_participants = sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'participant_id', participants.id::TEXT,
+                'position', participants.position,
+                'hero_id', participants.hero_id
+            )
+            ORDER BY participants.position
+        )
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&target.room_code)
+    .fetch_one(&target.database)
+    .await
+    .expect("the target participants must be queryable");
+    let mut initial_snapshot = source_initial_snapshot.clone();
+    initial_snapshot["participants"] = target_participants.clone();
+    snapshot["participants"] = target_participants;
+
+    V4EventFixture {
+        initial_snapshot,
+        snapshot,
+        event_version,
+        event_type,
+        sequence,
+        state_version,
+        payload,
+    }
+}
+
+async fn insert_cloned_state_anchor(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_room_code: &str,
+) {
+    sqlx::query(
+        r"
+        INSERT INTO game_state_anchors (game_id, sequence, snapshot_version, state_digest)
+        SELECT games.id, games.sequence, games.snapshot_version, games.state_digest
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(target_room_code)
+    .execute(&mut **transaction)
+    .await
+    .expect("the cloned committed state must have a matching replay anchor");
+}
+
+async fn cloned_event_context(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_room_code: &str,
+    payload: &Value,
+) -> ClonedEventContext {
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            SELECT games.id, games.room_id, participants.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            JOIN participants
+              ON participants.room_id = rooms.id
+             AND participants.position = ($2 ->> 'actor_position')::SMALLINT
+            WHERE rooms.code = $1
+            ",
+    )
+    .bind(target_room_code)
+    .bind(payload)
+    .fetch_one(&mut **transaction)
+    .await
+    .expect("the cloned event actor must be queryable");
+    ClonedEventContext {
+        game: game_id,
+        room: room_id,
+        actor: actor_id,
+    }
+}
+
+async fn insert_v4_event_for_pairing(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &ClonedEventContext,
+    fixture: &V4EventFixture,
+    command_id: uuid::Uuid,
+) {
+    sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_version,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ",
+    )
+    .bind(context.game)
+    .bind(context.room)
+    .bind(fixture.sequence)
+    .bind(fixture.event_version)
+    .bind(&fixture.event_type)
+    .bind(command_id)
+    .bind(context.actor)
+    .bind(fixture.state_version)
+    .bind(&fixture.payload)
+    .execute(&mut **transaction)
+    .await
+    .expect("the individually valid v4 event must reach the deferred pairing guard");
+}
+
+async fn insert_wrong_command_receipt(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &ClonedEventContext,
+    fixture: &V4EventFixture,
+    command_id: uuid::Uuid,
+    wrong_command_type: &str,
+) {
+    sqlx::query(
+        r"
+        INSERT INTO game_command_receipts (
+            game_id,
+            room_id,
+            command_id,
+            actor_participant_id,
+            command_type,
+            expected_state_version,
+            payload_digest,
+            accepted_state_version,
+            accepted_sequence,
+            expires_at
+        )
+        SELECT
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6 - 1,
+            'blake3:0000000000000000000000000000000000000000000000000000000000000000',
+            $6,
+            $7,
+            games.expires_at
+        FROM games
+        WHERE games.id = $1
+        ",
+    )
+    .bind(context.game)
+    .bind(context.room)
+    .bind(command_id)
+    .bind(context.actor)
+    .bind(wrong_command_type)
+    .bind(fixture.state_version)
+    .bind(fixture.sequence)
+    .execute(&mut **transaction)
+    .await
+    .expect("the individually valid receipt must reach the deferred pairing guard");
+}
+
+async fn current_game_snapshot(room: &ReadyRoom) -> Value {
+    sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT games.snapshot
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the current game snapshot must be queryable")
+}
+
+async fn assert_v4_event_rejects_wrong_command_type(
+    source: &ReadyRoom,
+    target: &ReadyRoom,
+    source_initial_snapshot: &Value,
+    wrong_command_type: &str,
+) {
+    let fixture = v4_event_fixture_for_target(source, target, source_initial_snapshot).await;
+    let mut transaction = target
+        .database
+        .begin()
+        .await
+        .expect("the event-command pairing transaction must start");
+    insert_cloned_game_snapshot(
+        &mut transaction,
+        &source.room_code,
+        &target.room_code,
+        &fixture.initial_snapshot,
+    )
+    .await
+    .expect("the source initial snapshot must be cloneable into the target room");
+    insert_cloned_state_anchor(&mut transaction, &target.room_code).await;
+    advance_cloned_game_snapshot(&mut transaction, &target.room_code, &fixture.snapshot).await;
+    insert_cloned_state_anchor(&mut transaction, &target.room_code).await;
+    let context = cloned_event_context(&mut transaction, &target.room_code, &fixture.payload).await;
+    let command_id = uuid::Uuid::new_v4();
+    insert_v4_event_for_pairing(&mut transaction, &context, &fixture, command_id).await;
+    insert_wrong_command_receipt(
+        &mut transaction,
+        &context,
+        &fixture,
+        command_id,
+        wrong_command_type,
+    )
+    .await;
+
+    let error = transaction
+        .commit()
+        .await
+        .expect_err("a v4 event cannot commit with the other command type");
     assert_database_error_code(&error, "23514");
     assert!(
-        error
-            .to_string()
-            .contains("game event payload must match the v3 codec shape")
+        error.to_string().contains("receipt"),
+        "unexpected event-command pairing error: {error}"
     );
-    transaction
-        .rollback()
-        .await
-        .expect("the rejected v3 choice transaction must roll back");
 }
 
 fn json_request(
@@ -813,7 +1235,7 @@ fn command_request(
         &json!({
             "command_id": command_id.to_string(),
             "expected_state_version": expected_state_version,
-            "type": "complete_dark_arts"
+            "type": "end_hero_actions"
         }),
         Some(cookie),
         None,
@@ -871,8 +1293,10 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
         ))
         .await
         .expect("game start must receive a response");
-    assert_eq!(response.status(), StatusCode::CREATED);
-    response_json(response).await
+    let status = response.status();
+    let body = response_json(response).await;
+    assert_eq!(status, StatusCode::CREATED, "response body: {body}");
+    body
 }
 
 async fn authoritative_command_state(room: &ReadyRoom) -> (i64, i64, i64, i64, String) {
@@ -916,8 +1340,8 @@ async fn assert_choice_codec_versions(room: &ReadyRoom) {
     .bind(&room.room_code)
     .fetch_one(&room.database)
     .await
-    .expect("the promoted Snapshot and v3 events must be queryable");
-    assert_eq!(versions, (2, 3, 3));
+    .expect("the v3 Snapshot and v4 choice events must be queryable");
+    assert_eq!(versions, (3, 4, 4));
 }
 
 async fn assert_winning_choice_artifacts(room: &ReadyRoom, winning_command_id: uuid::Uuid) {
@@ -935,7 +1359,7 @@ async fn assert_winning_choice_artifacts(room: &ReadyRoom, winning_command_id: u
         JOIN rooms ON rooms.id = games.room_id
         JOIN game_events AS events
           ON events.game_id = games.id
-         AND events.sequence = 2
+         AND events.sequence = 1
         JOIN game_command_receipts AS receipts
           ON receipts.game_id = events.game_id
          AND receipts.command_id = events.command_id
@@ -946,7 +1370,7 @@ async fn assert_winning_choice_artifacts(room: &ReadyRoom, winning_command_id: u
     .fetch_one(&room.database)
     .await
     .expect("the winning choice artifacts must remain paired");
-    assert_eq!((stored.0, stored.1, stored.2, stored.3), (3, 2, 2, 2));
+    assert_eq!((stored.0, stored.1, stored.2, stored.3), (2, 1, 1, 1));
     assert_eq!(stored.4, winning_command_id);
     assert_eq!(stored.5, "choice_resolved");
     assert_eq!(stored.6, "resolve_choice");
@@ -1076,19 +1500,25 @@ async fn routine_recovery_rotation_and_regeneration_do_not_renew_game_retention(
 }
 
 fn assert_initial_synchronization_projection(projection: &Value) {
-    assert_eq!(projection["snapshot"]["snapshot_version"], 1);
+    assert_eq!(projection["snapshot"]["snapshot_version"], 3);
     assert_eq!(projection["snapshot"]["state_version"], 1);
     assert_eq!(projection["snapshot"]["sequence"], 0);
     assert_eq!(projection["snapshot"]["cursor"], 0);
-    assert_eq!(projection["legal_actions"], json!(["complete_dark_arts"]));
+    assert_eq!(projection["queued_phases"], json!(["end_turn"]));
+    assert_eq!(projection["queued_effect_count"], 0);
+    assert!(projection.get("queued_effects").is_none());
+    assert!(projection["turn"].get("queued_phases").is_none());
+    assert!(projection["turn"].get("queued_effect_count").is_none());
+    assert_eq!(projection["legal_actions"], json!(["end_hero_actions"]));
     assert_eq!(projection["choice"], json!({ "status": "none" }));
+    assert_eq!(projection["effects"]["status"], "resolved");
     assert_eq!(
-        projection["effects"],
-        json!({ "status": "idle", "outcomes": [] })
+        projection["effects"]["outcomes"].as_array().map(Vec::len),
+        Some(7)
     );
     assert_eq!(
         projection["participant"]["resources"],
-        json!({ "health": 10, "attack": 0, "influence": 0 })
+        json!({ "health": 9, "attack": 2, "influence": 2 })
     );
 }
 
@@ -1141,7 +1571,7 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
         room.manifest.digest
     );
     assert_eq!(host_projection["turn"]["number"], 1);
-    assert_eq!(host_projection["turn"]["phase"], "dark_arts");
+    assert_eq!(host_projection["turn"]["phase"], "hero_actions");
     assert_eq!(host_projection["participant"]["display_name"], "Minerva");
     assert_eq!(
         host_projection["participants"].as_array().map(Vec::len),
@@ -1172,9 +1602,10 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
         host_projection["snapshot"]["digest"]
     );
     assert_eq!(guest_projection["participant"]["display_name"], "Luna");
+    assert_eq!(guest_projection["legal_actions"], json!([]));
     assert!(!guest_projection.to_string().contains("seed"));
 
-    let stored = sqlx::query_as::<_, (String, String, i32, i64, i64, String, String)>(
+    let stored = sqlx::query_as::<_, (String, String, i32, i64, i64, i64, String, String)>(
         r"
         SELECT
             rooms.status,
@@ -1182,6 +1613,7 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
             octet_length(games.prng_seed),
             games.state_version,
             games.sequence,
+            games.prng_counter,
             games.state_digest,
             games.snapshot::text
         FROM games
@@ -1198,15 +1630,16 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
     assert_eq!(stored.2, 32);
     assert_eq!(stored.3, 1);
     assert_eq!(stored.4, 0);
-    assert!(stored.5.starts_with("blake3:"));
+    assert_eq!(stored.5, 1);
+    assert!(stored.6.starts_with("blake3:"));
     let snapshot: Value =
-        serde_json::from_str(&stored.6).expect("the persisted Snapshot must be JSON");
-    assert_eq!(snapshot["snapshot_version"], 1);
+        serde_json::from_str(&stored.7).expect("the persisted Snapshot must be JSON");
+    assert_eq!(snapshot["snapshot_version"], 3);
     assert_eq!(
         snapshot["versions"]["manifest_digest"],
         room.manifest.digest
     );
-    assert!(!stored.6.contains("seed"));
+    assert!(!stored.7.contains("seed"));
 }
 
 #[tokio::test]
@@ -1571,6 +2004,89 @@ async fn sealed_room_rejects_entry_hero_readiness_and_position_changes() {
             .to_string()
             .contains("sealed room participants cannot change")
     );
+
+    let participant_deletion = sqlx::query(
+        r"
+        DELETE FROM participants
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+          AND role = 'guest'
+        ",
+    )
+    .bind(&room.room_code)
+    .execute(&room.database)
+    .await
+    .expect_err("a sealed participant must not be removable");
+    assert!(
+        participant_deletion
+            .to_string()
+            .contains("sealed room participants cannot change")
+    );
+
+    let participant_count = sqlx::query_scalar::<_, i64>(
+        r"
+        SELECT COUNT(*)
+        FROM participants
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the sealed room participant count must remain queryable");
+    assert_eq!(participant_count, 2);
+}
+
+fn assert_committed_turn_event(snapshot: &Value, event: &Value) {
+    assert_eq!(snapshot["state_version"], 2);
+    assert_eq!(snapshot["sequence"], 1);
+    assert_eq!(snapshot["turn"]["number"], 2);
+    assert_eq!(snapshot["turn"]["phase"], "hero_actions");
+    assert_eq!(snapshot["turn"]["active_position"], 2);
+    assert_eq!(snapshot["prng"]["counter"], 2);
+    assert_eq!(snapshot["last_turn_steps"], event["steps"]);
+    assert_eq!(
+        snapshot["effects"]["outcomes"],
+        event["steps"][1]["effects"]
+    );
+    assert_eq!(event["sequence"], 1);
+    assert_eq!(event["state_version"], 2);
+    assert_eq!(event["event_version"], 4);
+    assert_eq!(event["type"], "turn_completed");
+    assert_eq!(event["turn"], 1);
+    assert_eq!(event["actor_position"], 1);
+    assert_eq!(event["prng_counter"], 2);
+    assert_eq!(
+        event["end_turn"],
+        json!([
+            { "type": "resource_reset", "resource": "attack", "before": 2 },
+            { "type": "resource_reset", "resource": "influence", "before": 2 }
+        ])
+    );
+    assert_eq!(
+        event["steps"]
+            .as_array()
+            .expect("turn steps must be an array")
+            .iter()
+            .map(|step| step["phase"].as_str())
+            .collect::<Vec<_>>(),
+        vec![Some("end_turn"), Some("dark_arts"), Some("villains")]
+    );
+    assert!(
+        event["steps"][1]["effects"]
+            .as_array()
+            .is_some_and(|effects| effects
+                .iter()
+                .all(|effect| effect["rule_id"] == "rule:functional"))
+    );
+    assert_eq!(event["steps"][2]["effects"], json!([]));
+    assert_eq!(event["control"]["turn"], 2);
+    assert_eq!(event["control"]["phase"], "hero_actions");
+    assert_eq!(event["control"]["active_position"], 2);
+    assert_eq!(event["control"]["queued_phases"], json!(["end_turn"]));
+    assert_eq!(
+        event["control"]["decision_point"],
+        json!({ "type": "player_intent", "responsible_position": 2 })
+    );
 }
 
 async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration: &str) {
@@ -1621,27 +2137,17 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     .expect("every committed command artifact must be queryable together");
     assert_eq!(stored.0, 2);
     assert_eq!(stored.1, 1);
-    assert_eq!(stored.2, 1);
-    assert_eq!(stored.4, "dark_arts_completed");
+    assert_eq!(stored.2, 2);
+    assert_eq!(stored.4, "turn_completed");
     assert_eq!(stored.6, 2);
     assert_eq!(stored.7, 1);
     assert!(stored.8, "the receipt and game must share one expiration");
     assert!(stored.9, "an accepted action must renew retention");
-    assert_eq!(stored.10, 1);
-    assert_eq!(stored.11, 2);
+    assert_eq!(stored.10, 3);
+    assert_eq!(stored.11, 4);
     let snapshot: Value = serde_json::from_str(&stored.3).expect("snapshot must be JSON");
     let event: Value = serde_json::from_str(&stored.5).expect("event must be JSON");
-    assert_eq!(snapshot["snapshot_version"], 1);
-    assert_eq!(snapshot["state_version"], 2);
-    assert_eq!(snapshot["sequence"], 1);
-    assert_eq!(snapshot["turn"]["phase"], "hero_action");
-    assert_eq!(snapshot["prng"]["counter"], 1);
-    assert_eq!(snapshot["effects"]["outcomes"], event["effects"]);
-    assert_eq!(event["sequence"], 1);
-    assert_eq!(event["state_version"], 2);
-    assert_eq!(event["event_version"], 2);
-    assert_eq!(event["effect_stop"], "stable");
-    assert_eq!(event["prng_counter"], 1);
+    assert_committed_turn_event(&snapshot, &event);
 
     let anchors = sqlx::query_as::<_, (i64, bool)>(
         r"
@@ -1668,8 +2174,47 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     assert_eq!(anchors, (2, true));
 }
 
+fn assert_host_projection_after_turn_handoff(accepted: &Value) {
+    assert_eq!(accepted["projection"]["turn"]["number"], 2);
+    assert_eq!(accepted["projection"]["turn"]["phase"], "hero_actions");
+    assert_eq!(accepted["projection"]["turn"]["active_position"], 2);
+    assert_eq!(accepted["projection"]["queued_phases"], json!(["end_turn"]));
+    assert_eq!(accepted["projection"]["queued_effect_count"], 0);
+    assert!(accepted["projection"].get("queued_effects").is_none());
+    assert!(
+        accepted["projection"]["turn"]
+            .get("queued_phases")
+            .is_none()
+    );
+    assert!(
+        accepted["projection"]["turn"]
+            .get("queued_effect_count")
+            .is_none()
+    );
+    assert_eq!(accepted["projection"]["snapshot"]["state_version"], 2);
+    assert_eq!(accepted["projection"]["snapshot"]["sequence"], 1);
+    assert_eq!(accepted["projection"]["legal_actions"], json!([]));
+    assert_eq!(
+        accepted["projection"]["participant"]["resources"],
+        json!({ "health": 9, "attack": 0, "influence": 0 })
+    );
+    assert_eq!(accepted["projection"]["effects"]["status"], "resolved");
+    let outcomes = accepted["projection"]["effects"]["outcomes"]
+        .as_array()
+        .expect("effect outcomes must be an array");
+    assert_eq!(outcomes.len(), 7);
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["type"] == "die_rolled"
+            && outcome["die"] == "d4"
+            && (1..=4).contains(&outcome["result"].as_u64().unwrap_or_default())
+    }));
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["type"] == "no_op" && outcome["reason"] == "no_eligible_target"
+    }));
+}
+
 #[tokio::test]
-async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expiration() {
+async fn active_player_ends_actions_and_commits_the_next_turn_after_automatic_phases() {
     let room = ready_room().await;
     let start_response = room
         .app
@@ -1684,6 +2229,10 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
         .expect("game start must receive a response");
     assert_eq!(start_response.status(), StatusCode::CREATED);
     let initial = response_json(start_response).await;
+    assert_eq!(initial["turn"]["number"], 1);
+    assert_eq!(initial["turn"]["phase"], "hero_actions");
+    assert_eq!(initial["turn"]["active_position"], 1);
+    assert_eq!(initial["legal_actions"], json!(["end_hero_actions"]));
     let initial_expiration = initial["game"]["expires_at"]
         .as_str()
         .expect("the initial expiration must be present")
@@ -1699,7 +2248,7 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
             &json!({
                 "command_id": command_id.to_string(),
                 "expected_state_version": 1,
-                "type": "complete_dark_arts"
+                "type": "end_hero_actions"
             }),
             Some(&room.host_cookie),
             None,
@@ -1714,30 +2263,34 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
     );
     let accepted = response_json(response).await;
     assert_eq!(accepted["receipt"]["command_id"], command_id.to_string());
+    assert_eq!(accepted["receipt"]["type"], "end_hero_actions");
     assert_eq!(accepted["receipt"]["status"], "accepted");
     assert_eq!(accepted["receipt"]["accepted_state_version"], 2);
     assert_eq!(accepted["receipt"]["accepted_sequence"], 1);
-    assert_eq!(accepted["projection"]["turn"]["phase"], "hero_action");
-    assert_eq!(accepted["projection"]["snapshot"]["state_version"], 2);
-    assert_eq!(accepted["projection"]["snapshot"]["sequence"], 1);
-    assert_eq!(accepted["projection"]["legal_actions"], json!([]));
+    assert_host_projection_after_turn_handoff(&accepted);
+
+    let guest_response = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header(header::COOKIE, &room.guest_cookie)
+                .body(Body::empty())
+                .expect("the guest projection request must be valid"),
+        )
+        .await
+        .expect("the next active player must receive a projection");
+    assert_eq!(guest_response.status(), StatusCode::OK);
+    let guest = response_json(guest_response).await;
+    assert_eq!(guest["turn"]["number"], 2);
+    assert_eq!(guest["turn"]["phase"], "hero_actions");
+    assert_eq!(guest["turn"]["active_position"], 2);
+    assert_eq!(guest["legal_actions"], json!(["end_hero_actions"]));
     assert_eq!(
-        accepted["projection"]["participant"]["resources"],
+        guest["participant"]["resources"],
         json!({ "health": 9, "attack": 2, "influence": 2 })
     );
-    assert_eq!(accepted["projection"]["effects"]["status"], "resolved");
-    let outcomes = accepted["projection"]["effects"]["outcomes"]
-        .as_array()
-        .expect("effect outcomes must be an array");
-    assert_eq!(outcomes.len(), 7);
-    assert!(outcomes.iter().any(|outcome| {
-        outcome["type"] == "die_rolled"
-            && outcome["die"] == "d4"
-            && (1..=4).contains(&outcome["result"].as_u64().unwrap_or_default())
-    }));
-    assert!(outcomes.iter().any(|outcome| {
-        outcome["type"] == "no_op" && outcome["reason"] == "no_eligible_target"
-    }));
 
     assert_committed_command_artifacts(&room, &initial_expiration).await;
 
@@ -1760,6 +2313,26 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
         recovered["projection"]["snapshot"],
         accepted["projection"]["snapshot"]
     );
+}
+
+fn assert_initial_each_hero_choice(started: &Value) -> String {
+    assert_eq!(started["snapshot"]["snapshot_version"], 3);
+    assert_eq!(started["snapshot"]["state_version"], 1);
+    assert_eq!(started["snapshot"]["sequence"], 0);
+    assert_eq!(started["turn"]["phase"], "dark_arts");
+    assert_eq!(started["turn"]["active_position"], 1);
+    assert_eq!(started["choice"]["status"], "pending");
+    assert_eq!(started["choice"]["cause"], "rule:functional");
+    assert_eq!(started["choice"]["responsible_position"], 1);
+    assert_eq!(
+        started["choice"]["options"],
+        json!(["option:1", "option:2"])
+    );
+    assert_eq!(started["legal_actions"], json!(["resolve_choice"]));
+    started["choice"]["id"]
+        .as_str()
+        .expect("the global choice ID must be present")
+        .to_owned()
 }
 
 struct GameplayInstances {
@@ -1835,25 +2408,14 @@ async fn inspect_initial_gameplay(room: &ReadyRoom, initial: &Value) -> Gameplay
     }
 }
 
-async fn enter_gameplay_hero_action(room: &ReadyRoom, instances: &GameplayInstances) {
-    let response = room
-        .app
-        .clone()
-        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
-        .await
-        .expect("the Dark Arts command must receive a response");
-    assert_eq!(response.status(), StatusCode::OK);
-    let after_dark_arts = response_json(response).await;
+fn assert_gameplay_hero_actions(initial: &Value, instances: &GameplayInstances) {
+    assert_eq!(initial["turn"]["phase"], "hero_actions");
     assert_eq!(
-        after_dark_arts["projection"]["turn"]["phase"],
-        "hero_action"
-    );
-    assert_eq!(
-        after_dark_arts["projection"]["participant"]["resources"],
+        initial["participant"]["resources"],
         json!({ "health": 9, "attack": 0, "influence": 0 })
     );
     assert_eq!(
-        after_dark_arts["projection"]["legal_intentions"]["play_cards"][0]["card_id"],
+        initial["legal_intentions"]["play_cards"][0]["card_id"],
         instances.host_card
     );
 }
@@ -1867,7 +2429,7 @@ async fn assert_foreign_card_is_rejected(room: &ReadyRoom, instances: &GameplayI
             "/api/games/current/commands",
             &json!({
                 "command_id": uuid::Uuid::new_v4().to_string(),
-                "expected_state_version": 2,
+                "expected_state_version": 1,
                 "type": "play_card",
                 "card_id": instances.guest_card,
                 "targets": [{
@@ -1885,7 +2447,7 @@ async fn assert_foreign_card_is_rejected(room: &ReadyRoom, instances: &GameplayI
         response_json(response).await["error"]["code"],
         "GAME_ACTION_NOT_ALLOWED"
     );
-    assert_eq!(current_official_state(room).await.0, 2);
+    assert_eq!(current_official_state(room).await.0, 1);
 }
 
 async fn play_gameplay_starter_card(room: &ReadyRoom, instances: &GameplayInstances) {
@@ -1897,7 +2459,7 @@ async fn play_gameplay_starter_card(room: &ReadyRoom, instances: &GameplayInstan
             "/api/games/current/commands",
             &json!({
                 "command_id": uuid::Uuid::new_v4().to_string(),
-                "expected_state_version": 2,
+                "expected_state_version": 1,
                 "type": "play_card",
                 "card_id": instances.host_card,
                 "targets": [{
@@ -1936,7 +2498,7 @@ async fn assign_all_gameplay_attack(room: &ReadyRoom, instances: &GameplayInstan
             "/api/games/current/commands",
             &json!({
                 "command_id": uuid::Uuid::new_v4().to_string(),
-                "expected_state_version": 3,
+                "expected_state_version": 2,
                 "type": "assign_attack",
                 "villain_id": instances.villain,
                 "amount": 2
@@ -1969,7 +2531,7 @@ async fn assign_all_gameplay_attack(room: &ReadyRoom, instances: &GameplayInstan
 async fn acquire_card_and_assert_replay(room: &ReadyRoom, instances: &GameplayInstances) -> String {
     let acquire_body = json!({
         "command_id": uuid::Uuid::new_v4().to_string(),
-        "expected_state_version": 4,
+        "expected_state_version": 3,
         "type": "acquire_card",
         "card_id": instances.market_card
     });
@@ -1987,7 +2549,7 @@ async fn acquire_card_and_assert_replay(room: &ReadyRoom, instances: &GameplayIn
         .expect("the acquisition command must receive a response");
     assert_eq!(response.status(), StatusCode::OK);
     let acquired = response_json(response).await;
-    assert_eq!(acquired["projection"]["snapshot"]["state_version"], 5);
+    assert_eq!(acquired["projection"]["snapshot"]["state_version"], 4);
     assert_eq!(
         acquired["projection"]["participant"]["resources"]["influence"],
         1
@@ -2057,7 +2619,7 @@ async fn assert_persisted_gameplay_state(
     .fetch_one(&room.database)
     .await
     .expect("the final game state must be persisted");
-    assert_eq!((stored.0, stored.1), (5, 4));
+    assert_eq!((stored.0, stored.1), (4, 3));
     let snapshot: Value = serde_json::from_str(&stored.2).expect("the Snapshot must be JSON");
     let entities = snapshot["effects"]["entities"]
         .as_array()
@@ -2115,16 +2677,11 @@ async fn assert_gameplay_command_history(
             .iter()
             .map(|(event_type, _)| event_type.as_str())
             .collect::<Vec<_>>(),
-        vec![
-            "dark_arts_completed",
-            "card_played",
-            "attack_assigned",
-            "card_acquired"
-        ]
+        vec!["card_played", "attack_assigned", "card_acquired"]
     );
     let acquisition_event: Value =
-        serde_json::from_str(&events[3].1).expect("the acquisition event must be JSON");
-    assert_eq!(acquisition_event["event_version"], 3);
+        serde_json::from_str(&events[2].1).expect("the acquisition event must be JSON");
+    assert_eq!(acquisition_event["event_version"], 4);
     assert_eq!(acquisition_event["card_id"], instances.market_card);
     assert_eq!(acquisition_event["cost"], 2);
     assert_eq!(acquisition_event["refill_card_id"], refill_card_id);
@@ -2151,12 +2708,7 @@ async fn assert_gameplay_command_history(
     .expect("each accepted command must have one receipt");
     assert_eq!(
         command_types,
-        vec![
-            "complete_dark_arts",
-            "play_card",
-            "assign_attack",
-            "acquire_card"
-        ]
+        vec!["play_card", "assign_attack", "acquire_card"]
     );
 }
 
@@ -2166,7 +2718,7 @@ async fn hero_actions_move_exact_instances_spend_resources_refill_and_replay_ide
     let initial = start_ready_game(&room, "hero-actions-start").await;
     let instances = inspect_initial_gameplay(&room, &initial).await;
 
-    enter_gameplay_hero_action(&room, &instances).await;
+    assert_gameplay_hero_actions(&initial, &instances);
     assert_foreign_card_is_rejected(&room, &instances).await;
     play_gameplay_starter_card(&room, &instances).await;
     assign_all_gameplay_attack(&room, &instances).await;
@@ -2180,7 +2732,7 @@ async fn optional_named_card_target_can_be_empty_and_survive_receipt_recovery() 
     let room = ready_room_with_manifest(optional_target_manifest()).await;
     let initial = start_ready_game(&room, "optional-target-start").await;
     let instances = inspect_initial_gameplay(&room, &initial).await;
-    enter_gameplay_hero_action(&room, &instances).await;
+    assert_gameplay_hero_actions(&initial, &instances);
 
     let command_id = uuid::Uuid::new_v4();
     let response = room
@@ -2191,7 +2743,7 @@ async fn optional_named_card_target_can_be_empty_and_survive_receipt_recovery() 
             "/api/games/current/commands",
             &json!({
                 "command_id": command_id.to_string(),
-                "expected_state_version": 2,
+                "expected_state_version": 1,
                 "type": "play_card",
                 "card_id": instances.host_card,
                 "targets": [{
@@ -2208,7 +2760,7 @@ async fn optional_named_card_target_can_be_empty_and_survive_receipt_recovery() 
     assert_eq!(response.status(), StatusCode::OK);
     let accepted = response_json(response).await;
     assert_eq!(accepted["receipt"]["status"], "accepted");
-    assert_eq!(accepted["projection"]["snapshot"]["state_version"], 3);
+    assert_eq!(accepted["projection"]["snapshot"]["state_version"], 2);
     assert_eq!(accepted["projection"]["table"]["hand"], json!([]));
     assert_eq!(
         accepted["projection"]["table"]["play_area"][0]["instance_id"],
@@ -2236,42 +2788,8 @@ async fn optional_named_card_target_can_be_empty_and_survive_receipt_recovery() 
     );
 }
 
-#[tokio::test]
-async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command_artifacts() {
-    let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
-    start_ready_game(&room, "each-hero-choice-start").await;
-
-    let complete_response = room
-        .app
-        .clone()
-        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
-        .await
-        .expect("the complete Dark Arts command must receive a response");
-    assert_eq!(complete_response.status(), StatusCode::OK);
-    let completed = response_json(complete_response).await;
-    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 2);
-    assert_eq!(completed["projection"]["snapshot"]["state_version"], 2);
-    assert_eq!(completed["projection"]["snapshot"]["sequence"], 1);
-    assert_eq!(completed["projection"]["turn"]["active_position"], 1);
-    assert_eq!(completed["projection"]["choice"]["status"], "pending");
-    assert_eq!(
-        completed["projection"]["choice"]["cause"],
-        "rule:functional"
-    );
-    assert_eq!(completed["projection"]["choice"]["responsible_position"], 1);
-    assert_eq!(
-        completed["projection"]["choice"]["options"],
-        json!(["option:1", "option:2"])
-    );
-    assert_eq!(
-        completed["projection"]["legal_actions"],
-        json!(["resolve_choice"])
-    );
-    let choice_id = completed["projection"]["choice"]["id"]
-        .as_str()
-        .expect("the global choice ID must be present")
-        .to_owned();
-    let before_rejection = authoritative_command_state(&room).await;
+async fn assert_unassigned_choice_rejected_without_artifacts(room: &ReadyRoom, choice_id: &str) {
+    let before_rejection = authoritative_command_state(room).await;
     assert_eq!(
         (
             before_rejection.0,
@@ -2279,7 +2797,7 @@ async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command
             before_rejection.2,
             before_rejection.3,
         ),
-        (2, 1, 1, 1)
+        (1, 0, 0, 0)
     );
 
     let rejected_command_id = uuid::Uuid::new_v4();
@@ -2289,8 +2807,8 @@ async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command
         .oneshot(resolve_choice_request(
             &room.guest_cookie,
             rejected_command_id,
-            2,
-            &choice_id,
+            1,
+            choice_id,
             &["option:1"],
         ))
         .await
@@ -2300,19 +2818,21 @@ async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command
     assert_eq!(rejected["error"]["code"], "CHOICE_NOT_ASSIGNED");
     assert_eq!(rejected["error"]["category"], "authorization");
     assert_eq!(rejected["error"]["message_key"], "game.choice.not_assigned");
-    assert_eq!(authoritative_command_state(&room).await, before_rejection);
+    assert_eq!(authoritative_command_state(room).await, before_rejection);
 
     let missing_receipt = command_result(&room.app, &room.guest_cookie, rejected_command_id).await;
     assert_eq!(missing_receipt.status(), StatusCode::NOT_FOUND);
+}
 
+async fn resolve_first_each_hero_choice(room: &ReadyRoom, choice_id: &str) -> String {
     let resolve_response = room
         .app
         .clone()
         .oneshot(resolve_choice_request(
             &room.host_cookie,
             uuid::Uuid::new_v4(),
-            2,
-            &choice_id,
+            1,
+            choice_id,
             &["option:1"],
         ))
         .await
@@ -2320,11 +2840,13 @@ async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command
     assert_eq!(resolve_response.status(), StatusCode::OK);
     let resolved = response_json(resolve_response).await;
     assert_eq!(resolved["receipt"]["type"], "resolve_choice");
-    assert_eq!(resolved["receipt"]["accepted_state_version"], 3);
-    assert_eq!(resolved["receipt"]["accepted_sequence"], 2);
-    assert_eq!(resolved["projection"]["snapshot"]["state_version"], 3);
-    assert_eq!(resolved["projection"]["snapshot"]["sequence"], 2);
+    assert_eq!(resolved["receipt"]["accepted_state_version"], 2);
+    assert_eq!(resolved["receipt"]["accepted_sequence"], 1);
+    assert_eq!(resolved["projection"]["snapshot"]["snapshot_version"], 3);
+    assert_eq!(resolved["projection"]["snapshot"]["state_version"], 2);
+    assert_eq!(resolved["projection"]["snapshot"]["sequence"], 1);
     assert_eq!(resolved["projection"]["turn"]["active_position"], 1);
+    assert_eq!(resolved["projection"]["turn"]["phase"], "dark_arts");
     assert_eq!(resolved["projection"]["choice"]["status"], "pending");
     assert_eq!(resolved["projection"]["choice"]["cause"], "rule:functional");
     assert_eq!(resolved["projection"]["choice"]["responsible_position"], 2);
@@ -2334,22 +2856,85 @@ async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command
     );
     assert_eq!(resolved["projection"]["legal_actions"], json!([]));
 
+    resolved["projection"]["choice"]["id"]
+        .as_str()
+        .expect("the second participant choice must be present")
+        .to_owned()
+}
+
+async fn complete_second_each_hero_choice(room: &ReadyRoom, second_choice_id: &str) {
+    let completed = room
+        .app
+        .clone()
+        .oneshot(resolve_choice_request(
+            &room.guest_cookie,
+            uuid::Uuid::new_v4(),
+            2,
+            second_choice_id,
+            &["option:2"],
+        ))
+        .await
+        .expect("the second participant must complete the automatic phase");
+    if completed.status() != StatusCode::OK {
+        let status = completed.status();
+        let body = response_json(completed).await;
+        panic!("the second participant choice returned {status}: {body}");
+    }
+    let completed = response_json(completed).await;
+    assert_eq!(completed["receipt"]["accepted_state_version"], 3);
+    assert_eq!(completed["receipt"]["accepted_sequence"], 2);
+    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 3);
+    assert_eq!(completed["projection"]["snapshot"]["state_version"], 3);
+    assert_eq!(completed["projection"]["snapshot"]["sequence"], 2);
+    assert_eq!(completed["projection"]["turn"]["number"], 1);
+    assert_eq!(completed["projection"]["turn"]["phase"], "hero_actions");
+    assert_eq!(completed["projection"]["turn"]["active_position"], 1);
+    assert_eq!(
+        completed["projection"]["choice"],
+        json!({ "status": "none" })
+    );
+    assert_eq!(completed["projection"]["legal_actions"], json!([]));
+}
+
+async fn assert_active_host_can_end_hero_actions(room: &ReadyRoom) {
+    let host_session = room
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header(header::COOKIE, &room.host_cookie)
+                .body(Body::empty())
+                .expect("the active participant projection request must be valid"),
+        )
+        .await
+        .expect("the active participant projection must receive a response");
+    assert_eq!(host_session.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(host_session).await["legal_actions"],
+        json!(["end_hero_actions"])
+    );
+}
+
+#[tokio::test]
+async fn each_hero_choice_is_assigned_in_position_order_without_rejected_command_artifacts() {
+    let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    let started = start_ready_game(&room, "each-hero-choice-start").await;
+    let choice_id = assert_initial_each_hero_choice(&started);
+
+    assert_unassigned_choice_rejected_without_artifacts(&room, &choice_id).await;
+    let second_choice_id = resolve_first_each_hero_choice(&room, &choice_id).await;
+    complete_second_each_hero_choice(&room, &second_choice_id).await;
+    assert_active_host_can_end_hero_actions(&room).await;
+
     assert_choice_codec_versions(&room).await;
 }
 
 #[tokio::test]
 async fn two_sessions_for_the_responsible_participant_accept_one_choice_resolution() {
     let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
-    start_ready_game(&room, "choice-session-race-start").await;
-    let completed = room
-        .app
-        .clone()
-        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
-        .await
-        .expect("the choice-producing command must receive a response");
-    assert_eq!(completed.status(), StatusCode::OK);
-    let completed = response_json(completed).await;
-    let choice_id = completed["projection"]["choice"]["id"]
+    let started = start_ready_game(&room, "choice-session-race-start").await;
+    let choice_id = started["choice"]["id"]
         .as_str()
         .expect("the first participant choice must be present")
         .to_owned();
@@ -2368,7 +2953,7 @@ async fn two_sessions_for_the_responsible_participant_accept_one_choice_resoluti
             app.oneshot(resolve_choice_request(
                 &cookie,
                 first_command_id,
-                2,
+                1,
                 &choice_id,
                 &["option:1"],
             ))
@@ -2385,7 +2970,7 @@ async fn two_sessions_for_the_responsible_participant_accept_one_choice_resoluti
             app.oneshot(resolve_choice_request(
                 &cookie,
                 second_command_id,
-                2,
+                1,
                 &choice_id,
                 &["option:1"],
             ))
@@ -2420,7 +3005,7 @@ async fn two_sessions_for_the_responsible_participant_accept_one_choice_resoluti
     assert_eq!(recovered.status(), StatusCode::OK);
     let recovered = response_json(recovered).await;
     assert_eq!(recovered["receipt"], accepted["receipt"]);
-    assert_eq!(recovered["projection"]["snapshot"]["state_version"], 3);
+    assert_eq!(recovered["projection"]["snapshot"]["state_version"], 2);
     assert_eq!(
         command_result(&room.app, &second_host_cookie, losing_command_id)
             .await
@@ -2434,26 +3019,14 @@ async fn two_sessions_for_the_responsible_participant_accept_one_choice_resoluti
 #[tokio::test]
 async fn a_terminal_effect_commits_the_same_status_to_snapshot_row_and_projection() {
     let room = ready_room_with_manifest(terminal_manifest()).await;
-    start_ready_game(&room, "terminal-effect-start").await;
+    let started = start_ready_game(&room, "terminal-effect-start").await;
 
-    let response = room
-        .app
-        .clone()
-        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
-        .await
-        .expect("the terminal command must receive a response");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let accepted = response_json(response).await;
-    assert_eq!(accepted["projection"]["game"]["status"], "won");
-    assert_eq!(accepted["projection"]["effects"]["status"], "terminal");
-    assert_eq!(accepted["projection"]["legal_actions"], json!([]));
-    assert_eq!(
-        accepted["projection"]["choice"],
-        json!({ "status": "none" })
-    );
+    assert_eq!(started["game"]["status"], "won");
+    assert_eq!(started["effects"]["status"], "terminal");
+    assert_eq!(started["legal_actions"], json!([]));
+    assert_eq!(started["choice"], json!({ "status": "none" }));
     assert!(
-        accepted["projection"]["effects"]["outcomes"]
+        started["effects"]["outcomes"]
             .as_array()
             .is_some_and(|outcomes| outcomes
                 .iter()
@@ -2610,6 +3183,7 @@ async fn an_event_actor_must_belong_to_the_games_room() {
     .fetch_one(&mut *transaction)
     .await
     .expect("the unrelated actor must exist");
+    let payload = test_turn_completed_payload(1, 2, 1, 1);
 
     let error = sqlx::query(
         r"
@@ -2617,23 +3191,26 @@ async fn an_event_actor_must_belong_to_the_games_room() {
             game_id,
             room_id,
             sequence,
+            event_version,
             event_type,
             command_id,
             actor_participant_id,
             state_version,
             payload
         )
-        VALUES ($1, $2, 1, 'dark_arts_completed', $3, $4, 2, '{}'::jsonb)
+        VALUES ($1, $2, 1, 4, 'turn_completed', $3, $4, 2, $5)
         ",
     )
     .bind(game_id)
     .bind(room_id)
     .bind(uuid::Uuid::new_v4())
     .bind(other_actor)
+    .bind(payload)
     .execute(&mut *transaction)
     .await
     .expect_err("an event actor from another room must be rejected");
-    assert_database_error_code(&error, "23503");
+    assert_database_error_code(&error, "23514");
+    assert!(error.to_string().contains("payload metadata must match"));
     transaction
         .rollback()
         .await
@@ -2670,12 +3247,19 @@ async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
             .execute(&mut *transaction)
             .await
             .expect("the test snapshot must advance inside the transaction");
+        let payload = test_turn_completed_payload(
+            1,
+            u64::try_from(payload_state_version).expect("the state version must be positive"),
+            1,
+            1,
+        );
         let error = sqlx::query(
             r"
             INSERT INTO game_events (
                 game_id,
                 room_id,
                 sequence,
+                event_version,
                 event_type,
                 command_id,
                 actor_participant_id,
@@ -2686,18 +3270,12 @@ async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
                 $1,
                 $2,
                 1,
-                'dark_arts_completed',
+                4,
+                'turn_completed',
                 $3,
                 $4,
                 $5,
-                jsonb_build_object(
-                    'event_version', 1,
-                    'type', 'dark_arts_completed',
-                    'sequence', 1,
-                    'state_version', $6,
-                    'turn', 1,
-                    'actor_position', 1
-                )
+                $6
             )
             ",
         )
@@ -2706,7 +3284,7 @@ async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
         .bind(uuid::Uuid::new_v4())
         .bind(actor_id)
         .bind(row_state_version)
-        .bind(payload_state_version)
+        .bind(payload)
         .execute(&mut *transaction)
         .await
         .expect_err("incoherent event metadata must be rejected");
@@ -2735,22 +3313,10 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
     .await
     .expect("the test game must exist");
 
-    for (event_type, extra_payload, expected_message) in [
-        (
-            "future_event",
-            "{}",
-            "event type is not supported by the current codec",
-        ),
-        (
-            "dark_arts_completed",
-            r#"{"unexpected":true}"#,
-            "payload metadata must match",
-        ),
-        (
-            "dark_arts_completed",
-            r#"{"sequence":1.0}"#,
-            "payload must match the current codec shape",
-        ),
+    for (event_type, extra_payload) in [
+        ("future_event", "{}"),
+        ("turn_completed", r#"{"unexpected":true}"#),
+        ("turn_completed", r#"{"sequence":1.0}"#),
     ] {
         let mut transaction = room
             .database
@@ -2762,12 +3328,15 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
             .execute(&mut *transaction)
             .await
             .expect("the test snapshot must advance inside the transaction");
+        let mut payload = test_turn_completed_payload(1, 2, 1, 1);
+        payload["type"] = json!(event_type);
         let error = sqlx::query(
             r"
             INSERT INTO game_events (
                 game_id,
                 room_id,
                 sequence,
+                event_version,
                 event_type,
                 command_id,
                 actor_participant_id,
@@ -2778,18 +3347,12 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
                 $1,
                 $2,
                 1,
+                4,
                 $3,
                 $4,
                 $5,
                 2,
-                jsonb_build_object(
-                    'event_version', 1,
-                    'type', $3,
-                    'sequence', 1,
-                    'state_version', 2,
-                    'turn', 1,
-                    'actor_position', 1
-                ) || $6::jsonb
+                $6 || $7::jsonb
             )
             ",
         )
@@ -2798,12 +3361,17 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
         .bind(event_type)
         .bind(uuid::Uuid::new_v4())
         .bind(actor_id)
+        .bind(payload)
         .bind(extra_payload)
         .execute(&mut *transaction)
         .await
         .expect_err("an event outside the current codec must be rejected");
         assert_database_error_code(&error, "23514");
-        assert!(error.to_string().contains(expected_message));
+        assert!(
+            error
+                .to_string()
+                .contains("payload must match the current codec shape")
+        );
         transaction
             .rollback()
             .await
@@ -2812,14 +3380,14 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
 }
 
 #[tokio::test]
-async fn a_v2_event_rejects_an_incomplete_closed_effect_outcome() {
+async fn legacy_event_codecs_are_rejected_for_new_appends() {
     let room = ready_room().await;
-    start_ready_game(&room, "event-v2-effect-start").await;
+    start_ready_game(&room, "legacy-event-write-start").await;
     let mut transaction = room
         .database
         .begin()
         .await
-        .expect("the v2 effect transaction must start");
+        .expect("the legacy event transaction must start");
     let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
         r"
             UPDATE games
@@ -2833,22 +3401,17 @@ async fn a_v2_event_rejects_an_incomplete_closed_effect_outcome() {
     .fetch_one(&mut *transaction)
     .await
     .expect("the test snapshot must advance inside the transaction");
-    let malformed = json!({
+    let legacy = json!({
         "event_version": 2,
         "type": "dark_arts_completed",
         "sequence": 1,
         "state_version": 2,
         "turn": 1,
         "actor_position": 1,
-        "effects": [{
-            "type": "die_rolled",
-            "rule_id": "rule:functional"
-        }],
+        "effects": [],
         "effect_stop": "stable",
-        "choice": null,
-        "prng_counter": 0
+        "prng_counter": 1
     });
-
     let error = sqlx::query(
         r"
         INSERT INTO game_events (
@@ -2869,6 +3432,71 @@ async fn a_v2_event_rejects_an_incomplete_closed_effect_outcome() {
     .bind(room_id)
     .bind(uuid::Uuid::new_v4())
     .bind(actor_id)
+    .bind(legacy)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("legacy event codecs must be read-only");
+
+    assert_database_error_code(&error, "23514");
+    assert!(
+        error
+            .to_string()
+            .contains("legacy game event codecs are read-only")
+    );
+    transaction
+        .rollback()
+        .await
+        .expect("the legacy event transaction must roll back");
+}
+
+#[tokio::test]
+async fn a_v4_event_rejects_an_incomplete_automatic_effect_outcome() {
+    let room = ready_room().await;
+    start_ready_game(&room, "event-v3-effect-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the v4 effect transaction must start");
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            UPDATE games
+            SET sequence = 1,
+                state_version = 2
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            RETURNING id, room_id, started_by_participant_id
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test snapshot must advance inside the transaction");
+    let mut malformed = test_turn_completed_payload(1, 2, 1, 1);
+    malformed["steps"][1]["effects"] = json!([{
+        "type": "die_rolled",
+        "rule_id": "rule:functional"
+    }]);
+
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_version,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, 1, 4, 'turn_completed', $3, $4, 2, $5)
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(actor_id)
     .bind(malformed)
     .execute(&mut *transaction)
     .await
@@ -2878,46 +3506,754 @@ async fn a_v2_event_rejects_an_incomplete_closed_effect_outcome() {
     assert!(
         error
             .to_string()
-            .contains("event effect payload is invalid")
+            .contains("payload must match the current codec shape")
     );
     transaction
         .rollback()
         .await
-        .expect("the rejected v2 effect transaction must roll back");
+        .expect("the rejected v4 effect transaction must roll back");
+}
+
+#[tokio::test]
+async fn v4_event_validation_rejects_nulls_and_cross_field_inconsistencies() {
+    let room = ready_room().await;
+    let valid = test_turn_completed_payload(1, 2, 1, 1);
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT valid_turn_completed_payload_v4($1)")
+            .bind(&valid)
+            .fetch_one(&room.database)
+            .await
+            .expect("the v4 validator must accept the canonical fixture")
+    );
+
+    let mut null_choice_kind = valid.clone();
+    null_choice_kind["control"] = json!({
+        "status": "in_progress",
+        "turn": 2,
+        "phase": "dark_arts",
+        "active_position": 2,
+        "queued_phases": ["villains", "hero_actions", "end_turn"],
+        "queued_effects": [],
+        "decision_point": {
+            "type": "effect_choice",
+            "choice": {
+                "id": "rule:test:effect:0",
+                "rule_id": "rule:test",
+                "path": [],
+                "responsible_position": 2,
+                "kind": null,
+                "options": ["option:1", "option:2"],
+                "min": 1,
+                "max": 1
+            }
+        }
+    });
+    null_choice_kind["steps"] = json!([
+        { "phase": "end_turn", "effects": [] },
+        { "phase": "dark_arts", "effects": [] }
+    ]);
+
+    let mut null_shuffle_zone = valid.clone();
+    null_shuffle_zone["end_turn"] = json!([{
+        "type": "pile_shuffled",
+        "owner_position": 1,
+        "zone": null,
+        "bottom_to_top": ["card:a"]
+    }]);
+
+    let mut null_step_phase = valid.clone();
+    null_step_phase["steps"][2]["phase"] = Value::Null;
+
+    let mut null_control_status = valid.clone();
+    null_control_status["control"]["status"] = Value::Null;
+
+    let mut same_zone_move = valid.clone();
+    same_zone_move["steps"][1]["effects"] = json!([{
+        "type": "moved",
+        "rule_id": "rule:test",
+        "target_id": "card:a",
+        "from": "hero_hand",
+        "to": "hero_hand"
+    }]);
+
+    let mut stable_without_villains = valid.clone();
+    stable_without_villains["steps"] = json!([
+        { "phase": "end_turn", "effects": [] },
+        { "phase": "dark_arts", "effects": [] }
+    ]);
+
+    for (case, payload) in [
+        ("null choice kind", null_choice_kind),
+        ("null shuffle zone", null_shuffle_zone),
+        ("null step phase", null_step_phase),
+        ("null control status", null_control_status),
+        ("same-zone move", same_zone_move),
+        ("stable event without Villains", stable_without_villains),
+    ] {
+        let accepted = sqlx::query_scalar::<_, bool>("SELECT valid_turn_completed_payload_v4($1)")
+            .bind(payload)
+            .fetch_one(&room.database)
+            .await
+            .unwrap_or_else(|error| panic!("the v4 validator must evaluate {case}: {error}"));
+        assert!(!accepted, "the v4 validator accepted {case}");
+    }
+}
+
+fn v3_terminal_event_fixture() -> Value {
+    json!({
+        "event_version": 3,
+        "type": "dark_arts_completed",
+        "sequence": 1,
+        "state_version": 2,
+        "turn": 1,
+        "actor_position": 1,
+        "effects": [
+            { "type": "terminal", "rule_id": "rule:first", "outcome": "lost" }
+        ],
+        "effect_stop": "terminal",
+        "choice": null,
+        "prng_counter": 0
+    })
+}
+
+async fn legacy_event_passes_replay_preflight(
+    room: &ReadyRoom,
+    event_version: i16,
+    payload: &Value,
+    description: &str,
+) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT valid_legacy_game_event_for_replay(\
+            $1, 'dark_arts_completed', $2, 1::BIGINT, 2::BIGINT, 1::SMALLINT\
+        )",
+    )
+    .bind(event_version)
+    .bind(payload)
+    .fetch_one(&room.database)
+    .await
+    .unwrap_or_else(|error| panic!("the legacy preflight must evaluate {description}: {error}"))
+}
+
+#[tokio::test]
+async fn legacy_replay_preflight_rejects_rows_the_rust_codec_cannot_decode() {
+    let room = ready_room().await;
+    let v1 = json!({
+        "event_version": 1,
+        "type": "dark_arts_completed",
+        "sequence": 1,
+        "state_version": 2,
+        "turn": 1,
+        "actor_position": 1
+    });
+    let v2 = json!({
+        "event_version": 2,
+        "type": "dark_arts_completed",
+        "sequence": 1,
+        "state_version": 2,
+        "turn": 1,
+        "actor_position": 1,
+        "effects": [],
+        "effect_stop": "stable",
+        "choice": null,
+        "prng_counter": 0
+    });
+    let v3_terminal = v3_terminal_event_fixture();
+
+    for (version, payload) in [(1_i16, &v1), (2_i16, &v2)] {
+        let accepted =
+            legacy_event_passes_replay_preflight(&room, version, payload, "canonical fixture")
+                .await;
+        assert!(accepted, "the canonical v{version} fixture was rejected");
+    }
+    let accepted = legacy_event_passes_replay_preflight(
+        &room,
+        3,
+        &v3_terminal,
+        "canonical v3 terminal fixture",
+    )
+    .await;
+    assert!(accepted, "the canonical v3 terminal fixture was rejected");
+
+    let mut null_stop = v2.clone();
+    null_stop["effect_stop"] = Value::Null;
+
+    let mut non_card_move = v2.clone();
+    non_card_move["effects"] = json!([{
+        "type": "moved",
+        "rule_id": "rule:test",
+        "target_id": "hero:1",
+        "target_position": 1,
+        "from": "heroes",
+        "to": "heroes"
+    }]);
+
+    let mut malformed_choice_id = v2.clone();
+    malformed_choice_id["effect_stop"] = json!("choice");
+    malformed_choice_id["choice"] = json!({
+        "id": "missing-address",
+        "responsible_position": 1,
+        "kind": "target",
+        "options": ["card:a", "card:b"],
+        "min": 1,
+        "max": 1
+    });
+
+    let mut duplicate_choice_options = malformed_choice_id.clone();
+    duplicate_choice_options["choice"]["id"] = json!("rule:test:target:0");
+    duplicate_choice_options["choice"]["options"] = json!(["card:a", "card:a"]);
+
+    let mut duplicate_terminal = v2.clone();
+    duplicate_terminal["effect_stop"] = json!("terminal");
+    duplicate_terminal["effects"] = json!([
+        { "type": "terminal", "rule_id": "rule:first", "outcome": "lost" },
+        { "type": "terminal", "rule_id": "rule:second", "outcome": "lost" }
+    ]);
+
+    let mut oversized = v2;
+    oversized["padding"] = json!("x".repeat(4 * 1_024 * 1_024));
+
+    for (case, payload) in [
+        ("null effect stop", null_stop),
+        ("non-card same-zone move", non_card_move),
+        ("choice without an address", malformed_choice_id),
+        ("duplicate choice options", duplicate_choice_options),
+        ("multiple terminal outcomes", duplicate_terminal),
+        ("oversized payload", oversized),
+    ] {
+        let accepted = legacy_event_passes_replay_preflight(&room, 2, &payload, case).await;
+        assert!(!accepted, "the legacy preflight accepted {case}");
+    }
+
+    let mut duplicate_v3_terminal = v3_terminal;
+    duplicate_v3_terminal["effects"] = json!([
+        { "type": "terminal", "rule_id": "rule:first", "outcome": "lost" },
+        { "type": "terminal", "rule_id": "rule:second", "outcome": "lost" }
+    ]);
+    let accepted = legacy_event_passes_replay_preflight(
+        &room,
+        3,
+        &duplicate_v3_terminal,
+        "multiple v3 terminal outcomes",
+    )
+    .await;
+    assert!(
+        !accepted,
+        "the legacy preflight accepted multiple v3 terminal outcomes"
+    );
+}
+
+async fn is_snapshot_valid_for_v15_upgrade(
+    database: &PgPool,
+    candidate: &Value,
+    expected_participants: &Value,
+    failure_context: &str,
+) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT valid_game_snapshot_for_v15_upgrade($1::JSONB, $2::JSONB)",
+    )
+    .bind(candidate)
+    .bind(expected_participants)
+    .fetch_one(database)
+    .await
+    .unwrap_or_else(|error| panic!("{failure_context}: {error}"))
+}
+
+fn legacy_v1_snapshot_fixture(current: &Value) -> Value {
+    let mut legacy_v1 = current.clone();
+    legacy_v1["snapshot_version"] = json!(1);
+    let legacy_v1_object = legacy_v1
+        .as_object_mut()
+        .expect("the current snapshot must be an object");
+    for field in [
+        "queued_phases",
+        "queued_effects",
+        "decision_point",
+        "last_turn_steps",
+        "effects",
+    ] {
+        legacy_v1_object.remove(field);
+    }
+    legacy_v1["turn"]["phase"] = json!("hero_action");
+    legacy_v1
+}
+
+fn legacy_v2_snapshot_fixture(current: &Value, legacy_v1: &Value) -> Value {
+    let mut legacy_v2 = legacy_v1.clone();
+    legacy_v2["snapshot_version"] = json!(2);
+    let mut entities = current["effects"]["entities"]
+        .as_array()
+        .expect("the current effect entities must be an array")
+        .clone();
+    for entity in &mut entities {
+        entity
+            .as_object_mut()
+            .expect("each effect entity must be an object")
+            .remove("zone_index");
+    }
+    entities.push(json!({
+        "id": "legacy-card:extra",
+        "owner_position": 1,
+        "zone": "hero_draw_pile"
+    }));
+    legacy_v2["effects"] = json!({
+        "entities": entities,
+        "outcomes": [{
+            "type": "no_op",
+            "rule_id": "legacy-rule:test",
+            "reason": "explicit"
+        }]
+    });
+    legacy_v2
+}
+
+async fn legacy_resumable_choice_snapshot(
+    database: &PgPool,
+    choice_room_code: &str,
+    legacy_v2: &Value,
+) -> Value {
+    let choice_snapshot = sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT games.snapshot
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(choice_room_code)
+    .fetch_one(database)
+    .await
+    .expect("the resumable choice fixture must be queryable");
+    let mut legacy_choice = legacy_v2.clone();
+    legacy_choice["turn"]["phase"] = json!("dark_arts");
+    legacy_choice["effects"]["choice"] = choice_snapshot["effects"]["choice"].clone();
+    legacy_choice
+}
+
+fn invalid_v15_upgrade_snapshot_fixtures(
+    legacy_v1: &Value,
+    legacy_v2: Value,
+    legacy_choice: Value,
+    current: Value,
+) -> [(&'static str, Value); 9] {
+    let mut null_phase = legacy_v1.clone();
+    null_phase["turn"]["phase"] = Value::Null;
+
+    let mut partial_control = legacy_v1.clone();
+    partial_control["queued_phases"] = json!(["end_turn"]);
+
+    let mut reordered_participants = legacy_v1.clone();
+    reordered_participants["participants"]
+        .as_array_mut()
+        .expect("legacy participants must be an array")
+        .swap(0, 1);
+
+    let mut wrong_participant_uuid = legacy_v1.clone();
+    wrong_participant_uuid["participants"][0]["participant_id"] =
+        json!(uuid::Uuid::new_v4().to_string());
+
+    let mut swapped_heroes = legacy_v1.clone();
+    let first_hero = swapped_heroes["participants"][0]["hero_id"].clone();
+    swapped_heroes["participants"][0]["hero_id"] =
+        swapped_heroes["participants"][1]["hero_id"].clone();
+    swapped_heroes["participants"][1]["hero_id"] = first_hero;
+
+    let mut invalid_effects = legacy_v2;
+    invalid_effects["effects"]["entities"][0]["resources"] = json!({ "mana": 1 });
+
+    let mut malformed_effects = legacy_v1.clone();
+    malformed_effects["effects"] = json!("not-an-effect-object");
+
+    let mut wrong_choice_actor = legacy_choice;
+    wrong_choice_actor["effects"]["choice"]["responsible_position"] = json!(4);
+
+    let mut divergent_structured_history = current;
+    let structured_outcomes = divergent_structured_history["effects"]["outcomes"]
+        .as_array_mut()
+        .expect("the structured outcomes must be an array");
+    assert!(
+        structured_outcomes.len() > 1,
+        "the fixture must retain a non-empty outcome history after mutation"
+    );
+    structured_outcomes.pop();
+
+    [
+        ("null turn phase", null_phase),
+        ("partial structured control", partial_control),
+        ("reordered participants", reordered_participants),
+        ("another participant UUID", wrong_participant_uuid),
+        ("heroes assigned to other positions", swapped_heroes),
+        (
+            "an effect resource unsupported by its zone",
+            invalid_effects,
+        ),
+        ("a malformed effects value", malformed_effects),
+        (
+            "a pending choice assigned outside the participants",
+            wrong_choice_actor,
+        ),
+        (
+            "structured outcomes divergent from turn steps",
+            divergent_structured_history,
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn v15_upgrade_preflight_rejects_legacy_snapshots_that_cannot_be_restored() {
+    let room = ready_room().await;
+    start_ready_game(&room, "legacy-snapshot-preflight-start").await;
+    let (game_id, current) = sqlx::query_as::<_, (uuid::Uuid, Value)>(
+        r"
+        SELECT games.id, games.snapshot
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the current game snapshot must be queryable");
+    let expected_participants = current["participants"].clone();
+
+    sqlx::query("SELECT require_game_snapshot_for_v15_upgrade($1, $2::JSONB)")
+        .bind(game_id)
+        .bind(&current)
+        .execute(&room.database)
+        .await
+        .expect("the current structured snapshot must pass the upgrade preflight");
+
+    let legacy_v1 = legacy_v1_snapshot_fixture(&current);
+    let accepted = is_snapshot_valid_for_v15_upgrade(
+        &room.database,
+        &legacy_v1,
+        &expected_participants,
+        "the V1 snapshot preflight must evaluate the canonical fixture",
+    )
+    .await;
+    assert!(accepted, "a legitimate V1 snapshot must remain upgradeable");
+
+    let mut legacy_with_null_control = legacy_v1.clone();
+    for field in [
+        "queued_phases",
+        "queued_effects",
+        "decision_point",
+        "last_turn_steps",
+    ] {
+        legacy_with_null_control[field] = Value::Null;
+    }
+    let accepted = is_snapshot_valid_for_v15_upgrade(
+        &room.database,
+        &legacy_with_null_control,
+        &expected_participants,
+        "the null legacy control preflight must evaluate the fixture",
+    )
+    .await;
+    assert!(
+        accepted,
+        "explicit null Option fields must remain equivalent to absent legacy control"
+    );
+
+    let legacy_v2 = legacy_v2_snapshot_fixture(&current, &legacy_v1);
+    let accepted = is_snapshot_valid_for_v15_upgrade(
+        &room.database,
+        &legacy_v2,
+        &expected_participants,
+        "the V2 snapshot preflight must evaluate the canonical fixture",
+    )
+    .await;
+    assert!(
+        accepted,
+        "a legitimate V2 snapshot without zone indexes must remain upgradeable"
+    );
+
+    let choice_room = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    start_ready_game(&choice_room, "legacy-choice-preflight-start").await;
+    let legacy_choice =
+        legacy_resumable_choice_snapshot(&room.database, &choice_room.room_code, &legacy_v2).await;
+    let accepted = is_snapshot_valid_for_v15_upgrade(
+        &room.database,
+        &legacy_choice,
+        &expected_participants,
+        "the V2 choice preflight must evaluate the resumable fixture",
+    )
+    .await;
+    assert!(accepted, "a legitimate resumable V2 choice must upgrade");
+
+    let mut delegated_choice = legacy_choice.clone();
+    delegated_choice["effects"]["choice"]["responsible_position"] = json!(2);
+    let accepted = is_snapshot_valid_for_v15_upgrade(
+        &room.database,
+        &delegated_choice,
+        &expected_participants,
+        "the delegated V2 choice preflight must evaluate the fixture",
+    )
+    .await;
+    assert!(
+        accepted,
+        "a pending choice may be assigned to a non-active participant"
+    );
+
+    for (case, candidate) in
+        invalid_v15_upgrade_snapshot_fixtures(&legacy_v1, legacy_v2, legacy_choice, current)
+    {
+        let failure_context = format!("the upgrade preflight must evaluate {case}");
+        let accepted = is_snapshot_valid_for_v15_upgrade(
+            &room.database,
+            &candidate,
+            &expected_participants,
+            &failure_context,
+        )
+        .await;
+        assert!(!accepted, "the upgrade preflight accepted {case}");
+    }
+}
+
+#[tokio::test]
+async fn v3_snapshot_validation_rejects_codec_incompatible_effects_and_identifiers() {
+    let room = ready_room().await;
+    start_ready_game(&room, "snapshot-validator-start").await;
+    let snapshot = sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT games.snapshot
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the current snapshot must exist");
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v3($1)")
+            .bind(&snapshot)
+            .fetch_one(&room.database)
+            .await
+            .expect("the snapshot validator must accept the committed snapshot")
+    );
+
+    let mut same_zone_move = snapshot.clone();
+    same_zone_move["effects"]["outcomes"] = json!([{
+        "type": "moved",
+        "rule_id": "rule:test",
+        "target_id": "card:a",
+        "from": "hero_hand",
+        "to": "hero_hand"
+    }]);
+
+    let mut non_card_move = snapshot.clone();
+    non_card_move["effects"]["outcomes"] = json!([{
+        "type": "moved",
+        "rule_id": "rule:test",
+        "target_id": "hero:1",
+        "target_position": 1,
+        "from": "heroes",
+        "to": "active_location"
+    }]);
+
+    let mut null_prng_algorithm = snapshot.clone();
+    null_prng_algorithm["prng"]["algorithm"] = Value::Null;
+
+    let mut oversized_identifier = snapshot.clone();
+    oversized_identifier["adventure_id"] = json!(format!("adventure:{}", "a".repeat(247)));
+    assert_eq!(
+        oversized_identifier["adventure_id"]
+            .as_str()
+            .expect("the fixture ID must be a string")
+            .len(),
+        257
+    );
+
+    let mut non_contiguous_positions = snapshot.clone();
+    non_contiguous_positions["participants"][1]["position"] = json!(3);
+
+    let mut divergent_effect_history = snapshot.clone();
+    let outcomes = divergent_effect_history["effects"]["outcomes"]
+        .as_array_mut()
+        .expect("the snapshot outcomes must be an array");
+    assert!(
+        outcomes.len() > 1,
+        "the fixture must retain a non-empty outcome history after mutation"
+    );
+    outcomes.pop();
+
+    let mut absent_active_player = snapshot;
+    absent_active_player["turn"]["active_position"] = json!(4);
+    absent_active_player["decision_point"]["responsible_position"] = json!(4);
+
+    for (case, candidate) in [
+        ("same-zone move", same_zone_move),
+        ("non-card move", non_card_move),
+        ("null PRNG algorithm", null_prng_algorithm),
+        ("257-byte identifier", oversized_identifier),
+        (
+            "non-contiguous participant positions",
+            non_contiguous_positions,
+        ),
+        (
+            "effects divergent from turn steps",
+            divergent_effect_history,
+        ),
+        ("active player outside participants", absent_active_player),
+    ] {
+        let accepted = sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v3($1)")
+            .bind(candidate)
+            .fetch_one(&room.database)
+            .await
+            .unwrap_or_else(|error| panic!("the snapshot validator must evaluate {case}: {error}"));
+        assert!(!accepted, "the snapshot validator accepted {case}");
+    }
+}
+
+#[tokio::test]
+async fn a_new_game_snapshot_must_exactly_match_the_room_participants() {
+    let source = ready_room().await;
+    let target = ready_room().await;
+    start_ready_game(&source, "participant-bound-source-start").await;
+    let mut snapshot = sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT games.snapshot
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&source.room_code)
+    .fetch_one(&source.database)
+    .await
+    .expect("the source snapshot must exist");
+    snapshot["participants"] = sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'participant_id', participants.id::TEXT,
+                'position', participants.position,
+                'hero_id', participants.hero_id
+            )
+            ORDER BY participants.position
+        )
+        FROM participants
+        JOIN rooms ON rooms.id = participants.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&target.room_code)
+    .fetch_one(&target.database)
+    .await
+    .expect("the target participants must be queryable");
+
+    let mut valid_transaction = target
+        .database
+        .begin()
+        .await
+        .expect("the valid cloned game transaction must start");
+    insert_cloned_game_snapshot(
+        &mut valid_transaction,
+        &source.room_code,
+        &target.room_code,
+        &snapshot,
+    )
+    .await
+    .expect("a snapshot with the exact room participants must pass the INSERT trigger");
+    valid_transaction
+        .rollback()
+        .await
+        .expect("the valid cloned game transaction must roll back");
+
+    let mut reordered = snapshot.clone();
+    reordered["participants"]
+        .as_array_mut()
+        .expect("snapshot participants must be an array")
+        .swap(0, 1);
+
+    let mut wrong_uuid = snapshot.clone();
+    wrong_uuid["participants"][0]["participant_id"] = json!(uuid::Uuid::new_v4().to_string());
+
+    let mut swapped_heroes = snapshot.clone();
+    let first_hero = swapped_heroes["participants"][0]["hero_id"].clone();
+    swapped_heroes["participants"][0]["hero_id"] =
+        swapped_heroes["participants"][1]["hero_id"].clone();
+    swapped_heroes["participants"][1]["hero_id"] = first_hero;
+
+    for (case, candidate) in [
+        ("reordered participants", reordered),
+        ("another participant UUID", wrong_uuid),
+        ("heroes assigned to other positions", swapped_heroes),
+    ] {
+        let mut transaction = target
+            .database
+            .begin()
+            .await
+            .unwrap_or_else(|error| panic!("the {case} transaction must start: {error}"));
+        let error = insert_cloned_game_snapshot(
+            &mut transaction,
+            &source.room_code,
+            &target.room_code,
+            &candidate,
+        )
+        .await
+        .expect_err(
+            "the INSERT trigger must reject snapshot participants that differ from the room",
+        );
+        assert_database_error_code(&error, "23514");
+        assert!(
+            error
+                .to_string()
+                .contains("snapshot must match the current codec and relational metadata"),
+            "unexpected error for {case}: {error}"
+        );
+        transaction
+            .rollback()
+            .await
+            .unwrap_or_else(|error| panic!("the {case} transaction must roll back: {error}"));
+    }
 }
 
 #[tokio::test]
 async fn v3_choice_payload_limits_match_the_domain_decoder() {
     let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
     start_ready_game(&room, "event-v3-cursor-limit-start").await;
-    let response = room
-        .app
-        .clone()
-        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
-        .await
-        .expect("the choice-producing command must receive a response");
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let (game_id, room_id, actor_id, payload) =
-        sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid, String)>(
-            r"
-        SELECT games.id, games.room_id, events.actor_participant_id, events.payload::text
+    let snapshot = sqlx::query_scalar::<_, Value>(
+        r"
+        SELECT games.snapshot
         FROM games
         JOIN rooms ON rooms.id = games.room_id
-        JOIN game_events AS events
-          ON events.game_id = games.id
-         AND events.sequence = 1
         WHERE rooms.code = $1
         ",
-        )
-        .bind(&room.room_code)
-        .fetch_one(&room.database)
-        .await
-        .expect("the persisted v3 choice event must be queryable");
-    let mut base: Value =
-        serde_json::from_str(&payload).expect("the persisted choice event must be JSON");
-    base["sequence"] = json!(2);
-    base["state_version"] = json!(3);
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the persisted pending choice must be queryable");
+    let effects = snapshot["effects"]
+        .get("outcomes")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let base = json!({
+        "event_version": 3,
+        "type": "dark_arts_completed",
+        "sequence": 1,
+        "state_version": 2,
+        "turn": 1,
+        "actor_position": 1,
+        "effects": effects,
+        "effect_stop": "choice",
+        "choice": snapshot["effects"]["choice"],
+        "prng_counter": snapshot["prng"]["counter"]
+    });
+    let accepted = sqlx::query_scalar::<_, bool>(
+        "SELECT valid_legacy_game_event_for_replay(\
+            3::SMALLINT, 'dark_arts_completed', $1, \
+            1::BIGINT, 2::BIGINT, 1::SMALLINT\
+        )",
+    )
+    .bind(&base)
+    .fetch_one(&room.database)
+    .await
+    .expect("the v3 replay validator must accept the canonical choice fixture");
+    assert!(accepted);
+
     let mut oversized_path = base.clone();
     oversized_path["choice"]["continuation"]["choice_cursor"]["path"] =
         Value::Array(vec![json!({ "type": "condition_then" }); 4097]);
@@ -2941,8 +4277,7 @@ async fn v3_choice_payload_limits_match_the_domain_decoder() {
         ("target choice selecting every option", target_selects_all),
         ("target choice with a zero maximum", target_selects_none),
     ] {
-        assert_v3_choice_payload_rejected(&room, game_id, room_id, actor_id, payload, description)
-            .await;
+        assert_v3_choice_payload_rejected(&room, payload, description).await;
     }
 }
 
@@ -3073,17 +4408,15 @@ async fn an_official_receipt_must_share_the_committed_game_expiration() {
         .expect("the receipt expiration transaction must start");
     let (game_id, actor_id, room_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
         r"
-            UPDATE games
-            SET sequence = 1,
-                state_version = 2
+            SELECT id, started_by_participant_id, room_id
+            FROM games
             WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
-            RETURNING id, started_by_participant_id, room_id
             ",
     )
     .bind(&room.room_code)
     .fetch_one(&mut *transaction)
     .await
-    .expect("the test game cursor must advance inside the transaction");
+    .expect("the integrity test game must be queryable");
     let command_id = uuid::Uuid::new_v4();
     insert_test_event(&mut transaction, game_id, room_id, command_id, actor_id).await;
     sqlx::query(
@@ -3105,7 +4438,7 @@ async fn an_official_receipt_must_share_the_committed_game_expiration() {
             $2,
             $3,
             $4,
-            'complete_dark_arts',
+            'end_hero_actions',
             1,
             'blake3:0000000000000000000000000000000000000000000000000000000000000000',
             2,
@@ -3145,17 +4478,15 @@ async fn an_official_event_cannot_commit_without_its_receipt() {
         .expect("the orphan event transaction must start");
     let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
         r"
-            UPDATE games
-            SET sequence = 1,
-                state_version = 2
+            SELECT id, room_id, started_by_participant_id
+            FROM games
             WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
-            RETURNING id, room_id, started_by_participant_id
             ",
     )
     .bind(&room.room_code)
     .fetch_one(&mut *transaction)
     .await
-    .expect("the test snapshot must advance inside the transaction");
+    .expect("the integrity test game must be queryable");
     insert_test_event(
         &mut transaction,
         game_id,
@@ -3185,17 +4516,15 @@ async fn a_receipt_must_identify_the_actor_and_version_of_its_event() {
         .expect("the receipt integrity transaction must start");
     let (game_id, actor_id, room_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
         r"
-            UPDATE games
-            SET sequence = 1,
-                state_version = 2
+            SELECT id, started_by_participant_id, room_id
+            FROM games
             WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
-            RETURNING id, started_by_participant_id, room_id
             ",
     )
     .bind(&room.room_code)
     .fetch_one(&mut *transaction)
     .await
-    .expect("the test game cursor must advance inside the transaction");
+    .expect("the integrity test game must be queryable");
     let other_actor = sqlx::query_scalar::<_, uuid::Uuid>(
         r"
         SELECT participants.id
@@ -3231,7 +4560,7 @@ async fn a_receipt_must_identify_the_actor_and_version_of_its_event() {
             $2,
             $3,
             $4,
-            'complete_dark_arts',
+            'end_hero_actions',
             1,
             'blake3:0000000000000000000000000000000000000000000000000000000000000000',
             2,
@@ -3255,108 +4584,57 @@ async fn a_receipt_must_identify_the_actor_and_version_of_its_event() {
 }
 
 #[tokio::test]
-async fn v3_events_require_the_matching_command_type_at_commit() {
-    let room = ready_room().await;
-    start_ready_game(&room, "event-command-pair-start").await;
-    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
-        r"
-            SELECT games.id, games.room_id, games.started_by_participant_id
-            FROM games
-            JOIN rooms ON rooms.id = games.room_id
-            WHERE rooms.code = $1
-            ",
+async fn v4_events_require_the_matching_command_type_at_commit() {
+    let turn_source = ready_room().await;
+    start_ready_game(&turn_source, "turn-event-command-pair-source").await;
+    let turn_initial_snapshot = current_game_snapshot(&turn_source).await;
+    let turn = turn_source
+        .app
+        .clone()
+        .oneshot(command_request(
+            &turn_source.host_cookie,
+            uuid::Uuid::new_v4(),
+            1,
+        ))
+        .await
+        .expect("the turn command must receive a response");
+    assert_eq!(turn.status(), StatusCode::OK);
+    let turn_target = ready_room().await;
+    assert_v4_event_rejects_wrong_command_type(
+        &turn_source,
+        &turn_target,
+        &turn_initial_snapshot,
+        "resolve_choice",
     )
-    .bind(&room.room_code)
-    .fetch_one(&room.database)
-    .await
-    .expect("the pairing test game must exist");
+    .await;
 
-    for (event_type, wrong_command_type) in [
-        ("dark_arts_completed", "resolve_choice"),
-        ("choice_resolved", "complete_dark_arts"),
-    ] {
-        let payload = v3_pairing_payload(event_type);
-        let command_id = uuid::Uuid::new_v4();
-        let mut transaction = room
-            .database
-            .begin()
-            .await
-            .expect("the event-command pairing transaction must start");
-        sqlx::query("UPDATE games SET sequence = 1, state_version = 2 WHERE id = $1")
-            .bind(game_id)
-            .execute(&mut *transaction)
-            .await
-            .expect("the pairing test cursor must advance inside the transaction");
-        sqlx::query(
-            r"
-            INSERT INTO game_events (
-                game_id,
-                room_id,
-                sequence,
-                event_version,
-                event_type,
-                command_id,
-                actor_participant_id,
-                state_version,
-                payload
-            )
-            VALUES ($1, $2, 1, 3, $3, $4, $5, 2, $6)
-            ",
-        )
-        .bind(game_id)
-        .bind(room_id)
-        .bind(event_type)
-        .bind(command_id)
-        .bind(actor_id)
-        .bind(payload)
-        .execute(&mut *transaction)
+    let choice_source = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    let started = start_ready_game(&choice_source, "choice-event-command-pair-source").await;
+    let choice_id = started["choice"]["id"]
+        .as_str()
+        .expect("the initial participant choice must be present");
+    let choice_initial_snapshot = current_game_snapshot(&choice_source).await;
+    let choice = choice_source
+        .app
+        .clone()
+        .oneshot(resolve_choice_request(
+            &choice_source.host_cookie,
+            uuid::Uuid::new_v4(),
+            1,
+            choice_id,
+            &["option:1"],
+        ))
         .await
-        .expect("the individually valid v3 event must reach the deferred pairing guard");
-        sqlx::query(
-            r"
-            INSERT INTO game_command_receipts (
-                game_id,
-                room_id,
-                command_id,
-                actor_participant_id,
-                command_type,
-                expected_state_version,
-                payload_digest,
-                accepted_state_version,
-                accepted_sequence,
-                expires_at
-            )
-            SELECT
-                $1,
-                $2,
-                $3,
-                $4,
-                $5,
-                1,
-                'blake3:0000000000000000000000000000000000000000000000000000000000000000',
-                2,
-                1,
-                expires_at
-            FROM games
-            WHERE id = $1
-            ",
-        )
-        .bind(game_id)
-        .bind(room_id)
-        .bind(command_id)
-        .bind(actor_id)
-        .bind(wrong_command_type)
-        .execute(&mut *transaction)
-        .await
-        .expect("the individually valid receipt must reach the deferred pairing guard");
-
-        let error = transaction
-            .commit()
-            .await
-            .expect_err("a v3 event cannot commit with the other command type");
-        assert_database_error_code(&error, "23514");
-        assert!(error.to_string().contains("receipt"));
-    }
+        .expect("the choice command must receive a response");
+    assert_eq!(choice.status(), StatusCode::OK);
+    let choice_target = ready_room_with_manifest(each_hero_choice_manifest()).await;
+    assert_v4_event_rejects_wrong_command_type(
+        &choice_source,
+        &choice_target,
+        &choice_initial_snapshot,
+        "end_hero_actions",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -3417,7 +4695,7 @@ async fn unsupported_persisted_versions_are_rejected_at_the_database_boundary() 
             state_version,
             payload
         )
-        VALUES ($1, $2, 1, 999, 'dark_arts_completed', $3, $4, 2, '{}'::jsonb)
+        VALUES ($1, $2, 1, 999, 'turn_completed', $3, $4, 2, '{}'::jsonb)
         ",
     )
     .bind(game_id)
@@ -3754,7 +5032,7 @@ async fn rejected_or_stale_intentions_leave_no_official_artifacts() {
             &json!({
                 "command_id": uuid::Uuid::new_v4().to_string(),
                 "expected_state_version": 1,
-                "type": "complete_dark_arts"
+                "type": "end_hero_actions"
             }),
             Some(&room.guest_cookie),
             None,
@@ -3777,7 +5055,7 @@ async fn rejected_or_stale_intentions_leave_no_official_artifacts() {
             &json!({
                 "command_id": stale_command_id.to_string(),
                 "expected_state_version": 2,
-                "type": "complete_dark_arts"
+                "type": "end_hero_actions"
             }),
             Some(&room.host_cookie),
             None,
@@ -3880,7 +5158,7 @@ async fn an_expired_game_rejects_the_command_at_the_database_clock_boundary() {
             &json!({
                 "command_id": uuid::Uuid::new_v4().to_string(),
                 "expected_state_version": 1,
-                "type": "complete_dark_arts"
+                "type": "end_hero_actions"
             }),
             Some(&room.host_cookie),
             None,
@@ -4133,13 +5411,17 @@ fn assert_public_choice_resolution_event(
     let event_batch: Value =
         serde_json::from_str(serialized).expect("the choice event batch must be JSON");
     let event = &event_batch["events"][0];
-    assert_eq!(event["event_version"], 3);
+    assert_eq!(event["event_version"], 4);
     assert_eq!(event["type"], "choice_resolved");
     assert_eq!(event["choice_id"], first_choice_id);
     assert_eq!(event["choice_cause"], "rule:functional");
     assert_eq!(event["selected_options"], json!(["option:1"]));
-    assert_eq!(event["effect_stop"], "choice");
-    assert_eq!(event["choice"], *expected_choice);
+    assert_eq!(event["steps"].as_array().map(Vec::len), Some(1));
+    assert_eq!(event["steps"][0]["phase"], "dark_arts");
+    assert_eq!(
+        event["control"]["decision_point"]["choice"],
+        *expected_choice
+    );
     assert!(event.get("command_id").is_none());
     assert_no_private_choice_continuation(serialized);
 }
@@ -4158,9 +5440,28 @@ fn assert_reconnected_choice_snapshot(serialized: &str, expected_choice: &Value)
 }
 
 fn assert_no_private_choice_continuation(serialized: &str) {
-    for private_field in ["continuation", "choice_cursor", "queue", "steps_completed"] {
+    for private_field in [
+        "continuation",
+        "choice_cursor",
+        "queued_effects",
+        "steps_completed",
+    ] {
         assert!(!serialized.contains(private_field));
     }
+}
+
+fn assert_realtime_turn_completed(event: &Value) {
+    assert_eq!(event["event_version"], 4);
+    assert_eq!(event["type"], "turn_completed");
+    assert_eq!(
+        event["steps"]
+            .as_array()
+            .expect("the realtime turn steps must be present")
+            .iter()
+            .map(|step| step["phase"].as_str())
+            .collect::<Vec<_>>(),
+        vec![Some("end_turn"), Some("dark_arts"), Some("villains")]
+    );
 }
 
 async fn current_official_state(room: &ReadyRoom) -> (i64, i64, String, i64) {
@@ -4371,11 +5672,11 @@ async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participan
     assert_eq!(host["protocol_version"], 1);
     assert_eq!(host["type"], "snapshot");
     assert_eq!(host["cursor"], 0);
-    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 1);
+    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 3);
     assert_eq!(host["projection"]["snapshot"]["cursor"], 0);
     assert_eq!(
         host["projection"]["legal_actions"],
-        json!(["complete_dark_arts"])
+        json!(["end_hero_actions"])
     );
     assert_eq!(host["projection"]["choice"], json!({ "status": "none" }));
 
@@ -4405,7 +5706,7 @@ async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participan
 }
 
 #[tokio::test]
-async fn heartbeat_presence_blocks_only_the_required_offline_participant_without_mutating_game() {
+async fn offline_presence_does_not_block_http_intent_or_automatic_phase_resolution() {
     let room = ready_room().await;
     start_ready_game(&room, "realtime-presence").await;
     let initial_state = current_official_state(&room).await;
@@ -4464,6 +5765,10 @@ async fn heartbeat_presence_blocks_only_the_required_offline_participant_without
         .await
         .expect("presence must not deny an otherwise authorized command");
     assert_eq!(command.status(), StatusCode::OK);
+    let accepted = response_json(command).await;
+    assert_eq!(accepted["projection"]["turn"]["number"], 2);
+    assert_eq!(accepted["projection"]["turn"]["phase"], "hero_actions");
+    assert_eq!(accepted["projection"]["turn"]["active_position"], 2);
     let event: Value = serde_json::from_str(
         &tokio::time::timeout(Duration::from_secs(2), guest_socket.read_text())
             .await
@@ -4471,28 +5776,62 @@ async fn heartbeat_presence_blocks_only_the_required_offline_participant_without
     )
     .expect("the official event batch must be JSON");
     assert_eq!(event["type"], "events");
+    assert_realtime_turn_completed(&event["events"][0]);
+    assert_eq!(event["events"][0]["control"]["phase"], "hero_actions");
+    assert_eq!(event["events"][0]["control"]["active_position"], 2);
     let automatic = tokio::time::timeout(Duration::from_secs(2), guest_socket.read_presence())
         .await
         .expect("the resolved decision must publish unblocked presence");
-    assert!(automatic.get("required_participant_position").is_none());
+    assert_eq!(automatic["required_participant_position"], 2);
     assert_eq!(participant_presence(&automatic, 1), "offline");
+    assert_eq!(participant_presence(&automatic, 2), "online");
     assert_eq!(automatic["blocked"], false);
+    server.abort();
+}
+
+#[tokio::test]
+async fn websocket_disconnect_while_an_intent_is_in_flight_does_not_interrupt_automatic_phases() {
+    let room = ready_room().await;
+    start_ready_game(&room, "realtime-concurrent-disconnect").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    let mut host_socket = connect_current_game(address, &room.host_cookie).await;
+    let initial_presence = host_socket.read_presence().await;
+    assert_eq!(participant_presence(&initial_presence, 1), "online");
+
+    let barrier = Arc::new(Barrier::new(2));
+    let command_barrier = Arc::clone(&barrier);
+    let command_app = room.app.clone();
+    let host_cookie = room.host_cookie.clone();
+    let command = async move {
+        command_barrier.wait().await;
+        command_app
+            .oneshot(command_request(&host_cookie, uuid::Uuid::new_v4(), 1))
+            .await
+            .expect("the in-flight command must receive a response")
+    };
+    let disconnect = async move {
+        barrier.wait().await;
+        tokio::task::yield_now().await;
+        drop(host_socket);
+    };
+
+    let (response, ()) = tokio::join!(command, disconnect);
+    assert_eq!(response.status(), StatusCode::OK);
+    let accepted = response_json(response).await;
+    assert_eq!(accepted["projection"]["turn"]["number"], 2);
+    assert_eq!(accepted["projection"]["turn"]["phase"], "hero_actions");
+    assert_eq!(accepted["projection"]["turn"]["active_position"], 2);
+
+    let (state_version, sequence, _, event_count) = current_official_state(&room).await;
+    assert_eq!((state_version, sequence, event_count), (2, 1, 1));
     server.abort();
 }
 
 #[tokio::test]
 async fn responsible_choice_survives_offline_and_reconnect_without_mutating_the_game() {
     let room = ready_room_with_manifest(each_hero_choice_manifest()).await;
-    start_ready_game(&room, "choice-presence-start").await;
-    let completed = room
-        .app
-        .clone()
-        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
-        .await
-        .expect("the choice-producing command must receive a response");
-    assert_eq!(completed.status(), StatusCode::OK);
-    let completed = response_json(completed).await;
-    let first_choice_id = completed["projection"]["choice"]["id"]
+    let started = start_ready_game(&room, "choice-presence-start").await;
+    let first_choice_id = started["choice"]["id"]
         .as_str()
         .expect("the first participant choice must be present")
         .to_owned();
@@ -4518,7 +5857,7 @@ async fn responsible_choice_survives_offline_and_reconnect_without_mutating_the_
         .oneshot(resolve_choice_request(
             &room.host_cookie,
             resolution_command_id,
-            2,
+            1,
             &first_choice_id,
             &["option:1"],
         ))
@@ -4820,13 +6159,14 @@ async fn database_rejects_a_gap_in_the_official_event_sequence() {
             game_id,
             room_id,
             sequence,
+            event_version,
             event_type,
             command_id,
             actor_participant_id,
             state_version,
             payload
         )
-        VALUES ($1, $2, 2, 'dark_arts_completed', $3, $4, 2, '{}'::jsonb)
+        VALUES ($1, $2, 2, 3, 'turn_completed', $3, $4, 2, '{}'::jsonb)
         ",
     )
     .bind(game_id)
@@ -4869,7 +6209,7 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
         serde_json::from_str(&synchronized).expect("synchronization must be JSON");
     assert_eq!(synchronized["type"], "synchronized");
     assert_eq!(synchronized["cursor"], 0);
-    assert_eq!(synchronized["snapshot_version"], 1);
+    assert_eq!(synchronized["snapshot_version"], 3);
     assert_eq!(synchronized["digest"], projection["snapshot"]["digest"]);
 
     let command_id = uuid::Uuid::new_v4();
@@ -4882,7 +6222,7 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
             &json!({
                 "command_id": command_id.to_string(),
                 "expected_state_version": 1,
-                "type": "complete_dark_arts"
+                "type": "end_hero_actions"
             }),
             Some(&room.host_cookie),
             None,
@@ -4900,8 +6240,11 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
     assert_eq!(host["from_cursor"], 0);
     assert_eq!(host["cursor"], 1);
     assert_eq!(host["events"][0]["sequence"], 1);
+    assert_realtime_turn_completed(&host["events"][0]);
     assert_eq!(host["events"][0]["command_id"], command_id.to_string());
     assert_eq!(host["projection"]["snapshot"]["cursor"], 1);
+    assert_eq!(host["projection"]["turn"]["active_position"], 2);
+    assert_eq!(host["projection"]["turn"]["phase"], "hero_actions");
 
     let (status, _, mut guest_socket) = websocket_handshake(
         address,
@@ -4918,7 +6261,12 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
             .expect("the durable log must replay without the original signal");
     let guest: Value = serde_json::from_str(&guest_serialized).expect("event batch must be JSON");
     assert_eq!(guest["events"][0]["sequence"], 1);
+    assert_realtime_turn_completed(&guest["events"][0]);
     assert!(guest["events"][0].get("command_id").is_none());
+    assert_eq!(
+        guest["projection"]["legal_actions"],
+        json!(["end_hero_actions"])
+    );
     assert!(!guest_serialized.contains("actor_participant_id"));
     assert!(!guest_serialized.contains(&command_id.to_string()));
 
