@@ -47,9 +47,9 @@ pub struct AppState {
     started: Arc<AtomicBool>,
     content: content_catalog::ContentCatalog,
     application_origin: Arc<str>,
-    game_event_fanout: EventFanout,
-    game_presence_fanout: EventFanout,
-    security_event_fanout: EventFanout,
+    game_synchronization_fanout: GameSignalFanout,
+    game_presence_fanout: GameSignalFanout,
+    security_event_fanout: GameSignalFanout,
     session_token_key: Arc<[u8; 32]>,
     recovery_token_key: Arc<[u8; 32]>,
     recovery_password_checks: Arc<Semaphore>,
@@ -57,11 +57,11 @@ pub struct AppState {
 }
 
 #[derive(Clone, Default)]
-struct EventFanout {
+struct GameSignalFanout {
     channels: Arc<Mutex<HashMap<Uuid, broadcast::Sender<()>>>>,
 }
 
-impl EventFanout {
+impl GameSignalFanout {
     fn subscribe(&self, game_id: Uuid) -> broadcast::Receiver<()> {
         let mut channels = self.channels.lock().unwrap_or_else(PoisonError::into_inner);
         channels
@@ -130,9 +130,9 @@ impl AppState {
             started: Arc::new(AtomicBool::new(false)),
             content: content_catalog::ContentCatalog::new(manifests),
             application_origin: Arc::from(DEFAULT_APPLICATION_ORIGIN),
-            game_event_fanout: EventFanout::default(),
-            game_presence_fanout: EventFanout::default(),
-            security_event_fanout: EventFanout::default(),
+            game_synchronization_fanout: GameSignalFanout::default(),
+            game_presence_fanout: GameSignalFanout::default(),
+            security_event_fanout: GameSignalFanout::default(),
             session_token_key: Arc::new(session_token_key),
             recovery_token_key: Arc::new(recovery_token_key),
             recovery_password_checks: Arc::new(Semaphore::new(
@@ -179,16 +179,16 @@ impl AppState {
         &self.application_origin
     }
 
-    fn subscribe_to_game_events(&self, game_id: Uuid) -> broadcast::Receiver<()> {
-        self.game_event_fanout.subscribe(game_id)
+    fn subscribe_to_game_synchronization(&self, game_id: Uuid) -> broadcast::Receiver<()> {
+        self.game_synchronization_fanout.subscribe(game_id)
     }
 
-    fn signal_game_event(&self, game_id: Uuid) {
-        self.game_event_fanout.signal(game_id);
+    fn signal_game_synchronization(&self, game_id: Uuid) {
+        self.game_synchronization_fanout.signal(game_id);
     }
 
-    fn prune_game_event_channel(&self, game_id: Uuid) {
-        self.game_event_fanout.prune(game_id);
+    fn prune_game_synchronization_channel(&self, game_id: Uuid) {
+        self.game_synchronization_fanout.prune(game_id);
     }
 
     fn subscribe_to_game_presence(&self, game_id: Uuid) -> broadcast::Receiver<()> {

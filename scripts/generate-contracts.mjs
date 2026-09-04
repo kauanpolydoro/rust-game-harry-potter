@@ -44,12 +44,14 @@ const enumAliases = new Map([
 ])
 
 function typeScriptType(schema, indentationLevel) {
-  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
-    return schema.oneOf.map((variant) => typeScriptType(variant, indentationLevel)).join(' | ')
-  }
   const enumAlias = enumAliases.get(schema)
   if (enumAlias) {
     return enumAlias
+  }
+  if (Array.isArray(schema.oneOf)) {
+    return schema.oneOf
+      .map((candidate) => typeScriptType(candidate, indentationLevel))
+      .join(' | ')
   }
   if (typeof schema.$ref === 'string') {
     return schema.$ref.split('/').at(-1)
@@ -87,12 +89,59 @@ function typeScriptType(schema, indentationLevel) {
   throw new TypeError(`unsupported JSON Schema fragment: ${JSON.stringify(schema)}`)
 }
 
+function refinementValidationExpressions(schema, value) {
+  const refinements = schema['x-refinements']
+  if (refinements === undefined) {
+    return []
+  }
+  if (
+    !Array.isArray(refinements) ||
+    refinements.some((refinement) => typeof refinement !== 'string') ||
+    new Set(refinements).size !== refinements.length
+  ) {
+    throw new TypeError('x-refinements must be an array of unique strings')
+  }
+
+  return refinements.map((refinement) => {
+    if (refinement === 'min_lte_max') {
+      return `${value}["min"] <= ${value}["max"]`
+    }
+    if (refinement === 'max_lt_options_length') {
+      return `${value}["max"] < ${value}["options"].length`
+    }
+    throw new TypeError(`unsupported x-refinement: ${refinement}`)
+  })
+}
+
 function validationExpression(schema, value) {
-  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
-    const variants = schema.oneOf.map(
-      (variant) => `(${validationExpression(variant, value)})`,
+  if (Object.hasOwn(schema, 'const')) {
+    return `${value} === ${JSON.stringify(schema.const)}`
+  }
+  if (schema.if !== undefined) {
+    if (
+      typeof schema.if !== 'object' ||
+      schema.if === null ||
+      (schema.then !== undefined && (typeof schema.then !== 'object' || schema.then === null)) ||
+      (schema.else !== undefined && (typeof schema.else !== 'object' || schema.else === null))
+    ) {
+      throw new TypeError('if, then and else must contain JSON Schema objects')
+    }
+    const condition = validationExpression(schema.if, value)
+    const whenTrue = schema.then === undefined ? 'true' : validationExpression(schema.then, value)
+    const whenFalse = schema.else === undefined ? 'true' : validationExpression(schema.else, value)
+    return `((${condition}) ? (${whenTrue}) : (${whenFalse}))`
+  }
+  if (schema.not !== undefined) {
+    if (typeof schema.not !== 'object' || schema.not === null) {
+      throw new TypeError('not must contain a JSON Schema object')
+    }
+    return `!(${validationExpression(schema.not, value)})`
+  }
+  if (Array.isArray(schema.oneOf)) {
+    const candidates = schema.oneOf.map((candidate) =>
+      validationExpression(candidate, value),
     )
-    return `([${variants.join(', ')}].filter(Boolean).length === 1)`
+    return `[${candidates.join(',')}].filter(Boolean).length === 1`
   }
   if (typeof schema.$ref === 'string') {
     const definitionName = schema.$ref.split('/').at(-1)
@@ -153,15 +202,29 @@ function validationExpression(schema, value) {
       `Array.isArray(${value})`,
       `${value}.every((entry) => ${validationExpression(schema.items, 'entry')})`,
     ]
-    if (typeof schema.minItems === 'number') {
-      checks.push(`${value}.length >= ${schema.minItems}`)
+    if (
+      typeof schema.minItems === 'number' &&
+      schema.minItems === schema.maxItems
+    ) {
+      checks.push(`${value}.length === ${schema.minItems}`)
+    } else {
+      if (typeof schema.minItems === 'number') {
+        checks.push(`${value}.length >= ${schema.minItems}`)
+      }
+      if (typeof schema.maxItems === 'number') {
+        checks.push(`${value}.length <= ${schema.maxItems}`)
+      }
     }
-    if (typeof schema.maxItems === 'number') {
-      checks.push(`${value}.length <= ${schema.maxItems}`)
+    if (schema.uniqueItems === true) {
+      checks.push(`new Set(${value}.map((entry) => JSON.stringify(entry))).size === ${value}.length`)
     }
     return checks.join(' && ')
   }
-  if (schema.type === 'object') {
+  if (
+    schema.type === 'object' ||
+    (schema.type === undefined &&
+      (schema.properties !== undefined || schema.required !== undefined))
+  ) {
     const properties = Object.entries(schema.properties ?? {})
     const required = new Set(schema.required ?? [])
     const checks = [`isRecord(${value})`]
@@ -181,6 +244,18 @@ function validationExpression(schema, value) {
           : `(!Object.hasOwn(${value}, ${JSON.stringify(name)}) || (${propertyCheck}))`,
       )
     }
+    for (const name of required) {
+      if (!properties.some(([propertyName]) => propertyName === name)) {
+        checks.push(`Object.hasOwn(${value}, ${JSON.stringify(name)})`)
+      }
+    }
+    if (schema.allOf !== undefined) {
+      if (!Array.isArray(schema.allOf)) {
+        throw new TypeError('allOf must contain an array of JSON Schema objects')
+      }
+      checks.push(...schema.allOf.map((candidate) => validationExpression(candidate, value)))
+    }
+    checks.push(...refinementValidationExpressions(schema, value))
     return checks.join(' && ')
   }
 
@@ -190,13 +265,18 @@ function validationExpression(schema, value) {
 const generatedDefinitions = Object.entries(identitySchema.$defs)
   .filter(([name]) => name !== 'HeroId')
   .map(([name, schema]) => {
-    if (schema.type !== 'object' || !schema.properties) {
-      throw new TypeError(`identity-access.schema.json definition ${name} must be an object`)
+    if (schema.type === 'object' && schema.properties) {
+      if (Object.keys(schema.properties).length === 0) {
+        return `export type ${name} = Record<string, never>`
+      }
+      return `export interface ${name} ${typeScriptType(schema, 1)}`
     }
-    if (Object.keys(schema.properties).length === 0) {
-      return `export type ${name} = Record<string, never>`
+    if (Array.isArray(schema.oneOf)) {
+      return `export type ${name} = ${typeScriptType(schema, 1)}`
     }
-    return `export interface ${name} ${typeScriptType(schema, 1)}`
+    throw new TypeError(
+      `identity-access.schema.json definition ${name} must be an object or oneOf union`,
+    )
   })
 const generatedGuards = Object.entries(identitySchema.$defs).map(
   ([name, schema]) =>

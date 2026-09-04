@@ -5,6 +5,7 @@ import { isUncertainTransportFailure } from '../api/http'
 import { useRecoveryManagementStore } from '../stores/recoveryManagement'
 import { useRoomAccessStore } from '../stores/roomAccess'
 import { useSecuritySyncStore } from '../stores/securitySync'
+import RecoveryCredential from './RecoveryCredential.vue'
 
 interface RecoveryParticipantView {
   display_name: string
@@ -259,8 +260,14 @@ watch(
       </button>
     </div>
 
+    <RecoveryCredential
+      v-if="roomAccess.issuedRecoveryToken && !recovery.issuedCredential"
+      :token="roomAccess.issuedRecoveryToken"
+      @dismiss="roomAccess.dismissRecoveryCredential()"
+    />
+
     <section
-      v-if="issuedRecoveryLink"
+      v-else-if="issuedRecoveryLink"
       class="recovery-credential"
       aria-labelledby="recovery-credential-heading"
     >

@@ -13,7 +13,10 @@ use tokio::sync::{broadcast, watch};
 use uuid::Uuid;
 
 use super::codec::{command_domain_state, decode_persisted_event, decode_persisted_snapshot};
-use super::{GameProjectionResponse, StoredGameEvent, postgres, projection_for_participant};
+use super::{
+    GameProjectionResponse, PersistedEffectOutcome, PersistedEventChoice, StoredGameEvent,
+    postgres, projection_for_participant,
+};
 use crate::{
     AppState,
     http_support::ApiError,
@@ -148,7 +151,30 @@ struct RealtimeGameEvent {
     turn: u32,
     actor_position: i16,
     #[serde(skip_serializing_if = "Option::is_none")]
+    choice_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice_cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected_options: Option<Vec<String>>,
+    effects: Vec<PersistedEffectOutcome>,
+    effect_stop: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice: Option<RealtimeChoiceSummary>,
+    prng_counter: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     command_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct RealtimeChoiceSummary {
+    status: &'static str,
+    id: String,
+    cause: String,
+    responsible_position: u8,
+    kind: String,
+    options: Vec<String>,
+    min: u16,
+    max: u16,
 }
 
 struct RealtimePosition {
@@ -197,7 +223,7 @@ pub(super) async fn game_events(
 
     let session = authenticated_session(&state, &headers).await?;
     let participant_id = session.participant_id;
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::game_action_not_allowed)?;
     let game_id = Uuid::parse_str(&projection.game.id)
@@ -238,22 +264,22 @@ async fn serve_game_events(
         digest: query.digest,
         synchronized: false,
     };
-    let signal = state.subscribe_to_game_events(game_id);
+    let synchronization_signal = state.subscribe_to_game_synchronization(game_id);
     let presence_signal = state.subscribe_to_game_presence(game_id);
     let shutdown = state.subscribe_to_shutdown();
     if *shutdown.borrow() {
         close_socket(&mut socket, close_code::RESTART, "server is shutting down").await;
-        drop(signal);
+        drop(synchronization_signal);
         drop(presence_signal);
-        state.prune_game_event_channel(game_id);
+        state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
         return;
     }
     let force_initial_snapshot = query.cursor.is_none() || position.cursor.is_none();
-    if let Err(error) = synchronize_socket(
+    if !synchronize_connection(
         &mut socket,
         &state,
-        participant_id,
+        session,
         game_id,
         &mut position,
         force_initial_snapshot,
@@ -261,21 +287,9 @@ async fn serve_game_events(
     )
     .await
     {
-        tracing::warn!(
-            error = %error,
-            %game_id,
-            %participant_id,
-            "initial realtime synchronization failed"
-        );
-        close_socket(
-            &mut socket,
-            close_code::ERROR,
-            "initial synchronization failed",
-        )
-        .await;
-        drop(signal);
+        drop(synchronization_signal);
         drop(presence_signal);
-        state.prune_game_event_channel(game_id);
+        state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
         return;
     }
@@ -283,9 +297,9 @@ async fn serve_game_events(
     let Some((connection_id, mut last_presence)) =
         register_connection_presence(&mut socket, &state, session, game_id, protocol).await
     else {
-        drop(signal);
+        drop(synchronization_signal);
         drop(presence_signal);
-        state.prune_game_event_channel(game_id);
+        state.prune_game_synchronization_channel(game_id);
         state.prune_game_presence_channel(game_id);
         return;
     };
@@ -302,13 +316,13 @@ async fn serve_game_events(
         context,
         &mut position,
         &mut last_presence,
-        signal,
+        synchronization_signal,
         presence_signal,
         shutdown,
     )
     .await;
     disconnect_presence(&state, connection_id, game_id, participant_id).await;
-    state.prune_game_event_channel(game_id);
+    state.prune_game_synchronization_channel(game_id);
     state.prune_game_presence_channel(game_id);
 }
 
@@ -360,7 +374,7 @@ async fn realtime_event_loop(
     context: RealtimeConnectionContext<'_>,
     position: &mut RealtimePosition,
     last_presence: &mut Option<RealtimePresenceMessage>,
-    mut signal: broadcast::Receiver<()>,
+    mut synchronization_signal: broadcast::Receiver<()>,
     mut presence_signal: broadcast::Receiver<()>,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -407,7 +421,7 @@ async fn realtime_event_loop(
                 )
                 .await
             }
-            notification = signal.recv() => {
+            notification = synchronization_signal.recv() => {
                 match notification {
                     Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                         RealtimeLoopAction::Synchronize
@@ -497,7 +511,9 @@ async fn apply_realtime_loop_action(
             .await
         }
         RealtimeLoopAction::Synchronize => {
-            if !synchronize_connection(socket, state, session, game_id, position, protocol).await {
+            if !synchronize_connection(socket, state, session, game_id, position, false, protocol)
+                .await
+            {
                 return false;
             }
             !protocol.publishes_presence()
@@ -525,6 +541,17 @@ async fn synchronize_presence(
         protocol,
         ..
     } = context;
+    match revalidate_socket_session(state, session, game_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            return false;
+        }
+        Err(_) => {
+            close_socket(socket, close_code::ERROR, "session revalidation failed").await;
+            return false;
+        }
+    }
     if let Err(error) =
         send_realtime_presence(socket, state, game_id, last_presence, false, protocol).await
     {
@@ -665,6 +692,7 @@ async fn synchronize_connection(
     session: AuthenticatedSession,
     game_id: Uuid,
     position: &mut RealtimePosition,
+    force_snapshot: bool,
     protocol: RealtimeProtocol,
 ) -> bool {
     match revalidate_socket_session(state, session, game_id).await {
@@ -685,7 +713,7 @@ async fn synchronize_connection(
         session.participant_id,
         game_id,
         position,
-        false,
+        force_snapshot,
         protocol,
     )
     .await
@@ -762,7 +790,7 @@ async fn send_realtime_presence(
     force: bool,
     protocol: RealtimeProtocol,
 ) -> Result<(), RealtimeFailure> {
-    let presence = realtime_presence(&state.database, game_id, protocol).await?;
+    let presence = realtime_presence(state, game_id, protocol).await?;
     if !force && last_presence.as_ref() == Some(&presence) {
         return Ok(());
     }
@@ -772,12 +800,12 @@ async fn send_realtime_presence(
 }
 
 async fn realtime_presence(
-    database: &sqlx::PgPool,
+    state: &AppState,
     game_id: Uuid,
     protocol: RealtimeProtocol,
 ) -> Result<RealtimePresenceMessage, RealtimeFailure> {
     let (snapshot_json, stored_participants) = postgres::game_presence(
-        database,
+        &state.database,
         game_id,
         REALTIME_ONLINE_WINDOW_SECONDS,
         REALTIME_RECONNECTING_WINDOW_SECONDS,
@@ -789,8 +817,14 @@ async fn realtime_presence(
         .map_err(|_| RealtimeFailure::InvalidData("decode presence decision state"))?;
     let domain_state = command_domain_state(&persisted)
         .map_err(|_| RealtimeFailure::InvalidData("restore presence decision state"))?;
+    let effect_rules = state
+        .content
+        .effect_rules(&persisted.versions.manifest_digest)
+        .ok_or(RealtimeFailure::InvalidData(
+            "manifest effect rules are unavailable",
+        ))?;
     let required_participant_position =
-        game_domain::required_participant_for_decision(&domain_state).map(i16::from);
+        game_domain::required_participant_for_decision(&domain_state, &effect_rules).map(i16::from);
     let participants = stored_participants
         .into_iter()
         .map(|(position, status)| {
@@ -854,7 +888,7 @@ async fn synchronize_socket(
         return Ok(());
     }
 
-    let projection = match projection_for_participant(&state.database, participant_id).await {
+    let projection = match projection_for_participant(state, participant_id).await {
         Ok(Some(projection)) if projection.game.id == game_id.to_string() => projection,
         Ok(Some(_) | None) => {
             return Err(RealtimeFailure::InvalidData(
@@ -1054,20 +1088,92 @@ fn realtime_event(
         && i64::try_from(payload.sequence).ok() == Some(stored.sequence)
         && i64::try_from(payload.state_version).ok() == Some(stored.state_version)
         && i16::from(payload.actor_position) == stored.actor_position;
-    if !metadata_matches || stored.event_type != "dark_arts_completed" {
+    if !metadata_matches {
+        return Err(ApiError::internal());
+    }
+    let event_type = match (payload.event_version, stored.event_type.as_str()) {
+        (1..=3, "dark_arts_completed") => "dark_arts_completed",
+        (3, "choice_resolved") => "choice_resolved",
+        _ => return Err(ApiError::internal()),
+    };
+    let choice = payload
+        .choice
+        .as_ref()
+        .map(realtime_choice_summary)
+        .transpose()?;
+    if !matches!(
+        payload.effect_stop.as_str(),
+        "stable" | "choice" | "terminal"
+    ) || (payload.effect_stop == "choice") != choice.is_some()
+    {
         return Err(ApiError::internal());
     }
 
     Ok(RealtimeGameEvent {
         event_version: stored.event_version,
-        event_type: "dark_arts_completed",
+        event_type,
         sequence: stored.sequence,
         state_version: stored.state_version,
         turn: payload.turn,
         actor_position: stored.actor_position,
+        choice_id: payload.choice_id,
+        choice_cause: payload.choice_cause,
+        selected_options: payload.selected_options,
+        effects: payload.effects,
+        effect_stop: payload.effect_stop,
+        choice,
+        prng_counter: payload.prng_counter,
         command_id: (stored.actor_participant_id == participant_id)
             .then(|| stored.command_id.to_string()),
     })
+}
+
+fn realtime_choice_summary(
+    choice: &PersistedEventChoice,
+) -> Result<RealtimeChoiceSummary, ApiError> {
+    let (id, cause, responsible_position, kind, options, min, max) = match choice {
+        PersistedEventChoice::Current(choice) => (
+            choice.id.clone(),
+            choice.cause.clone(),
+            choice.responsible_position,
+            choice.kind.clone(),
+            choice.options.clone(),
+            choice.min,
+            choice.max,
+        ),
+        PersistedEventChoice::Legacy(choice) => (
+            choice.id.clone(),
+            legacy_choice_cause(&choice.id, &choice.kind)?,
+            choice.responsible_position,
+            choice.kind.clone(),
+            choice.options.clone(),
+            choice.min,
+            choice.max,
+        ),
+    };
+    Ok(RealtimeChoiceSummary {
+        status: "pending",
+        id,
+        cause,
+        responsible_position,
+        kind,
+        options,
+        min,
+        max,
+    })
+}
+
+fn legacy_choice_cause(id: &str, kind: &str) -> Result<String, ApiError> {
+    let marker = match kind {
+        "effect" => ":effect:",
+        "target" => ":target:",
+        _ => return Err(ApiError::internal()),
+    };
+    let (cause, index) = id.rsplit_once(marker).ok_or_else(ApiError::internal)?;
+    if cause.is_empty() || index.parse::<usize>().is_err() {
+        return Err(ApiError::internal());
+    }
+    Ok(cause.to_owned())
 }
 
 fn events_are_contiguous(

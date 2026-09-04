@@ -1068,7 +1068,7 @@ async fn a_participant_directly_regenerates_one_successor_recovery_credential() 
         .expect("the successor credential must receive a response");
     assert_eq!(recovered.status(), StatusCode::OK);
     assert_eq!(
-        response_json(recovered).await["participant"],
+        response_json(recovered).await["lobby"]["participant"],
         room.participant
     );
 }
@@ -1150,7 +1150,7 @@ async fn only_a_host_who_acknowledges_impersonation_risk_can_assist_a_participan
         .expect("the assisted successor credential must receive a response");
     assert_eq!(recovered.status(), StatusCode::OK);
     assert_eq!(
-        response_json(recovered).await["participant"],
+        response_json(recovered).await["lobby"]["participant"],
         guest.participant
     );
 

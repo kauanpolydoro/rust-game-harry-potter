@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CatalogId, RuleId};
+use crate::{CatalogId, EffectRule, RuleId};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ContentManifest {
@@ -15,6 +15,8 @@ pub struct ContentManifest {
     pub playable: bool,
     pub gaps: Vec<ContentGap>,
     pub entries: Vec<ManifestEntry>,
+    pub executable_rules: BTreeSet<RuleId>,
+    pub rules: Vec<EffectRule>,
     pub sources: Vec<ProvenanceSource>,
 }
 

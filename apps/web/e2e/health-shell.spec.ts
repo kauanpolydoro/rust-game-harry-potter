@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 const initialGameProjection = {
   choice: { status: 'none' },
+  effects: { outcomes: [], status: 'idle' },
   game: {
     adventure: { id: 'adventure:001', name: 'Game 1' },
     expires_at: '2026-09-10T12:00:00Z',
@@ -13,6 +14,7 @@ const initialGameProjection = {
     display_name: 'Minerva',
     hero: { id: 'harry', name: 'Harry' },
     position: 1,
+    resources: { attack: 0, health: 10, influence: 0 },
     role: 'host',
   },
   participants: [
@@ -20,12 +22,14 @@ const initialGameProjection = {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     {
       display_name: 'Luna',
       hero: { id: 'hermione', name: 'Hermione' },
       position: 2,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'guest',
     },
   ],
@@ -50,8 +54,32 @@ const initialGameProjection = {
 
 const completedGameProjection = {
   ...initialGameProjection,
+  effects: {
+    outcomes: [
+      {
+        after: 2,
+        before: 0,
+        cause: 'effect',
+        resource: 'influence',
+        rule_id: 'rule:functional',
+        target_id: 'hero:1',
+        target_position: 1,
+        type: 'resource_changed',
+      },
+    ],
+    status: 'resolved',
+  },
   game: { ...initialGameProjection.game, expires_at: '2026-09-10T13:00:00Z' },
   legal_actions: [],
+  participant: {
+    ...initialGameProjection.participant,
+    resources: { attack: 2, health: 9, influence: 2 },
+  },
+  participants: initialGameProjection.participants.map((participant) =>
+    participant.position === 1
+      ? { ...participant, resources: { attack: 2, health: 9, influence: 2 } }
+      : participant,
+  ),
   snapshot: {
     ...initialGameProjection.snapshot,
     cursor: 1,
@@ -152,7 +180,7 @@ test('a guest joins with an available hero and keeps the same position after rel
   }
 })
 
-test('a participant uses an individual link once to recover the same position on a second device', async ({
+test('a participant explicitly replaces one of two sessions when recovering on a third device', async ({
   browser,
   page,
 }) => {
@@ -163,6 +191,7 @@ test('a participant uses an individual link once to recover the same position on
   const recoveryLink = await page.getByLabel('Link de recuperação').inputValue()
   expect(recoveryLink).toMatch(/#recovery=[0-9a-f]{64}$/)
 
+  let successorRecoveryLink = ''
   const secondDevice = await browser.newContext()
   const recoveredPage = await secondDevice.newPage()
   try {
@@ -180,6 +209,8 @@ test('a participant uses an individual link once to recover the same position on
     await expect(
       recoveredPage.locator('.room-details').getByText('Posição 1', { exact: true }),
     ).toBeVisible()
+    successorRecoveryLink = await recoveredPage.getByLabel('Link de recuperação').inputValue()
+    expect(successorRecoveryLink).toMatch(/#recovery=[0-9a-f]{64}$/)
     const recoveredSession = (await secondDevice.cookies()).find(
       (cookie) => cookie.name === '__Host-session',
     )
@@ -204,6 +235,43 @@ test('a participant uses an individual link once to recover the same position on
   } finally {
     await replayDevice.close()
   }
+
+  const thirdDevice = await browser.newContext()
+  const replacementPage = await thirdDevice.newPage()
+  try {
+    await replacementPage.goto(successorRecoveryLink)
+    await replacementPage
+      .getByLabel('Senha de recuperação da sala')
+      .fill('a long uncommon passphrase')
+    await replacementPage.getByRole('button', { name: 'Recuperar minha posição' }).click()
+
+    await expect(
+      replacementPage.getByRole('heading', {
+        level: 2,
+        name: 'Escolha uma sessão para substituir',
+      }),
+    ).toBeVisible()
+    await expect(replacementPage.getByRole('radio', { name: 'Sessão 1' })).toBeVisible()
+    await expect(replacementPage.getByRole('radio', { name: 'Sessão 2' })).toBeVisible()
+    await replacementPage.getByRole('radio', { name: 'Sessão 1' }).check()
+    await replacementPage.getByRole('button', { name: 'Substituir Sessão 1' }).click()
+
+    await expect(
+      replacementPage.getByRole('heading', { level: 2, name: 'Sala pronta' }),
+    ).toBeVisible()
+    await expect(replacementPage.getByLabel('Link de recuperação')).toHaveValue(
+      /#recovery=[0-9a-f]{64}$/,
+    )
+  } finally {
+    await thirdDevice.close()
+  }
+
+  const revokedSession = await page.request.get('/api/session')
+  expect(revokedSession.status()).toBe(401)
+  await page.reload()
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Abra uma sala para o seu grupo' }),
+  ).toBeVisible()
 })
 
 test('recovery rotation preserves sessions and replaces direct and assisted credentials', async ({
@@ -396,10 +464,24 @@ test('a player replays a missed event and falls back to Snapshot within recovery
     await expect(hostPage.locator('.presence-label--reconnecting')).toContainText('Reconectando')
     await expect(hostPage.locator('.presence-block')).toHaveCount(0)
     await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
+    await expect(
+      hostPage.getByRole('heading', { level: 3, name: 'Última resolução oficial' }),
+    ).toBeVisible()
+    await expect(hostPage.getByText('Minerva pagou 1 de Vida (10 → 9).')).toBeVisible()
+    await expect(hostPage.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
+    await expect(hostPage.getByText(/Dado D4: resultado [1-4]\./)).toBeVisible()
+    await expect(
+      hostPage.getByText('Nenhum alvo era elegível. O efeito foi resolvido sem alterar a mesa.'),
+    ).toBeVisible()
+    await expect(hostPage.getByText('Vida 9 · Ataque 2 · Influência 2')).toBeVisible()
     await guestContext.setOffline(false)
 
     const replayStartedAt = Date.now()
     await expect(guestPage.getByText('Ação do Herói')).toBeVisible({ timeout: 3_000 })
+    await expect(
+      guestPage.getByRole('heading', { level: 3, name: 'Última resolução oficial' }),
+    ).toBeVisible()
+    await expect(guestPage.getByText(/Dado D4: resultado [1-4]\./)).toBeVisible()
     expect(Date.now() - replayStartedAt).toBeLessThan(3_000)
     await expect
       .poll(

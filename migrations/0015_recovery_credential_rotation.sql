@@ -31,6 +31,7 @@ ALTER TABLE recovery_credentials
             status = 'active'
             AND recovery_attempt_id IS NULL
             AND consumed_by_guest_session_id IS NULL
+            AND replaced_device_session_id IS NULL
             AND consumed_at IS NULL
             AND superseded_at IS NULL
         )
@@ -45,6 +46,7 @@ ALTER TABLE recovery_credentials
             status = 'superseded'
             AND recovery_attempt_id IS NULL
             AND consumed_by_guest_session_id IS NULL
+            AND replaced_device_session_id IS NULL
             AND consumed_at IS NULL
             AND superseded_at IS NOT NULL
         )
@@ -252,5 +254,5 @@ CREATE TABLE recovery_credential_regeneration_requests (
 );
 
 UPDATE application_metadata
-SET value = '13'
+SET value = '15'
 WHERE key = 'schema_version';

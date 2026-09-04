@@ -6,12 +6,17 @@ use axum::{
     routing::{get, post},
 };
 use game_domain::{
-    ContentSelection, GameCommand, GameCommandError, GameCommandInput, HeroId, InitialGameState,
-    LobbyParticipant, ParticipantRole, StartGameError, StartGameInput, decide_game_command,
-    initialize_game,
+    ContentSelection, EffectDie, EffectRoller, GameCommand, GameCommandError, GameCommandInput,
+    GameCommandType, HeroId, InitialGameState, LobbyParticipant, ParticipantRole, StartGameError,
+    StartGameInput, decide_game_command, initialize_game,
 };
-use serde::{Deserialize, Serialize};
+use rand_chacha::{
+    ChaCha20Rng,
+    rand_core::{Rng, SeedableRng},
+};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use sqlx::FromRow;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
@@ -33,7 +38,7 @@ use codec::{
 pub(crate) use projection::{GameProjectionResponse, projection_for_participant};
 
 const SEED_BYTES: usize = 32;
-const GAME_EVENT_VERSION: u16 = 1;
+const GAME_EVENT_VERSION: u16 = 3;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -54,19 +59,155 @@ struct StartGameRequest {
     ruleset_version: String,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ExecuteGameCommandRequest {
-    command_id: String,
-    expected_state_version: u64,
-    #[serde(rename = "type")]
-    command_type: GameCommandType,
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum ExecuteGameCommandRequest {
+    CompleteDarkArts {
+        command_id: String,
+        #[serde(deserialize_with = "positive_state_version")]
+        expected_state_version: u64,
+    },
+    ResolveChoice {
+        command_id: String,
+        #[serde(deserialize_with = "positive_state_version")]
+        expected_state_version: u64,
+        #[serde(deserialize_with = "bounded_choice_string")]
+        choice_id: String,
+        #[serde(deserialize_with = "bounded_choice_selection")]
+        selected_options: Vec<String>,
+    },
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum GameCommandType {
-    CompleteDarkArts,
+impl ExecuteGameCommandRequest {
+    fn command_id(&self) -> &str {
+        match self {
+            Self::CompleteDarkArts { command_id, .. } | Self::ResolveChoice { command_id, .. } => {
+                command_id
+            }
+        }
+    }
+
+    const fn expected_state_version(&self) -> u64 {
+        match self {
+            Self::CompleteDarkArts {
+                expected_state_version,
+                ..
+            }
+            | Self::ResolveChoice {
+                expected_state_version,
+                ..
+            } => *expected_state_version,
+        }
+    }
+
+    const fn command_type(&self) -> GameCommandType {
+        match self {
+            Self::CompleteDarkArts { .. } => GameCommandType::CompleteDarkArts,
+            Self::ResolveChoice { .. } => GameCommandType::ResolveChoice,
+        }
+    }
+
+    fn domain_command(&self) -> GameCommand {
+        match self {
+            Self::CompleteDarkArts { .. } => GameCommand::CompleteDarkArts,
+            Self::ResolveChoice {
+                choice_id,
+                selected_options,
+                ..
+            } => GameCommand::ResolveChoice {
+                choice_id: choice_id.clone(),
+                selected_options: selected_options.clone(),
+            },
+        }
+    }
+
+    fn canonical_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        match self {
+            Self::CompleteDarkArts {
+                command_id,
+                expected_state_version,
+            } => serde_json::to_vec(&CanonicalCompleteDarkArtsCommandRequest {
+                command_id,
+                expected_state_version: *expected_state_version,
+                command_type: "complete_dark_arts",
+            }),
+            Self::ResolveChoice {
+                command_id,
+                expected_state_version,
+                choice_id,
+                selected_options,
+            } => serde_json::to_vec(&CanonicalResolveChoiceCommandRequest {
+                command_id,
+                expected_state_version: *expected_state_version,
+                command_type: "resolve_choice",
+                choice_id,
+                selected_options,
+            }),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CanonicalCompleteDarkArtsCommandRequest<'a> {
+    command_id: &'a str,
+    expected_state_version: u64,
+    #[serde(rename = "type")]
+    command_type: &'static str,
+}
+
+#[derive(Serialize)]
+struct CanonicalResolveChoiceCommandRequest<'a> {
+    command_id: &'a str,
+    expected_state_version: u64,
+    #[serde(rename = "type")]
+    command_type: &'static str,
+    choice_id: &'a str,
+    selected_options: &'a [String],
+}
+
+fn positive_state_version<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let version = u64::deserialize(deserializer)?;
+    (version > 0)
+        .then_some(version)
+        .ok_or_else(|| D::Error::custom("expected_state_version must be positive"))
+}
+
+fn bounded_choice_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    let length = value.chars().count();
+    (1..=256)
+        .contains(&length)
+        .then_some(value)
+        .ok_or_else(|| D::Error::custom("choice values must contain between 1 and 256 characters"))
+}
+
+fn bounded_choice_selection<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let selected = Vec::<String>::deserialize(deserializer)?;
+    let unique = selected.iter().collect::<std::collections::BTreeSet<_>>();
+    let valid = selected.len() <= 32
+        && unique.len() == selected.len()
+        && selected
+            .iter()
+            .all(|option| (1..=256).contains(&option.chars().count()));
+    valid
+        .then_some(selected)
+        .ok_or_else(|| D::Error::custom("selected_options must satisfy the public contract"))
+}
+
+fn command_payload_digest(request: &ExecuteGameCommandRequest) -> Result<String, ApiError> {
+    let canonical = request
+        .canonical_bytes()
+        .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    Ok(format!("blake3:{}", blake3::hash(&canonical).to_hex()))
 }
 
 #[derive(FromRow)]
@@ -134,6 +275,7 @@ struct StoredCommandGame {
     state_digest: String,
     snapshot_json: String,
     prng_algorithm: String,
+    prng_seed: Vec<u8>,
     prng_counter: i64,
     shuffle_algorithm: String,
     sampling_algorithm: String,
@@ -195,6 +337,8 @@ struct PersistedSnapshot {
     turn: PersistedTurn,
     participants: Vec<PersistedPlayer>,
     prng: PersistedPrng,
+    #[serde(default, skip_serializing_if = "PersistedEffects::is_empty")]
+    effects: PersistedEffects,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -232,6 +376,140 @@ struct PersistedPrng {
     counter: u64,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffects {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    entities: Vec<PersistedEffectEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    outcomes: Vec<PersistedEffectOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    choice: Option<PersistedEffectChoice>,
+}
+
+impl PersistedEffects {
+    fn is_empty(&self) -> bool {
+        self.entities.is_empty() && self.outcomes.is_empty() && self.choice.is_none()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectEntity {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_position: Option<u8>,
+    zone: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    resources: BTreeMap<String, u16>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PersistedEffectOutcome {
+    DieRolled {
+        rule_id: String,
+        die: String,
+        result: u8,
+    },
+    Moved {
+        rule_id: String,
+        target_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_position: Option<u8>,
+        from: String,
+        to: String,
+    },
+    NoOp {
+        rule_id: String,
+        reason: String,
+    },
+    ResourceChanged {
+        rule_id: String,
+        target_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_position: Option<u8>,
+        resource: String,
+        before: u16,
+        after: u16,
+        cause: String,
+    },
+    Terminal {
+        rule_id: String,
+        outcome: String,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectChoice {
+    id: String,
+    cause: String,
+    responsible_position: u8,
+    kind: String,
+    options: Vec<String>,
+    min: u16,
+    max: u16,
+    continuation: PersistedEffectContinuation,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectContinuation {
+    choice_cursor: PersistedEffectCursor,
+    queue: Vec<PersistedQueuedEffect>,
+    steps_completed: usize,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectCursor {
+    rule_id: String,
+    path: Vec<PersistedEffectPathSegment>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PersistedEffectPathSegment {
+    ChoiceOption { index: u16 },
+    ConditionThen,
+    ConditionOtherwise,
+    RepeatEffect,
+    RollOutcome { index: u16 },
+    SequenceEffect { index: u16 },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PersistedQueuedEffect {
+    Definition {
+        cursor: PersistedEffectCursor,
+        actor_position: u8,
+    },
+    EffectChoice {
+        cursor: PersistedEffectCursor,
+        responsible_position: u8,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedLegacyEffectChoice {
+    id: String,
+    responsible_position: u8,
+    kind: String,
+    options: Vec<String>,
+    min: u16,
+    max: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PersistedEventChoice {
+    Current(PersistedEffectChoice),
+    Legacy(PersistedLegacyEffectChoice),
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedGameEvent {
@@ -242,6 +520,54 @@ struct PersistedGameEvent {
     state_version: u64,
     turn: u32,
     actor_position: u8,
+    #[serde(default)]
+    effects: Vec<PersistedEffectOutcome>,
+    #[serde(default = "default_effect_stop")]
+    effect_stop: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    choice: Option<PersistedEventChoice>,
+    #[serde(default)]
+    choice_id: Option<String>,
+    #[serde(default)]
+    choice_cause: Option<String>,
+    #[serde(default)]
+    selected_options: Option<Vec<String>>,
+    #[serde(default)]
+    prng_counter: u64,
+}
+
+fn default_effect_stop() -> String {
+    "stable".to_owned()
+}
+
+struct ChaChaEffectRoller {
+    seed: [u8; SEED_BYTES],
+    stream: u64,
+}
+
+impl ChaChaEffectRoller {
+    fn new(seed: &[u8], stream: u64) -> Result<Self, ApiError> {
+        let seed = seed
+            .try_into()
+            .map_err(|error| ApiError::internal_with("match application operation", error))?;
+        Ok(Self { seed, stream })
+    }
+}
+
+impl EffectRoller for ChaChaEffectRoller {
+    fn roll(&mut self, die: EffectDie) -> Option<u8> {
+        let mut generator = ChaCha20Rng::from_seed(self.seed);
+        generator.set_stream(self.stream);
+        self.stream = self.stream.checked_add(1)?;
+        let sides = u32::from(die.sides());
+        let unbiased_range = u32::MAX - (u32::MAX % sides);
+        loop {
+            let value = generator.next_u32();
+            if value < unbiased_range {
+                return u8::try_from((value % sides) + 1).ok();
+            }
+        }
+    }
 }
 
 async fn start_game(
@@ -253,7 +579,7 @@ async fn start_game(
     let participant_id = authenticated_participant(&state, &headers).await?;
 
     if let Some(stored) = postgres::load_game_start(&state.database, &key).await? {
-        return replay_game_start(&state.database, stored, participant_id, &request).await;
+        return replay_game_start(&state, stored, participant_id, &request).await;
     }
 
     let content = state
@@ -278,7 +604,7 @@ async fn start_game(
             .rollback()
             .await
             .map_err(|error| ApiError::internal_with("match application operation", error))?;
-        return replay_game_start(&state.database, stored, participant_id, &request).await;
+        return replay_game_start(&state, stored, participant_id, &request).await;
     }
     if actor.room_status != "open" {
         return Err(ApiError::room_sealed());
@@ -308,7 +634,7 @@ async fn start_game(
         let stored = postgres::load_game_start(&state.database, &key)
             .await?
             .ok_or_else(ApiError::internal)?;
-        return replay_game_start(&state.database, stored, participant_id, &request).await;
+        return replay_game_start(&state, stored, participant_id, &request).await;
     }
 
     let snapshot = persisted_snapshot(&initial_state, &stored_participants);
@@ -326,6 +652,7 @@ async fn start_game(
             actor: &actor,
             content: &content,
             state: &initial_state,
+            snapshot_version: snapshot.snapshot_version,
             state_digest: &state_digest,
             snapshot_json: &snapshot_json,
             seed: &seed,
@@ -338,7 +665,7 @@ async fn start_game(
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
 
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
     Ok(no_store_json(StatusCode::CREATED, projection))
@@ -371,7 +698,7 @@ async fn initialize_persisted_game(
 }
 
 async fn replay_game_start(
-    database: &sqlx::PgPool,
+    state: &AppState,
     stored: StoredGameStart,
     participant_id: Uuid,
     request: &StartGameRequest,
@@ -384,7 +711,7 @@ async fn replay_game_start(
         return Err(ApiError::idempotency_conflict());
     }
 
-    let projection = projection_for_participant(database, participant_id)
+    let projection = projection_for_participant(state, participant_id)
         .await?
         .filter(|projection| projection.game.id == stored.game_id.to_string())
         .ok_or_else(ApiError::internal)?;
@@ -398,10 +725,11 @@ async fn execute_game_command(
 ) -> Result<Response, ApiError> {
     let participant_id = authenticated_participant(&state, &headers).await?;
     let command_id =
-        Uuid::parse_str(&request.command_id).map_err(|_| ApiError::invalid_command_id())?;
-    let request_json = serde_json::to_vec(&request)
-        .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let payload_digest = format!("blake3:{}", blake3::hash(&request_json).to_hex());
+        Uuid::parse_str(request.command_id()).map_err(|_| ApiError::invalid_command_id())?;
+    let payload_digest = command_payload_digest(&request)?;
+    let expected_state_version = request.expected_state_version();
+    let command_type = request.command_type();
+    let command = request.domain_command();
     let mut transaction = state
         .database
         .begin()
@@ -425,7 +753,7 @@ async fn execute_game_command(
         {
             return Err(ApiError::idempotency_conflict());
         }
-        let projection = projection_for_participant(&state.database, participant_id)
+        let projection = projection_for_participant(&state, participant_id)
             .await?
             .ok_or_else(ApiError::internal)?;
         return Ok(no_store_json(
@@ -440,14 +768,19 @@ async fn execute_game_command(
     let persisted = decode_persisted_snapshot(&stored.snapshot_json)?;
     verify_persisted_snapshot(&stored, &persisted)?;
     let current = command_domain_state(&persisted)?;
+    let effect_rules = state
+        .content
+        .effect_rules(&stored.manifest_digest)
+        .ok_or_else(ApiError::internal)?;
+    let mut die_roller = ChaChaEffectRoller::new(&stored.prng_seed, current.prng_counter())?;
     let decision = decide_game_command(GameCommandInput {
         state: &current,
         actor_position: u8::try_from(stored.actor_position)
             .map_err(|_| ApiError::game_action_not_allowed())?,
-        expected_state_version: request.expected_state_version,
-        command: match request.command_type {
-            GameCommandType::CompleteDarkArts => GameCommand::CompleteDarkArts,
-        },
+        expected_state_version,
+        command,
+        effect_rules: &effect_rules,
+        die_roller: &mut die_roller,
     })
     .map_err(command_error)?;
 
@@ -455,19 +788,21 @@ async fn execute_game_command(
     let snapshot_json = serde_json::to_string(&next_snapshot)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
-    let (event_type, event_json) = persisted_event(decision.event)?;
+    let (event_version, event_type, event_json) = persisted_event(decision.event)?;
     let receipt = postgres::persist_game_command(
         &mut transaction,
         postgres::NewGameCommand {
             game_id: stored.id,
             actor_participant_id: participant_id,
             command_id,
-            expected_state_version: request.expected_state_version,
-            command_type: command_type_name(request.command_type),
+            expected_state_version,
+            command_type: command_type_name(command_type),
             payload_digest: &payload_digest,
             state: &decision.state,
+            snapshot_version: next_snapshot.snapshot_version,
             state_digest: &state_digest,
             snapshot_json: &snapshot_json,
+            event_version,
             event_type,
             event_json: &event_json,
         },
@@ -477,9 +812,9 @@ async fn execute_game_command(
         .commit()
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    state.signal_game_event(stored.id);
+    state.signal_game_synchronization(stored.id);
 
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
     Ok(no_store_json(
@@ -501,7 +836,7 @@ async fn command_result(
     let receipt = postgres::command_receipt_for_actor(&state.database, participant_id, command_id)
         .await?
         .ok_or_else(ApiError::command_not_found)?;
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
 
@@ -559,17 +894,21 @@ fn start_error(error: StartGameError) -> ApiError {
 
 fn command_error(error: GameCommandError) -> ApiError {
     match error {
+        GameCommandError::ActorNotChoiceResponsible => ApiError::choice_not_assigned(),
         GameCommandError::StaleStateVersion => ApiError::stale_state_version(),
         GameCommandError::ActorNotActive | GameCommandError::CommandNotLegal => {
             ApiError::game_action_not_allowed()
         }
-        GameCommandError::VersionOverflow => ApiError::internal(),
+        GameCommandError::EffectExecutionFailed | GameCommandError::VersionOverflow => {
+            ApiError::internal()
+        }
     }
 }
 
 const fn command_type_name(command_type: GameCommandType) -> &'static str {
     match command_type {
         GameCommandType::CompleteDarkArts => "complete_dark_arts",
+        GameCommandType::ResolveChoice => "resolve_choice",
     }
 }
 
@@ -582,5 +921,33 @@ fn receipt_response(receipt: StoredCommandReceipt) -> GameCommandReceipt {
         accepted_state_version: receipt.accepted_state_version,
         accepted_sequence: receipt.accepted_sequence,
         expires_at: receipt.expires_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExecuteGameCommandRequest;
+
+    #[test]
+    fn command_digest_bytes_preserve_the_legacy_complete_shape_and_fix_resolve_order() {
+        let complete = ExecuteGameCommandRequest::CompleteDarkArts {
+            command_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            expected_state_version: 7,
+        };
+        assert_eq!(
+            complete.canonical_bytes().expect("complete must serialize"),
+            br#"{"command_id":"00000000-0000-0000-0000-000000000001","expected_state_version":7,"type":"complete_dark_arts"}"#
+        );
+
+        let resolve = ExecuteGameCommandRequest::ResolveChoice {
+            command_id: "00000000-0000-0000-0000-000000000002".to_owned(),
+            expected_state_version: 8,
+            choice_id: "choice:1".to_owned(),
+            selected_options: vec!["option:2".to_owned()],
+        };
+        assert_eq!(
+            resolve.canonical_bytes().expect("resolve must serialize"),
+            br#"{"command_id":"00000000-0000-0000-0000-000000000002","expected_state_version":8,"type":"resolve_choice","choice_id":"choice:1","selected_options":["option:2"]}"#
+        );
     }
 }

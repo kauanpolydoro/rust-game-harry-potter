@@ -1,6 +1,10 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use game_content::{ContentManifest, EntryKind, ManifestEntry};
+use game_content::{
+    Condition, ContentManifest, Die, Effect, EffectChoiceAudience as ContentEffectChoiceAudience,
+    EffectRule, EffectTrigger, Eligibility, EntryKind, GameOutcome, ManifestEntry, Operation,
+    Resource, Selector, TargetOwner, Zone,
+};
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -60,6 +64,27 @@ impl ContentCatalog {
                     })
                     .collect(),
             })
+            .collect()
+    }
+
+    pub(crate) fn effect_rules(
+        &self,
+        manifest_digest: &str,
+    ) -> Option<Vec<game_domain::EffectRule>> {
+        let manifest = self
+            .manifests
+            .iter()
+            .find(|manifest| manifest.digest == manifest_digest)?;
+        let rules = manifest
+            .rules
+            .iter()
+            .map(|rule| (&rule.id, rule))
+            .collect::<BTreeMap<_, _>>();
+
+        manifest
+            .executable_rules
+            .iter()
+            .map(|rule_id| compile_rule(rules.get(rule_id).copied()?, &rules))
             .collect()
     }
 
@@ -186,4 +211,187 @@ fn entry_name(entry: &ManifestEntry) -> String {
         .or_else(|| entry.names.values().next())
         .cloned()
         .unwrap_or_else(|| entry.catalog_id.as_str().to_owned())
+}
+
+fn compile_rule(
+    rule: &EffectRule,
+    rules: &BTreeMap<&game_content::RuleId, &EffectRule>,
+) -> Option<game_domain::EffectRule> {
+    Some(game_domain::EffectRule {
+        id: rule.id.as_str().to_owned(),
+        trigger: effect_trigger(rule.trigger),
+        cost: rule
+            .cost
+            .iter()
+            .map(|cost| game_domain::EffectResourceCost {
+                resource: effect_resource(cost.resource),
+                amount: cost.amount,
+            })
+            .collect(),
+        effect: compile_effect(&rule.effect, rules)?,
+    })
+}
+
+fn compile_effect(
+    effect: &Effect,
+    rules: &BTreeMap<&game_content::RuleId, &EffectRule>,
+) -> Option<game_domain::EffectDefinition> {
+    Some(match effect {
+        Effect::Apply { target, operation } => game_domain::EffectDefinition::Apply {
+            target: effect_selector(target),
+            operation: effect_operation(operation),
+        },
+        Effect::Choice { audience, options } => game_domain::EffectDefinition::Choice {
+            audience: match audience {
+                ContentEffectChoiceAudience::Actor => game_domain::EffectChoiceAudience::Actor,
+                ContentEffectChoiceAudience::EachHero => {
+                    game_domain::EffectChoiceAudience::EachHero
+                }
+            },
+            options: options
+                .iter()
+                .map(|option| compile_effect(option, rules))
+                .collect::<Option<Vec<_>>>()?,
+        },
+        Effect::Condition {
+            condition,
+            then,
+            otherwise,
+        } => game_domain::EffectDefinition::Condition {
+            condition: effect_condition(condition),
+            then: Box::new(compile_effect(then, rules)?),
+            otherwise: match otherwise.as_deref() {
+                Some(effect) => Some(Box::new(compile_effect(effect, rules)?)),
+                None => None,
+            },
+        },
+        Effect::NoOp => game_domain::EffectDefinition::NoOp,
+        Effect::Reference { rule } => compile_effect(&rules.get(rule)?.effect, rules)?,
+        Effect::Repeat { times, effect } => game_domain::EffectDefinition::Repeat {
+            times: *times,
+            effect: Box::new(compile_effect(effect, rules)?),
+        },
+        Effect::Roll { die, outcomes } => game_domain::EffectDefinition::Roll {
+            die: effect_die(*die),
+            outcomes: outcomes
+                .iter()
+                .map(|outcome| compile_effect(outcome, rules))
+                .collect::<Option<Vec<_>>>()?,
+        },
+        Effect::Sequence { effects } => game_domain::EffectDefinition::Sequence {
+            effects: effects
+                .iter()
+                .map(|effect| compile_effect(effect, rules))
+                .collect::<Option<Vec<_>>>()?,
+        },
+        Effect::Terminal { outcome } => game_domain::EffectDefinition::Terminal {
+            outcome: effect_game_outcome(*outcome),
+        },
+    })
+}
+
+fn effect_condition(condition: &Condition) -> game_domain::EffectCondition {
+    match condition {
+        Condition::HasEligibleTarget { target } => {
+            game_domain::EffectCondition::HasEligibleTarget {
+                target: effect_selector(target),
+            }
+        }
+        Condition::ResourceAtLeast {
+            target,
+            resource,
+            amount,
+        } => game_domain::EffectCondition::ResourceAtLeast {
+            target: effect_selector(target),
+            resource: effect_resource(*resource),
+            amount: *amount,
+        },
+    }
+}
+
+fn effect_selector(selector: &Selector) -> game_domain::EffectSelector {
+    game_domain::EffectSelector {
+        zone: effect_zone(selector.zone),
+        owner: match selector.owner {
+            TargetOwner::Actor => game_domain::EffectTargetOwner::Actor,
+            TargetOwner::Any => game_domain::EffectTargetOwner::Any,
+        },
+        min: selector.cardinality.min,
+        max: selector.cardinality.max,
+        eligibility: selector
+            .eligibility
+            .iter()
+            .map(|eligibility| match eligibility {
+                Eligibility::ResourceAtLeast { resource, amount } => {
+                    game_domain::EffectEligibility::ResourceAtLeast {
+                        resource: effect_resource(*resource),
+                        amount: *amount,
+                    }
+                }
+            })
+            .collect(),
+    }
+}
+
+fn effect_operation(operation: &Operation) -> game_domain::EffectOperation {
+    match operation {
+        Operation::Discard => game_domain::EffectOperation::Discard,
+        Operation::ModifyResource { resource, amount } => {
+            game_domain::EffectOperation::ModifyResource {
+                resource: effect_resource(*resource),
+                amount: *amount,
+            }
+        }
+        Operation::Move { to } => game_domain::EffectOperation::Move {
+            to: effect_zone(*to),
+        },
+    }
+}
+
+const fn effect_trigger(trigger: EffectTrigger) -> game_domain::EffectTrigger {
+    match trigger {
+        EffectTrigger::DarkArtsCompleted => game_domain::EffectTrigger::DarkArtsCompleted,
+        EffectTrigger::Manual => game_domain::EffectTrigger::Manual,
+    }
+}
+
+const fn effect_resource(resource: Resource) -> game_domain::EffectResource {
+    match resource {
+        Resource::Attack => game_domain::EffectResource::Attack,
+        Resource::Control => game_domain::EffectResource::Control,
+        Resource::Health => game_domain::EffectResource::Health,
+        Resource::Influence => game_domain::EffectResource::Influence,
+    }
+}
+
+const fn effect_zone(zone: Zone) -> game_domain::EffectZone {
+    match zone {
+        Zone::ActiveLocation => game_domain::EffectZone::ActiveLocation,
+        Zone::ActiveVillains => game_domain::EffectZone::ActiveVillains,
+        Zone::DarkArtsDeck => game_domain::EffectZone::DarkArtsDeck,
+        Zone::DarkArtsDiscard => game_domain::EffectZone::DarkArtsDiscard,
+        Zone::HeroDiscardPile => game_domain::EffectZone::HeroDiscardPile,
+        Zone::HeroDrawPile => game_domain::EffectZone::HeroDrawPile,
+        Zone::HeroHand => game_domain::EffectZone::HeroHand,
+        Zone::HeroPlayArea => game_domain::EffectZone::HeroPlayArea,
+        Zone::Heroes => game_domain::EffectZone::Heroes,
+        Zone::HogwartsDeck => game_domain::EffectZone::HogwartsDeck,
+        Zone::Market => game_domain::EffectZone::Market,
+        Zone::VillainDeck => game_domain::EffectZone::VillainDeck,
+    }
+}
+
+const fn effect_die(die: Die) -> game_domain::EffectDie {
+    match die {
+        Die::D4 => game_domain::EffectDie::D4,
+        Die::D6 => game_domain::EffectDie::D6,
+        Die::D8 => game_domain::EffectDie::D8,
+    }
+}
+
+const fn effect_game_outcome(outcome: GameOutcome) -> game_domain::EffectGameOutcome {
+    match outcome {
+        GameOutcome::Lost => game_domain::EffectGameOutcome::Lost,
+        GameOutcome::Won => game_domain::EffectGameOutcome::Won,
+    }
 }

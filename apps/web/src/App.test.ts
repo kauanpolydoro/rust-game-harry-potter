@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/vue'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/vue'
 import { createPinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -131,6 +131,7 @@ function unreadyHostLobbyResponse() {
 function gameProjectionResponse() {
   return {
     choice: { status: 'none' },
+    effects: { outcomes: [], status: 'idle' },
     game: {
       adventure: { id: 'adventure:001', name: 'Game 1' },
       expires_at: '2026-09-10T12:00:00Z',
@@ -142,6 +143,7 @@ function gameProjectionResponse() {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     participants: [
@@ -149,12 +151,14 @@ function gameProjectionResponse() {
         display_name: 'Minerva',
         hero: { id: 'harry', name: 'Harry' },
         position: 1,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
       },
       {
         display_name: 'Luna',
         hero: { id: 'hermione', name: 'Hermione' },
         position: 2,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
       },
     ],
@@ -180,10 +184,53 @@ function gameProjectionResponse() {
 
 function completedGameProjectionResponse() {
   const projection = gameProjectionResponse()
+  const participants = projection.participants.map((participant) =>
+    participant.position === 1
+      ? { ...participant, resources: { attack: 2, health: 9, influence: 2 } }
+      : participant,
+  )
   return {
     ...projection,
+    effects: {
+      outcomes: [
+        {
+          after: 9,
+          before: 10,
+          cause: 'cost',
+          resource: 'health',
+          rule_id: 'rule:functional',
+          target_id: 'hero:1',
+          target_position: 1,
+          type: 'resource_changed',
+        },
+        {
+          after: 2,
+          before: 0,
+          cause: 'effect',
+          resource: 'influence',
+          rule_id: 'rule:functional',
+          target_id: 'hero:1',
+          target_position: 1,
+          type: 'resource_changed',
+        },
+        {
+          die: 'd4',
+          result: 3,
+          rule_id: 'rule:functional',
+          type: 'die_rolled',
+        },
+        {
+          reason: 'no_eligible_target',
+          rule_id: 'rule:functional',
+          type: 'no_op',
+        },
+      ],
+      status: 'resolved',
+    },
     game: { ...projection.game, expires_at: '2026-09-10T13:00:00Z' },
     legal_actions: [],
+    participant: participants[0],
+    participants,
     snapshot: {
       ...projection.snapshot,
       cursor: 1,
@@ -192,6 +239,90 @@ function completedGameProjectionResponse() {
       state_version: 2,
     },
     turn: { ...projection.turn, phase: 'hero_action' },
+  }
+}
+
+const pendingChoiceId = 'rule:functional:target:0'
+
+function pendingChoiceProjectionResponse() {
+  const projection = gameProjectionResponse()
+  const responsibleParticipant = projection.participants[1]
+  if (!responsibleParticipant) {
+    throw new Error('the choice fixture requires a second participant')
+  }
+  return {
+    ...projection,
+    choice: {
+      cause: 'rule:functional',
+      id: pendingChoiceId,
+      kind: 'target',
+      max: 1,
+      min: 1,
+      options: ['hero:1', 'hero:2'],
+      responsible_position: 2,
+      status: 'pending',
+    },
+    effects: { outcomes: [], status: 'choice' },
+    legal_actions: ['resolve_choice'],
+    participant: responsibleParticipant,
+    snapshot: {
+      ...projection.snapshot,
+      cursor: 1,
+      digest: `blake3:${'e'.repeat(64)}`,
+      sequence: 1,
+      state_version: 2,
+    },
+  }
+}
+
+function multiplePendingChoiceProjectionResponse() {
+  const projection = pendingChoiceProjectionResponse()
+  return {
+    ...projection,
+    choice: {
+      ...projection.choice,
+      max: 2,
+      options: ['hero:1', 'hero:2', 'hero:3'],
+    },
+    participants: [
+      ...projection.participants,
+      {
+        display_name: 'Pomona',
+        hero: { id: 'neville', name: 'Neville' },
+        position: 3,
+        resources: { attack: 0, health: 10, influence: 0 },
+        role: 'guest',
+      },
+    ],
+  }
+}
+
+function acceptedChoiceResponse(commandId: string) {
+  const projection = pendingChoiceProjectionResponse()
+  return {
+    projection: {
+      ...projection,
+      choice: { status: 'none' },
+      effects: { outcomes: [], status: 'resolved' },
+      legal_actions: [],
+      snapshot: {
+        ...projection.snapshot,
+        cursor: 2,
+        digest: `blake3:${'f'.repeat(64)}`,
+        sequence: 2,
+        state_version: 3,
+      },
+      turn: { ...projection.turn, phase: 'hero_action' },
+    },
+    receipt: {
+      accepted_sequence: 2,
+      accepted_state_version: 3,
+      command_id: commandId,
+      expected_state_version: 2,
+      expires_at: '2026-09-10T13:00:00Z',
+      status: 'accepted',
+      type: 'resolve_choice',
+    },
   }
 }
 
@@ -207,6 +338,14 @@ function acceptedCommandResponse(commandId: string) {
       status: 'accepted',
       type: 'complete_dark_arts',
     },
+  }
+}
+
+function recoveredGuestLobbyResponse() {
+  return {
+    kind: 'lobby',
+    lobby: guestLobbyResponse(),
+    recovery_token: '8'.repeat(64),
   }
 }
 
@@ -273,6 +412,7 @@ describe('application shell', () => {
     delete window.__HOGWARTS_RECOVERY_TOKEN__
     localStorage.clear()
     sessionStorage.clear()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -424,7 +564,7 @@ describe('application shell', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(recoveredGuestLobbyResponse()), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
         }),
@@ -467,6 +607,93 @@ describe('application shell', () => {
     expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBeNull()
   })
 
+  it('requires an explicit session choice before replacing access on a third device', async () => {
+    const token = '6'.repeat(64)
+    const successorToken = '7'.repeat(64)
+    const firstSessionId = '2fe6c1be-50fc-42ac-8c4f-6ef270099c24'
+    const secondSessionId = '8aa543d4-9d6f-4a8c-bd7b-6c6605be48fc'
+    window.__HOGWARTS_RECOVERY_TOKEN__ = token
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready' }), {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessions: [
+              {
+                created_at: '2026-09-01T14:20:00Z',
+                id: firstSessionId,
+                label: 'Sessão 1',
+              },
+              {
+                created_at: '2026-09-03T10:05:00Z',
+                id: secondSessionId,
+                label: 'Sessão 2',
+              },
+            ],
+            status: 'replacement_required',
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 409,
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            kind: 'lobby',
+            lobby: guestLobbyResponse(),
+            recovery_token: successorToken,
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+    await screen.findByRole('heading', { level: 2, name: 'Recupere sua participação' })
+    await fireEvent.update(
+      screen.getByLabelText('Senha de recuperação da sala'),
+      'a long uncommon passphrase',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Escolha uma sessão para substituir' }),
+    ).toBeVisible()
+    expect(screen.getByText('Criada em 01/09/2026, 11:20')).toBeVisible()
+    expect(screen.getByText('Criada em 03/09/2026, 07:05')).toBeVisible()
+    expect(request).toHaveBeenCalledTimes(2)
+
+    await fireEvent.click(screen.getByRole('radio', { name: 'Sessão 1' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Substituir Sessão 1' }))
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
+    expect(screen.getByLabelText('Link de recuperação')).toHaveValue(
+      `${window.location.origin}${window.location.pathname}#recovery=${successorToken}`,
+    )
+    const discovery = JSON.parse(
+      String((request.mock.calls[1]?.[1] as RequestInit | undefined)?.body),
+    ) as { recovery_attempt_id: string }
+    expect(
+      JSON.parse(String((request.mock.calls[2]?.[1] as RequestInit | undefined)?.body)),
+    ).toEqual({
+      recovery_attempt_id: discovery.recovery_attempt_id,
+      recovery_password: 'a long uncommon passphrase',
+      recovery_token: token,
+      replace_session_id: firstSessionId,
+    })
+  })
+
   it('gives a recovery link precedence over an older pending room join', async () => {
     const token = 'f'.repeat(64)
     window.__HOGWARTS_RECOVERY_TOKEN__ = token
@@ -489,7 +716,7 @@ describe('application shell', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(recoveredGuestLobbyResponse()), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
         }),
@@ -530,13 +757,7 @@ describe('application shell', () => {
       )
       .mockRejectedValueOnce(new TypeError('response lost after commit'))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(errorResponse('SESSION_INVALID')), {
-          headers: { 'Content-Type': 'application/json' },
-          status: 401,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(guestLobbyResponse()), {
+        new Response(JSON.stringify(recoveredGuestLobbyResponse()), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
         }),
@@ -564,7 +785,7 @@ describe('application shell', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Recuperar minha posição' }))
     expect(await screen.findByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
     const retriedAttempt = JSON.parse(
-      String((request.mock.calls[3]?.[1] as RequestInit | undefined)?.body),
+      String((request.mock.calls[2]?.[1] as RequestInit | undefined)?.body),
     ) as { recovery_attempt_id: string }
     expect(retriedAttempt.recovery_attempt_id).toBe(firstAttempt.recovery_attempt_id)
     expect(sessionStorage.getItem('hogwarts.participant-recovery.attempt-id')).toBeNull()
@@ -1222,6 +1443,675 @@ describe('application shell', () => {
     )
   })
 
+  it('lets the responsible participant select and submit a simple pending choice', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(pendingChoiceProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        return Promise.resolve(
+          new Response(JSON.stringify(acceptedChoiceResponse(body.command_id)), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    await screen.findByRole('heading', { level: 3, name: 'Escolha oficial pendente' })
+    await fireEvent.click(screen.getByRole('radio', { name: 'Minerva' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirmar escolha' }))
+
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/games/current/commands' && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
+    const commandCall = request.mock.calls.find(
+      ([url, init]) => String(url) === '/api/games/current/commands' && init?.method === 'POST',
+    )
+    const submitted = JSON.parse(String(commandCall?.[1]?.body)) as Record<string, unknown>
+    expect(submitted).toEqual({
+      choice_id: pendingChoiceId,
+      command_id: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
+      expected_state_version: 2,
+      selected_options: ['hero:1'],
+      type: 'resolve_choice',
+    })
+  })
+
+  it('submits a multi-select choice in the official option order', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = multiplePendingChoiceProjectionResponse()
+    let completeCommand = (_response: Response): void => undefined
+    const commandResponse = new Promise<Response>((resolve) => {
+      completeCommand = resolve
+    })
+    let submittedCommandId = ''
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        submittedCommandId = body.command_id
+        return commandResponse
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(await screen.findAllByRole('checkbox')).toHaveLength(3)
+    const choiceGroup = screen.getByRole('group', { name: 'Selecione de 1 a 2 opções' })
+    expect(choiceGroup).toHaveAccessibleDescription(
+      'Luna precisa escolher 1 a 2 entre as opções elegíveis. Causa oficial rule:functional',
+    )
+    const confirmation = screen.getByRole('button', { name: 'Confirmar escolha' })
+    expect(confirmation).toBeDisabled()
+
+    const pomonaOption = screen.getByRole('checkbox', { name: 'Pomona' })
+    const minervaOption = screen.getByRole('checkbox', { name: 'Minerva' })
+    const lunaOption = screen.getByRole('checkbox', { name: 'Luna' })
+    await fireEvent.click(pomonaOption)
+    expect(confirmation).toBeEnabled()
+    expect(lunaOption).toBeEnabled()
+    await fireEvent.click(minervaOption)
+    expect(confirmation).toBeEnabled()
+    expect(pomonaOption).toBeEnabled()
+    expect(minervaOption).toBeEnabled()
+    expect(lunaOption).toBeDisabled()
+    void fireEvent.click(confirmation)
+
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/games/current/commands' && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
+    expect(screen.getByRole('button', { name: 'Aguardando confirmação' })).toBeDisabled()
+    const commandCall = request.mock.calls.find(
+      ([url, init]) => String(url) === '/api/games/current/commands' && init?.method === 'POST',
+    )
+    const submitted = JSON.parse(String(commandCall?.[1]?.body)) as Record<string, unknown>
+    expect(submitted.selected_options).toEqual(['hero:1', 'hero:3'])
+
+    completeCommand(
+      new Response(JSON.stringify(acceptedChoiceResponse(submittedCommandId)), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
+    expect(await screen.findByText('Ação do Herói')).toBeVisible()
+  })
+
+  it('keeps a newer realtime projection after a delayed choice response', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = pendingChoiceProjectionResponse()
+    let completeCommand = (_response: Response): void => undefined
+    const commandResponse = new Promise<Response>((resolve) => {
+      completeCommand = resolve
+    })
+    let submittedCommandId = ''
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        submittedCommandId = body.command_id
+        return commandResponse
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    const pinia = createPinia()
+    const roomAccess = useRoomAccessStore(pinia)
+    render(App, { global: { plugins: [pinia] } })
+
+    const option = await screen.findByRole('radio', { name: 'Minerva' })
+    await waitFor(() => expect(option).toBeEnabled())
+    await fireEvent.click(screen.getByText('Ver versões do Snapshot'))
+    await fireEvent.click(option)
+    void fireEvent.click(screen.getByRole('button', { name: 'Confirmar escolha' }))
+    expect(
+      await screen.findByRole('button', { name: 'Aguardando confirmação' }),
+    ).toBeDisabled()
+
+    const newerProjection = {
+      ...projection,
+      choice: { status: 'none' },
+      effects: { outcomes: [], status: 'resolved' },
+      legal_actions: [],
+      snapshot: {
+        ...projection.snapshot,
+        cursor: 3,
+        digest: `blake3:${'a'.repeat(64)}`,
+        sequence: 3,
+        state_version: 4,
+      },
+      turn: { active_position: 1, number: 2, phase: 'hero_action' },
+    }
+    const socket = SynchronizedWebSocket.instances[0]
+    if (!socket) {
+      throw new Error('the realtime race fixture requires an open socket')
+    }
+    socket.receive({
+      cursor: 3,
+      events: [
+        {
+          actor_position: 2,
+          choice_cause: 'rule:functional',
+          choice_id: pendingChoiceId,
+          effect_stop: 'stable',
+          effects: [],
+          event_version: 3,
+          prng_counter: 0,
+          selected_options: ['hero:1'],
+          sequence: 2,
+          state_version: 3,
+          turn: 1,
+          type: 'choice_resolved',
+        },
+        {
+          actor_position: 1,
+          effect_stop: 'stable',
+          effects: [],
+          event_version: 3,
+          prng_counter: 0,
+          sequence: 3,
+          state_version: 4,
+          turn: 2,
+          type: 'dark_arts_completed',
+        },
+      ],
+      from_cursor: 1,
+      projection: newerProjection,
+      protocol_version: 2,
+      type: 'events',
+    })
+
+    expect(await screen.findByText('v4 · sequência 3')).toBeVisible()
+    const snapshotDisclosure = screen.getByText('Ver versões do Snapshot')
+    snapshotDisclosure.focus()
+    expect(snapshotDisclosure).toHaveFocus()
+    completeCommand(
+      new Response(JSON.stringify(acceptedChoiceResponse(submittedCommandId)), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
+
+    expect(await screen.findByText('Recibo aceito no estado v3, sequência 2.')).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2, name: 'Partida em andamento' })).toHaveFocus(),
+    )
+    expect(roomAccess.game?.snapshot).toMatchObject({ sequence: 3, state_version: 4 })
+    expect(screen.getByText('v4 · sequência 3')).toBeVisible()
+    expect(screen.queryByText('v3 · sequência 2')).not.toBeInTheDocument()
+  })
+
+  it('submits an optional single choice empty after clearing its checkbox', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const baseProjection = multiplePendingChoiceProjectionResponse()
+    const projection = {
+      ...baseProjection,
+      choice: {
+        ...baseProjection.choice,
+        max: 1,
+        min: 0,
+      },
+    }
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { command_id: string }
+        return Promise.resolve(
+          new Response(JSON.stringify(acceptedChoiceResponse(body.command_id)), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(await screen.findAllByRole('checkbox')).toHaveLength(3)
+    const firstOption = screen.getByRole('checkbox', { name: 'Minerva' })
+    const confirmation = screen.getByRole('button', { name: 'Confirmar escolha' })
+    expect(confirmation).toBeEnabled()
+
+    await fireEvent.click(firstOption)
+    expect(firstOption).toBeChecked()
+    await fireEvent.click(firstOption)
+    expect(firstOption).not.toBeChecked()
+    expect(confirmation).toBeEnabled()
+    await fireEvent.click(confirmation)
+
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/games/current/commands' && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
+    const commandCall = request.mock.calls.find(
+      ([url, init]) => String(url) === '/api/games/current/commands' && init?.method === 'POST',
+    )
+    const submitted = JSON.parse(String(commandCall?.[1]?.body)) as Record<string, unknown>
+    expect(submitted.selected_options).toEqual([])
+  })
+
+  it('keeps the official choice visible when the server says it belongs to another participant', async () => {
+    class ChoiceResyncWebSocket {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+      static instances: ChoiceResyncWebSocket[] = []
+
+      readonly url: string
+      readonly requestedProtocol: string
+      protocol = ''
+      readyState = ChoiceResyncWebSocket.CONNECTING
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: ((event: { code: number }) => void) | null = null
+
+      constructor(url: string | URL, protocol: string | string[]) {
+        this.url = String(url)
+        this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+        ChoiceResyncWebSocket.instances.push(this)
+      }
+
+      open(): void {
+        this.readyState = ChoiceResyncWebSocket.OPEN
+        this.protocol = this.requestedProtocol
+        this.onopen?.()
+      }
+
+      receive(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      close(): void {
+        this.readyState = ChoiceResyncWebSocket.CLOSED
+        this.onclose?.({ code: 1000 })
+      }
+    }
+
+    vi.stubGlobal('WebSocket', ChoiceResyncWebSocket)
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = pendingChoiceProjectionResponse()
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/games/current/commands' && init?.method === 'POST') {
+        return Promise.resolve(
+          new Response(JSON.stringify(errorResponse('CHOICE_NOT_ASSIGNED')), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 403,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const choiceHeading = await screen.findByRole('heading', {
+      level: 3,
+      name: 'Escolha oficial pendente',
+    })
+    const gameSockets = () =>
+      ChoiceResyncWebSocket.instances.filter(
+        (candidate) => candidate.requestedProtocol === 'hogwarts.realtime.v2',
+      )
+    const firstSocket = gameSockets()[0]
+    if (!firstSocket) {
+      throw new Error('the rejected choice fixture requires an initial socket')
+    }
+    firstSocket.open()
+    firstSocket.receive({
+      cursor: projection.snapshot.cursor,
+      digest: projection.snapshot.digest,
+      protocol_version: 2,
+      snapshot_version: projection.snapshot.snapshot_version,
+      type: 'synchronized',
+    })
+    const selectedOption = screen.getByRole('radio', { name: 'Minerva' })
+    await waitFor(() => expect(selectedOption).toBeEnabled())
+    await fireEvent.click(selectedOption)
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirmar escolha' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByText('Ação não aceita')).toBeVisible()
+    expect(
+      within(alert).getByText(
+        'A escolha oficial pertence a outro participante. Aguarde a sincronização da partida antes de tentar novamente.',
+      ),
+    ).toBeVisible()
+    expect(choiceHeading).toBeVisible()
+    expect(screen.getByText('rule:functional')).toBeVisible()
+    await waitFor(() => expect(gameSockets()).toHaveLength(2))
+    const resyncSocket = gameSockets()[1]
+    expect(resyncSocket?.url).toContain('snapshot_version=0')
+    expect(screen.getByRole('radio', { name: 'Minerva' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Minerva' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'Luna' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Confirmar escolha' })).toBeDisabled()
+    expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
+
+    const reassignedProjection = {
+      ...projection,
+      choice: { ...projection.choice, responsible_position: 1 },
+      snapshot: {
+        ...projection.snapshot,
+        cursor: 2,
+        digest: `blake3:${'f'.repeat(64)}`,
+        sequence: 2,
+        state_version: 3,
+      },
+    }
+    resyncSocket?.open()
+    resyncSocket?.receive({
+      cursor: reassignedProjection.snapshot.cursor,
+      projection: reassignedProjection,
+      protocol_version: 2,
+      type: 'snapshot',
+    })
+
+    await waitFor(() => expect(screen.queryByRole('radio')).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Confirmar escolha' })).not.toBeInTheDocument()
+    expect(screen.getByText('Aguardando Minerva concluir a escolha.')).toBeVisible()
+    expect(alert).toBeVisible()
+  })
+
+  it('restores the owned choice focus after an offline replay reconnection', async () => {
+    class OfflineJourneyWebSocket {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+      static instances: OfflineJourneyWebSocket[] = []
+
+      readonly url: string
+      readonly requestedProtocol: string
+      protocol = ''
+      readyState = OfflineJourneyWebSocket.CONNECTING
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: ((event: { code: number }) => void) | null = null
+
+      constructor(url: string | URL, protocol: string | string[]) {
+        this.url = String(url)
+        this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+        OfflineJourneyWebSocket.instances.push(this)
+      }
+
+      open(): void {
+        this.readyState = OfflineJourneyWebSocket.OPEN
+        this.protocol = this.requestedProtocol
+        this.onopen?.()
+      }
+
+      receive(message: unknown): void {
+        this.onmessage?.({ data: JSON.stringify(message) })
+      }
+
+      close(): void {
+        this.readyState = OfflineJourneyWebSocket.CLOSED
+        this.onclose?.({ code: 1000 })
+      }
+    }
+
+    let browserIsOnline = true
+    vi.spyOn(window.navigator, 'onLine', 'get').mockImplementation(() => browserIsOnline)
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', OfflineJourneyWebSocket)
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = pendingChoiceProjectionResponse()
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(JSON.stringify(projection), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const choicePanel = await screen.findByRole('region', {
+      name: 'Escolha oficial pendente',
+    })
+    const gameHeading = screen.getByRole('heading', { level: 2, name: 'Partida em andamento' })
+    await waitFor(() => expect(gameHeading).toHaveFocus())
+    const gameSockets = () =>
+      OfflineJourneyWebSocket.instances.filter(
+        (candidate) => candidate.requestedProtocol === 'hogwarts.realtime.v2',
+      )
+    const firstSocket = gameSockets()[0]
+    firstSocket?.open()
+    firstSocket?.receive({
+      cursor: projection.snapshot.cursor,
+      digest: projection.snapshot.digest,
+      protocol_version: 2,
+      snapshot_version: projection.snapshot.snapshot_version,
+      type: 'synchronized',
+    })
+
+    const firstOption = screen.getByRole('radio', { name: 'Minerva' })
+    await waitFor(() => expect(firstOption).toHaveFocus())
+    expect(firstOption).toBeEnabled()
+
+    browserIsOnline = false
+    window.dispatchEvent(new Event('offline'))
+
+    expect(firstSocket?.readyState).toBe(OfflineJourneyWebSocket.CLOSED)
+    expect(await screen.findByText('Atualizações automáticas interrompidas.')).toBeVisible()
+    expect(firstOption).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Confirmar escolha' })).toBeDisabled()
+    expect(choicePanel).toBeVisible()
+    expect(within(choicePanel).getByText('rule:functional')).toBeVisible()
+    expect(within(choicePanel).getByRole('radio', { name: 'Luna' })).toBeDisabled()
+
+    gameHeading.focus()
+    expect(gameHeading).toHaveFocus()
+
+    browserIsOnline = true
+    window.dispatchEvent(new Event('online'))
+    await waitFor(() => expect(gameSockets()).toHaveLength(2))
+    const secondSocket = gameSockets()[1]
+    expect(secondSocket?.url).toContain(`cursor=${projection.snapshot.cursor}`)
+    expect(secondSocket?.url).toContain(
+      `snapshot_version=${projection.snapshot.snapshot_version}`,
+    )
+    secondSocket?.open()
+    secondSocket?.receive({
+      cursor: projection.snapshot.cursor,
+      digest: projection.snapshot.digest,
+      protocol_version: 2,
+      snapshot_version: projection.snapshot.snapshot_version,
+      type: 'synchronized',
+    })
+    secondSocket?.receive({
+      blocked: false,
+      game_id: projection.game.id,
+      participants: [
+        { position: 1, status: 'online' },
+        { position: 2, status: 'online' },
+      ],
+      protocol_version: 2,
+      required_participant_position: 2,
+      type: 'presence',
+    })
+
+    const restoredFirstOption = screen.getByRole('radio', { name: 'Minerva' })
+    await waitFor(() => expect(restoredFirstOption).toHaveFocus())
+    expect(restoredFirstOption).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Confirmar escolha' })).toBeDisabled()
+    expect(within(choicePanel).getByText('rule:functional')).toBeVisible()
+    expect(screen.getByText('Online · Você')).toBeVisible()
+  })
+
+  it('keeps a tampered legal action read-only for a participant who does not own the choice', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = pendingChoiceProjectionResponse()
+    const observer = projection.participants[0]
+    if (!observer) {
+      throw new Error('the choice fixture requires an observing participant')
+    }
+    const request = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health/ready') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+      }
+      if (url === '/api/session') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...projection,
+              legal_actions: ['resolve_choice'],
+              participant: observer,
+            }),
+            {
+              headers: { 'Content-Type': 'application/json' },
+              status: 200,
+            },
+          ),
+        )
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', request)
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const choicePanel = await screen.findByRole('region', {
+      name: 'Escolha oficial pendente',
+    })
+    expect(within(choicePanel).getByText('Causa oficial')).toBeVisible()
+    expect(within(choicePanel).getByText('rule:functional')).toBeVisible()
+    expect(within(choicePanel).getByText(/Luna precisa escolher 1 entre as opções elegíveis/)).toBeVisible()
+    expect(within(choicePanel).getByText('Minerva')).toBeVisible()
+    expect(within(choicePanel).getByText('Luna')).toBeVisible()
+    expect(within(choicePanel).queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirmar escolha' })).not.toBeInTheDocument()
+    expect(screen.getByText('Aguardando Luna concluir a escolha.')).toBeVisible()
+  })
+
   it('shows ephemeral availability and waits only for the required offline participant', async () => {
     localStorage.setItem('hogwarts.session.expected', 'true')
     vi.stubGlobal(
@@ -1650,6 +2540,14 @@ describe('application shell', () => {
     expect(screen.getByText('Ação do Herói')).toBeVisible()
     expect(screen.getByText('Ação oficial')).toBeVisible()
     expect(screen.getByText(/Recibo aceito no estado v2, sequência 1/)).toBeVisible()
+    expect(screen.getByRole('heading', { level: 3, name: 'Última resolução oficial' })).toBeVisible()
+    expect(screen.getByText('Minerva pagou 1 de Vida (10 → 9).')).toBeVisible()
+    expect(screen.getByText('Minerva recebeu 2 de Influência (0 → 2).')).toBeVisible()
+    expect(screen.getByText('Dado D4: resultado 3.')).toBeVisible()
+    expect(
+      screen.getByText('Nenhum alvo era elegível. O efeito foi resolvido sem alterar a mesa.'),
+    ).toBeVisible()
+    expect(screen.getByText('Vida 9 · Ataque 2 · Influência 2')).toBeVisible()
     expect(sessionStorage.getItem('hogwarts.game-command.pending-intent')).toBeNull()
 
     const commandCall = request.mock.calls.find(

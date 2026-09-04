@@ -1,8 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{ContentSet, ImportFailure, RuleId};
+use crate::{
+    Condition, ContentSet, Effect, EffectChoiceAudience, Eligibility, ImportFailure, Operation,
+    Resource, RuleId, Selector, Zone,
+};
 
-use super::{CandidateBundle, Effect, Operation, Zone};
+use super::CandidateBundle;
+
+const MAX_EFFECT_DEPTH: usize = 32;
+const MAX_EFFECT_NODES: usize = 1_024;
+const MAX_BRANCHES: usize = 64;
+const MAX_REPEAT: u8 = 16;
+const MAX_RUNTIME_NODES: usize = 4_096;
+const MAX_RUNTIME_RULE_ID_LENGTH: usize = 244;
+const MAX_TARGETS: u16 = 32;
+const MAX_PARTICIPANT_HEROES: usize = 4;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
     validate_metadata(bundle)?;
@@ -240,10 +252,201 @@ fn validate_provenance(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
 }
 
 fn validate_effects(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    if bundle.rules.len() > MAX_EFFECT_NODES {
+        return Err(ImportFailure {
+            message: format!("bundle declares more than {MAX_EFFECT_NODES} effect rules"),
+        });
+    }
     for rule in &bundle.rules {
-        rule.effect.validate(&rule.id)?;
+        if rule.cost.len() > MAX_BRANCHES {
+            return Err(ImportFailure {
+                message: format!(
+                    "rule {} declares more than {MAX_BRANCHES} resource costs",
+                    rule.id
+                ),
+            });
+        }
+        for cost in &rule.cost {
+            if cost.amount == 0 || cost.resource == Resource::Control {
+                return Err(ImportFailure {
+                    message: format!(
+                        "rule {} has an invalid {:?} resource cost",
+                        rule.id, cost.resource
+                    ),
+                });
+            }
+        }
+        let mut nodes = 0;
+        rule.effect.validate(&rule.id, 0, &mut nodes)?;
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct EffectStats {
+    compiled_nodes: usize,
+    reference_depth: usize,
+    runtime_nodes: usize,
+}
+
+pub(super) fn validate_runtime_rules(
+    bundle: &CandidateBundle,
+    roots: &BTreeSet<RuleId>,
+) -> Result<(), ImportFailure> {
+    let rules = bundle
+        .rules
+        .iter()
+        .map(|rule| (&rule.id, &rule.effect))
+        .collect::<BTreeMap<_, _>>();
+    let mut memo = BTreeMap::new();
+    let mut compiled_nodes = 0;
+    let mut runtime_nodes = 0;
+    for root in roots {
+        if root.as_str().chars().count() > MAX_RUNTIME_RULE_ID_LENGTH {
+            return Err(ImportFailure {
+                message: format!(
+                    "runtime rule ID exceeds {MAX_RUNTIME_RULE_ID_LENGTH} characters: {root}"
+                ),
+            });
+        }
+        let stats = rule_stats(root, &rules, &mut memo).ok_or_else(|| ImportFailure {
+            message: format!("runtime rule {root} exceeds the closed effect execution limit"),
+        })?;
+        if stats.reference_depth > MAX_EFFECT_DEPTH {
+            return Err(ImportFailure {
+                message: format!("runtime rule {root} exceeds the rule reference depth limit"),
+            });
+        }
+        compiled_nodes =
+            checked_total(compiled_nodes, stats.compiled_nodes).ok_or_else(|| ImportFailure {
+                message: format!("runtime rule {root} exceeds the closed effect complexity limit"),
+            })?;
+        runtime_nodes =
+            checked_total(runtime_nodes, stats.runtime_nodes).ok_or_else(|| ImportFailure {
+                message: format!("runtime rule {root} exceeds the execution step limit"),
+            })?;
+    }
+    Ok(())
+}
+
+fn rule_stats(
+    rule_id: &RuleId,
+    rules: &BTreeMap<&RuleId, &Effect>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    if let Some(stats) = memo.get(rule_id) {
+        return Some(*stats);
+    }
+    let stats = effect_stats(rules.get(rule_id)?, rules, memo)?;
+    memo.insert(rule_id.clone(), stats);
+    Some(stats)
+}
+
+fn effect_stats(
+    effect: &Effect,
+    rules: &BTreeMap<&RuleId, &Effect>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    match effect {
+        Effect::Apply { .. } | Effect::NoOp | Effect::Terminal { .. } => Some(EffectStats {
+            compiled_nodes: 1,
+            reference_depth: 0,
+            runtime_nodes: 1,
+        }),
+        Effect::Choice { audience, options } => {
+            let mut stats = branch_stats(options, 1, true, rules, memo)?;
+            if *audience == EffectChoiceAudience::EachHero {
+                stats.runtime_nodes = stats
+                    .runtime_nodes
+                    .checked_mul(MAX_PARTICIPANT_HEROES)
+                    .filter(|total| *total <= MAX_RUNTIME_NODES)?;
+            }
+            Some(stats)
+        }
+        Effect::Condition {
+            then, otherwise, ..
+        } => {
+            let then_stats = effect_stats(then, rules, memo)?;
+            let otherwise_stats = match otherwise.as_deref() {
+                Some(effect) => effect_stats(effect, rules, memo)?,
+                None => EffectStats {
+                    compiled_nodes: 0,
+                    reference_depth: 0,
+                    runtime_nodes: 0,
+                },
+            };
+            Some(EffectStats {
+                compiled_nodes: checked_total(
+                    checked_total(1, then_stats.compiled_nodes)?,
+                    otherwise_stats.compiled_nodes,
+                )?,
+                reference_depth: then_stats
+                    .reference_depth
+                    .max(otherwise_stats.reference_depth),
+                runtime_nodes: checked_total(
+                    1,
+                    then_stats.runtime_nodes.max(otherwise_stats.runtime_nodes),
+                )?,
+            })
+        }
+        Effect::Reference { rule } => {
+            let mut stats = rule_stats(rule, rules, memo)?;
+            stats.reference_depth = stats.reference_depth.checked_add(1)?;
+            Some(stats)
+        }
+        Effect::Repeat { times, effect } => {
+            let child = effect_stats(effect, rules, memo)?;
+            Some(EffectStats {
+                compiled_nodes: checked_total(1, child.compiled_nodes)?,
+                reference_depth: child.reference_depth,
+                runtime_nodes: checked_total(
+                    1,
+                    child.runtime_nodes.checked_mul(usize::from(*times))?,
+                )?,
+            })
+        }
+        Effect::Roll { outcomes, .. } => branch_stats(outcomes, 1, true, rules, memo),
+        Effect::Sequence { effects } => branch_stats(effects, 1, false, rules, memo),
+    }
+}
+
+fn branch_stats(
+    effects: &[Effect],
+    base_runtime_nodes: usize,
+    runtime_uses_largest_branch: bool,
+    rules: &BTreeMap<&RuleId, &Effect>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    let mut combined = EffectStats {
+        compiled_nodes: 1,
+        reference_depth: 0,
+        runtime_nodes: base_runtime_nodes,
+    };
+    for effect in effects {
+        let child = effect_stats(effect, rules, memo)?;
+        combined.compiled_nodes = checked_total(combined.compiled_nodes, child.compiled_nodes)?;
+        combined.reference_depth = combined.reference_depth.max(child.reference_depth);
+        combined.runtime_nodes = if runtime_uses_largest_branch {
+            base_runtime_nodes.checked_add(
+                combined
+                    .runtime_nodes
+                    .saturating_sub(base_runtime_nodes)
+                    .max(child.runtime_nodes),
+            )?
+        } else {
+            checked_total(combined.runtime_nodes, child.runtime_nodes)?
+        };
+        if combined.runtime_nodes > MAX_RUNTIME_NODES {
+            return None;
+        }
+    }
+    Some(combined)
+}
+
+fn checked_total(current: usize, additional: usize) -> Option<usize> {
+    current
+        .checked_add(additional)
+        .filter(|total| *total <= MAX_RUNTIME_NODES)
 }
 
 fn validate_references(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
@@ -339,48 +542,160 @@ fn find_rule_cycle<'a>(
 }
 
 impl Effect {
-    fn references(&self) -> Vec<&RuleId> {
-        match self {
-            Self::Choice { options } => options.iter().flat_map(Self::references).collect(),
-            Self::Apply { .. } | Self::NoOp => Vec::new(),
-            Self::Reference { rule } => vec![rule],
+    fn validate(
+        &self,
+        rule_id: &RuleId,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Result<(), ImportFailure> {
+        *nodes += 1;
+        if depth > MAX_EFFECT_DEPTH || *nodes > MAX_EFFECT_NODES {
+            return Err(ImportFailure {
+                message: format!("rule {rule_id} exceeds the closed effect complexity limit"),
+            });
         }
-    }
 
-    fn validate(&self, rule_id: &RuleId) -> Result<(), ImportFailure> {
         match self {
             Self::Apply { target, operation } => {
-                if target.cardinality.min > target.cardinality.max {
-                    return Err(ImportFailure {
-                        message: format!(
-                            "rule {rule_id} cardinality min {} exceeds max {}",
-                            target.cardinality.min, target.cardinality.max
-                        ),
-                    });
-                }
-                operation.validate_zone(&target.zone, rule_id)?;
+                target.validate(rule_id)?;
+                operation.validate_zone(target.zone, rule_id)?;
             }
-            Self::Choice { options } => {
-                if options.len() < 2 {
+            Self::Choice { options, .. } => {
+                if !(2..=MAX_BRANCHES).contains(&options.len()) {
                     return Err(ImportFailure {
                         message: format!(
-                            "rule {rule_id} choice must have at least two conclusions"
+                            "rule {rule_id} choice must have at least two conclusions and at most {MAX_BRANCHES}"
                         ),
                     });
                 }
                 for option in options {
-                    option.validate(rule_id)?;
+                    option.validate(rule_id, depth + 1, nodes)?;
                 }
             }
-            Self::NoOp | Self::Reference { .. } => {}
+            Self::Condition {
+                condition,
+                then,
+                otherwise,
+            } => {
+                condition.validate(rule_id)?;
+                then.validate(rule_id, depth + 1, nodes)?;
+                if let Some(otherwise) = otherwise {
+                    otherwise.validate(rule_id, depth + 1, nodes)?;
+                }
+            }
+            Self::Repeat { times, effect } => {
+                if !(1..=MAX_REPEAT).contains(times) {
+                    return Err(ImportFailure {
+                        message: format!(
+                            "rule {rule_id} repeat count must be between 1 and {MAX_REPEAT}"
+                        ),
+                    });
+                }
+                effect.validate(rule_id, depth + 1, nodes)?;
+            }
+            Self::Roll { die, outcomes } => {
+                if outcomes.len() != die.sides() {
+                    return Err(ImportFailure {
+                        message: format!(
+                            "rule {rule_id} {:?} must declare exactly {} outcomes",
+                            die,
+                            die.sides()
+                        ),
+                    });
+                }
+                for outcome in outcomes {
+                    outcome.validate(rule_id, depth + 1, nodes)?;
+                }
+            }
+            Self::Sequence { effects } => {
+                if effects.is_empty() || effects.len() > MAX_BRANCHES {
+                    return Err(ImportFailure {
+                        message: format!(
+                            "rule {rule_id} sequence must contain between 1 and {MAX_BRANCHES} effects"
+                        ),
+                    });
+                }
+                for effect in effects {
+                    effect.validate(rule_id, depth + 1, nodes)?;
+                }
+            }
+            Self::NoOp | Self::Reference { .. } | Self::Terminal { .. } => {}
+        }
+        Ok(())
+    }
+}
+
+impl Condition {
+    fn validate(&self, rule_id: &RuleId) -> Result<(), ImportFailure> {
+        match self {
+            Self::HasEligibleTarget { target } => target.validate(rule_id),
+            Self::ResourceAtLeast {
+                target,
+                resource,
+                amount,
+            } => {
+                target.validate(rule_id)?;
+                if *amount == 0 || !zone_supports_resource(target.zone, *resource) {
+                    return Err(ImportFailure {
+                        message: format!(
+                            "rule {rule_id} condition resource {} is incompatible with zone {}",
+                            resource.as_str(),
+                            target.zone.as_str()
+                        ),
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Selector {
+    fn validate(&self, rule_id: &RuleId) -> Result<(), ImportFailure> {
+        if self.cardinality.min > self.cardinality.max {
+            return Err(ImportFailure {
+                message: format!(
+                    "rule {rule_id} cardinality min {} exceeds max {}",
+                    self.cardinality.min, self.cardinality.max
+                ),
+            });
+        }
+        if self.cardinality.max > MAX_TARGETS {
+            return Err(ImportFailure {
+                message: format!(
+                    "rule {rule_id} selector exceeds the maximum cardinality {MAX_TARGETS}"
+                ),
+            });
+        }
+        for eligibility in &self.eligibility {
+            match eligibility {
+                Eligibility::ResourceAtLeast { resource, amount }
+                    if *amount == 0 || !zone_supports_resource(self.zone, *resource) =>
+                {
+                    return Err(ImportFailure {
+                        message: format!(
+                            "rule {rule_id} eligibility resource {} is incompatible with zone {}",
+                            resource.as_str(),
+                            self.zone.as_str()
+                        ),
+                    });
+                }
+                Eligibility::ResourceAtLeast { .. } => {}
+            }
         }
         Ok(())
     }
 }
 
 impl Operation {
-    fn validate_zone(&self, zone: &Zone, rule_id: &RuleId) -> Result<(), ImportFailure> {
-        let compatible = matches!((self, zone), (Self::Discard, Zone::HeroHand));
+    fn validate_zone(&self, zone: Zone, rule_id: &RuleId) -> Result<(), ImportFailure> {
+        let compatible = match self {
+            Self::Discard => zone == Zone::HeroHand,
+            Self::ModifyResource { resource, amount } => {
+                *amount != 0 && zone_supports_resource(zone, *resource)
+            }
+            Self::Move { to } => zone.is_card_zone() && to.is_card_zone() && zone != *to,
+        };
         if !compatible {
             return Err(ImportFailure {
                 message: format!(
@@ -396,12 +711,40 @@ impl Operation {
     fn as_str(&self) -> &'static str {
         match self {
             Self::Discard => "discard",
+            Self::ModifyResource { .. } => "modify_resource",
+            Self::Move { .. } => "move",
+        }
+    }
+}
+
+impl Resource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Attack => "attack",
+            Self::Control => "control",
+            Self::Health => "health",
+            Self::Influence => "influence",
         }
     }
 }
 
 impl Zone {
-    fn as_str(&self) -> &'static str {
+    fn is_card_zone(self) -> bool {
+        matches!(
+            self,
+            Self::DarkArtsDeck
+                | Self::DarkArtsDiscard
+                | Self::HeroDiscardPile
+                | Self::HeroDrawPile
+                | Self::HeroHand
+                | Self::HeroPlayArea
+                | Self::HogwartsDeck
+                | Self::Market
+                | Self::VillainDeck
+        )
+    }
+
+    fn as_str(self) -> &'static str {
         match self {
             Self::ActiveLocation => "active_location",
             Self::ActiveVillains => "active_villains",
@@ -417,4 +760,15 @@ impl Zone {
             Self::VillainDeck => "villain_deck",
         }
     }
+}
+
+fn zone_supports_resource(zone: Zone, resource: Resource) -> bool {
+    matches!(
+        (zone, resource),
+        (
+            Zone::Heroes,
+            Resource::Attack | Resource::Health | Resource::Influence
+        ) | (Zone::ActiveVillains, Resource::Health)
+            | (Zone::ActiveLocation, Resource::Control)
+    )
 }

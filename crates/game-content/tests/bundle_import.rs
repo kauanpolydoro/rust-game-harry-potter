@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use game_content::{
-    CardInstanceId, CatalogId, FunctionalField, ProvenanceSource, RuleId, SourceKind,
-    import_base_bundle, import_base_bundle_with_runtime_rules,
-    import_base_bundle_with_trusted_sources,
+    CardInstanceId, CatalogId, Effect, EffectChoiceAudience, EffectTrigger, FunctionalField,
+    ProvenanceSource, RuleId, SourceKind, import_base_bundle,
+    import_base_bundle_with_runtime_rules, import_base_bundle_with_trusted_sources,
 };
 use serde_json::json;
 
@@ -71,11 +71,32 @@ fn require_effect(bundle: &mut serde_json::Value) {
     bundle["entries"][0]["required_functional_fields"] = json!(["effect"]);
 }
 
+fn contains_participant_choice(effect: &Effect) -> bool {
+    match effect {
+        Effect::Choice { .. } => true,
+        Effect::Condition {
+            then, otherwise, ..
+        } => {
+            contains_participant_choice(then)
+                || otherwise
+                    .as_deref()
+                    .is_some_and(contains_participant_choice)
+        }
+        Effect::Repeat { effect, .. } => contains_participant_choice(effect),
+        Effect::Roll { outcomes, .. } => outcomes.iter().any(contains_participant_choice),
+        Effect::Sequence { effects } => effects.iter().any(contains_participant_choice),
+        Effect::Apply { .. }
+        | Effect::NoOp
+        | Effect::Reference { .. }
+        | Effect::Terminal { .. } => false,
+    }
+}
+
 #[test]
 fn structurally_complete_but_semantically_empty_bundle_is_not_playable() {
     let manifest = import_base_bundle(&complete_bundle()).expect("bundle should be valid");
 
-    assert_eq!(manifest.manifest_version, 1);
+    assert_eq!(manifest.manifest_version, 2);
     assert_eq!(manifest.content_version, "fixture-v1");
     assert_eq!(manifest.ruleset_version, "fixture-rules-v1");
     assert!(manifest.digest.starts_with("blake3:"));
@@ -199,6 +220,15 @@ fn catalog_identity_is_independent_from_localized_names_and_instance_identity() 
         std::any::TypeId::of::<CatalogId>(),
         std::any::TypeId::of::<CardInstanceId>()
     );
+}
+
+#[test]
+fn runtime_card_instance_ids_fit_public_choice_values() {
+    let maximum = format!("card:{}", "a".repeat(251));
+    let too_long = format!("card:{}", "a".repeat(252));
+
+    assert!(CardInstanceId::parse(&maximum).is_ok());
+    assert!(CardInstanceId::parse(&too_long).is_err());
 }
 
 #[test]
@@ -518,6 +548,137 @@ fn choice_without_conclusions_prevents_manifest_publication() {
 }
 
 #[test]
+fn participant_choice_audience_survives_the_closed_content_boundary() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{
+        "id": "rule:participant-choice",
+        "effect": {
+            "type": "choice",
+            "audience": "each_hero",
+            "options": [
+                { "type": "no_op" },
+                { "type": "terminal", "outcome": "won" }
+            ]
+        }
+    }]);
+    let rule_id = RuleId::parse("rule:participant-choice").expect("fixture ID should be valid");
+
+    let manifest = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id]),
+    )
+    .expect("the closed participant choice should import");
+
+    assert!(matches!(
+        &manifest.rules[0].effect,
+        Effect::Choice {
+            audience: EffectChoiceAudience::EachHero,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn default_actor_audience_preserves_the_legacy_canonical_choice_shape() {
+    let legacy = json!({
+        "type": "choice",
+        "options": [
+            { "type": "no_op" },
+            { "type": "terminal", "outcome": "won" }
+        ]
+    });
+    let effect = serde_json::from_value::<Effect>(legacy.clone())
+        .expect("the legacy choice shape should remain readable");
+
+    assert_eq!(
+        serde_json::to_value(effect).expect("the choice should serialize"),
+        legacy
+    );
+}
+
+#[test]
+fn participant_choice_complexity_accounts_for_all_four_heroes() {
+    let mut bundle = bundle_value();
+    let mut repeated_effects = vec![json!({ "type": "no_op" }); 63];
+    repeated_effects.push(json!({
+        "type": "apply",
+        "target": {
+            "zone": "heroes",
+            "owner": "actor",
+            "cardinality": { "min": 1, "max": 1 }
+        },
+        "operation": {
+            "type": "modify_resource",
+            "resource": "attack",
+            "amount": 1
+        }
+    }));
+    let repeated_sequence = json!({
+        "type": "repeat",
+        "times": 16,
+        "effect": {
+            "type": "sequence",
+            "effects": repeated_effects
+        }
+    });
+    bundle["rules"] = json!([{
+        "id": "rule:participant-choice-limit",
+        "effect": {
+            "type": "choice",
+            "audience": "each_hero",
+            "options": [repeated_sequence, { "type": "no_op" }]
+        }
+    }]);
+    let rule_id =
+        RuleId::parse("rule:participant-choice-limit").expect("fixture ID should be valid");
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id]),
+    )
+    .expect_err("four participant resolutions must fit the runtime step limit");
+
+    assert!(
+        failure
+            .to_string()
+            .contains("closed effect execution limit")
+    );
+}
+
+#[test]
+fn executable_rule_ids_leave_room_for_the_deterministic_choice_suffix() {
+    let mut bundle = bundle_value();
+    let rule_id = format!("rule:{}", "r".repeat(240));
+    bundle["rules"] = json!([{
+        "id": rule_id,
+        "effect": {
+            "type": "choice",
+            "options": [
+                { "type": "no_op" },
+                { "type": "terminal", "outcome": "won" }
+            ]
+        }
+    }]);
+    let rule_id = RuleId::parse(
+        bundle["rules"][0]["id"]
+            .as_str()
+            .expect("fixture ID should be a string"),
+    )
+    .expect("the structural ID parser should accept the fixture");
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id]),
+    )
+    .expect_err("runtime rule IDs must fit every public choice value");
+
+    assert!(failure.to_string().contains("runtime rule ID exceeds 244"));
+}
+
+#[test]
 fn invalid_selector_cardinality_prevents_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["rules"] = json!([{
@@ -559,6 +720,146 @@ fn operation_incompatible_with_its_zone_prevents_manifest_publication() {
 }
 
 #[test]
+fn closed_effect_ast_preserves_every_supported_construct_for_the_runtime() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{
+        "id": "rule:closed-language",
+        "trigger": "dark_arts_completed",
+        "cost": [{ "resource": "influence", "amount": 1 }],
+        "effect": {
+            "type": "sequence",
+            "effects": [
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "heroes",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 },
+                        "eligibility": [{
+                            "type": "resource_at_least",
+                            "resource": "health",
+                            "amount": 1
+                        }]
+                    },
+                    "operation": {
+                        "type": "modify_resource",
+                        "resource": "attack",
+                        "amount": 1
+                    }
+                },
+                {
+                    "type": "condition",
+                    "condition": {
+                        "type": "resource_at_least",
+                        "target": {
+                            "zone": "heroes",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "resource": "attack",
+                        "amount": 1
+                    },
+                    "then": {
+                        "type": "choice",
+                        "options": [
+                            { "type": "no_op" },
+                            {
+                                "type": "repeat",
+                                "times": 2,
+                                "effect": {
+                                    "type": "apply",
+                                    "target": {
+                                        "zone": "hero_hand",
+                                        "cardinality": { "min": 1, "max": 1 }
+                                    },
+                                    "operation": {
+                                        "type": "move",
+                                        "to": "hero_discard_pile"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "roll",
+                    "die": "d4",
+                    "outcomes": [
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "terminal", "outcome": "won" }
+                    ]
+                }
+            ]
+        }
+    }]);
+    let rule_id = RuleId::parse("rule:closed-language").expect("fixture rule ID should be valid");
+
+    let manifest = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id.clone()]),
+    )
+    .expect("the complete closed AST should import");
+
+    assert_eq!(manifest.rules.len(), 1);
+    assert_eq!(manifest.rules[0].id, rule_id);
+    assert_eq!(manifest.rules[0].trigger, EffectTrigger::DarkArtsCompleted);
+}
+
+#[test]
+fn arbitrary_script_nodes_cannot_enter_the_effect_ast() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{
+        "id": "rule:script",
+        "effect": {
+            "type": "script",
+            "source": "state.players[0].attack = 999"
+        }
+    }]);
+
+    let failure = import_value(&bundle).expect_err("arbitrary scripting must fail closed");
+
+    assert!(failure.contains("unknown variant `script`"));
+}
+
+#[test]
+fn executable_effects_cannot_exceed_the_runtime_step_limit() {
+    let mut bundle = bundle_value();
+    let repeated = |effect| {
+        json!({
+            "type": "repeat",
+            "times": 16,
+            "effect": effect
+        })
+    };
+    let effect = repeated(repeated(repeated(repeated(json!({
+        "type": "apply",
+        "target": {
+            "zone": "hero_hand",
+            "cardinality": { "min": 1, "max": 1 }
+        },
+        "operation": { "type": "discard" }
+    })))));
+    bundle["rules"] = json!([{
+        "id": "rule:unbounded",
+        "trigger": "dark_arts_completed",
+        "effect": effect
+    }]);
+    let rule_id = RuleId::parse("rule:unbounded").expect("fixture rule ID should be valid");
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id]),
+    )
+    .expect_err("validated executable effects must always fit the runtime step bound");
+
+    assert!(failure.to_string().contains("effect execution limit"));
+}
+
+#[test]
 fn expansion_or_promo_entry_prevents_base_manifest_publication() {
     let mut bundle = bundle_value();
     bundle["entries"][0]["set"] = json!("expansion");
@@ -582,4 +883,11 @@ fn candidate_base_catalog_closes_the_declared_inventory_without_becoming_playabl
     assert!(!manifest.playable);
     assert!(!manifest.gaps.is_empty());
     assert!(manifest.sources.len() >= 3);
+    assert!(
+        manifest
+            .rules
+            .iter()
+            .all(|rule| !contains_participant_choice(&rule.effect)),
+        "the phase-one bundle must not activate participant choices during a rolling deployment"
+    );
 }

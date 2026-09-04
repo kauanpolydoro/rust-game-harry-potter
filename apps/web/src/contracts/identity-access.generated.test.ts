@@ -4,16 +4,21 @@ import {
   isAssistedRecoveryCredentialResponse,
   isDirectRecoveryCredentialResponse,
   isErrorResponse,
+  isExecuteGameCommandRequest,
   isGameProjectionResponse,
   isRegenerateAssistedRecoveryCredentialRequest,
+  isRealtimeGameEvent,
   isRealtimePresenceMessage,
   isRotateRecoveryPasswordResponse,
   isSecurityEventsMessage,
+  isRecoveredLobbyResponse,
+  isRecoveryReplacementRequiredResponse,
 } from './identity-access.generated'
 
 function projection() {
   return {
     choice: { status: 'none' },
+    effects: { outcomes: [], status: 'idle' },
     game: {
       adventure: { id: 'adventure:001', name: 'Game 1' },
       expires_at: '2026-09-10T12:00:00Z',
@@ -25,6 +30,7 @@ function projection() {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     participants: [
@@ -32,6 +38,7 @@ function projection() {
         display_name: 'Minerva',
         hero: { id: 'harry', name: 'Harry' },
         position: 1,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
       },
     ],
@@ -56,6 +63,190 @@ function projection() {
 }
 
 describe('generated identity contract guards', () => {
+  it('discriminates choice commands, choice summaries and their official events', () => {
+    const commandId = 'dc8213d3-2941-4ef0-9ce8-b97cc6623410'
+    const choice = {
+      cause: 'rule:functional',
+      id: 'rule:functional:effect:0',
+      kind: 'effect',
+      max: 1,
+      min: 1,
+      options: ['option:1', 'option:2'],
+      responsible_position: 2,
+      status: 'pending',
+    }
+    const command = {
+      choice_id: choice.id,
+      command_id: commandId,
+      expected_state_version: 2,
+      selected_options: ['option:2'],
+      type: 'resolve_choice',
+    }
+    const darkArtsEvent = {
+      actor_position: 1,
+      effect_stop: 'stable',
+      effects: [],
+      event_version: 3,
+      prng_counter: 0,
+      sequence: 1,
+      state_version: 2,
+      turn: 1,
+      type: 'dark_arts_completed',
+    }
+    const event = {
+      actor_position: 2,
+      choice_cause: choice.cause,
+      choice_id: choice.id,
+      command_id: commandId,
+      effect_stop: 'stable',
+      effects: [],
+      event_version: 3,
+      prng_counter: 0,
+      selected_options: ['option:2'],
+      sequence: 2,
+      state_version: 3,
+      turn: 1,
+      type: 'choice_resolved',
+    }
+
+    expect(isExecuteGameCommandRequest(command)).toBe(true)
+    expect(isExecuteGameCommandRequest({ ...command, selected_options: [] })).toBe(true)
+    expect(
+      isExecuteGameCommandRequest({
+        ...command,
+        type: 'complete_dark_arts',
+      }),
+    ).toBe(false)
+    expect(isExecuteGameCommandRequest({ ...command, choice_id: undefined })).toBe(false)
+    expect(isRealtimeGameEvent(event)).toBe(true)
+    expect(isRealtimeGameEvent({ ...event, event_version: 2 })).toBe(false)
+    expect(isRealtimeGameEvent(darkArtsEvent)).toBe(true)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice,
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(true)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, cause: undefined },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, min: 2, max: 1 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, max: 3 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, min: 0, max: 0 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, max: 2 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, kind: 'target' },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(true)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, kind: 'target', min: 0, max: 0 },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, kind: 'target', max: choice.options.length },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(
+      isGameProjectionResponse({
+        ...projection(),
+        choice: { ...choice, options: ['o'.repeat(257), 'option:2'] },
+        legal_actions: ['resolve_choice'],
+      }),
+    ).toBe(false)
+    expect(isRealtimeGameEvent({ ...event, effect_stop: 'choice' })).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...event,
+        choice,
+        effect_stop: 'stable',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...event,
+        choice,
+        effect_stop: 'terminal',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...event,
+        choice: { ...choice, kind: 'target' },
+        effect_stop: 'choice',
+      }),
+    ).toBe(true)
+    expect(
+      isRealtimeGameEvent({ ...darkArtsEvent, effect_stop: 'choice' }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'stable',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'terminal',
+      }),
+    ).toBe(false)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'choice',
+      }),
+    ).toBe(true)
+    expect(
+      isRealtimeGameEvent({
+        ...darkArtsEvent,
+        choice,
+        effect_stop: 'choice',
+        event_version: 2,
+      }),
+    ).toBe(true)
+  })
+
   it('validates every field in the public error envelope', () => {
     const error = {
       error: {
@@ -183,6 +374,53 @@ describe('generated identity contract guards', () => {
       isRegenerateAssistedRecoveryCredentialRequest({
         host_assistance_risk_acknowledged: false,
       }),
+    ).toBe(false)
+  })
+
+  it('accepts only the safe device replacement metadata and a complete recovery result', () => {
+    const replacement = {
+      sessions: [
+        {
+          created_at: '2026-09-01T14:20:00Z',
+          id: '2fe6c1be-50fc-42ac-8c4f-6ef270099c24',
+          label: 'Sessão 1',
+        },
+        {
+          created_at: '2026-09-03T10:05:00Z',
+          id: '8aa543d4-9d6f-4a8c-bd7b-6c6605be48fc',
+          label: 'Sessão 2',
+        },
+      ],
+      status: 'replacement_required',
+    }
+
+    expect(isRecoveryReplacementRequiredResponse(replacement)).toBe(true)
+    expect(
+      isRecoveryReplacementRequiredResponse({
+        ...replacement,
+        sessions: [{ ...replacement.sessions[0], user_agent: 'browser fingerprint' }],
+      }),
+    ).toBe(false)
+    expect(
+      isRecoveredLobbyResponse({
+        kind: 'lobby',
+        lobby: {
+          content_options: [],
+          heroes: [],
+          participant: {
+            display_name: 'Minerva',
+            position: 1,
+            ready: false,
+            role: 'host',
+          },
+          participants: [],
+          room: { code: '9HKGW4RT', status: 'open' },
+        },
+        recovery_token: 'a'.repeat(64),
+      }),
+    ).toBe(true)
+    expect(
+      isRecoveredLobbyResponse({ kind: 'lobby', recovery_token: 'a'.repeat(64) }),
     ).toBe(false)
   })
 })
