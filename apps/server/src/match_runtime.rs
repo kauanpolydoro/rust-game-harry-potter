@@ -28,7 +28,7 @@ mod realtime;
 
 use codec::{
     command_domain_state, decode_persisted_snapshot, persisted_after_decision, persisted_event,
-    persisted_snapshot, verify_command_snapshot,
+    persisted_snapshot, verify_persisted_snapshot,
 };
 pub(crate) use projection::{GameProjectionResponse, projection_for_participant};
 
@@ -438,7 +438,7 @@ async fn execute_game_command(
     }
 
     let persisted = decode_persisted_snapshot(&stored.snapshot_json)?;
-    verify_command_snapshot(&stored, &persisted)?;
+    verify_persisted_snapshot(&stored, &persisted)?;
     let current = command_domain_state(&persisted)?;
     let decision = decide_game_command(GameCommandInput {
         state: &current,

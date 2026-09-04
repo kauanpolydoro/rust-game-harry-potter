@@ -5,14 +5,66 @@ use game_domain::{
 
 use super::{
     GAME_EVENT_VERSION, PersistedGameEvent, PersistedPlayer, PersistedPrng, PersistedSnapshot,
-    PersistedTurn, PersistedVersions, StoredCommandGame, StoredRoomParticipant, hero_id,
+    PersistedTurn, PersistedVersions, StoredCommandGame, StoredGame, StoredRoomParticipant,
+    hero_id,
 };
 use crate::http_support::ApiError;
 
-pub(super) fn verify_command_snapshot(
-    game: &StoredCommandGame,
+pub(super) struct StoredSnapshotMetadata<'a> {
+    state_digest: &'a str,
+    snapshot_version: i16,
+    state_version: i64,
+    sequence: i64,
+    status: &'a str,
+    adventure_id: &'a str,
+    manifest_version: i16,
+    content_version: &'a str,
+    ruleset_version: &'a str,
+    manifest_digest: &'a str,
+    prng_algorithm: &'a str,
+    prng_counter: i64,
+    shuffle_algorithm: &'a str,
+    sampling_algorithm: &'a str,
+}
+
+pub(super) trait StoredSnapshotRecord {
+    fn snapshot_metadata(&self) -> StoredSnapshotMetadata<'_>;
+}
+
+macro_rules! impl_stored_snapshot_record {
+    ($($record:ty),+ $(,)?) => {
+        $(
+            impl StoredSnapshotRecord for $record {
+                fn snapshot_metadata(&self) -> StoredSnapshotMetadata<'_> {
+                    StoredSnapshotMetadata {
+                        state_digest: &self.state_digest,
+                        snapshot_version: self.snapshot_version,
+                        state_version: self.state_version,
+                        sequence: self.sequence,
+                        status: &self.status,
+                        adventure_id: &self.adventure_id,
+                        manifest_version: self.manifest_version,
+                        content_version: &self.content_version,
+                        ruleset_version: &self.ruleset_version,
+                        manifest_digest: &self.manifest_digest,
+                        prng_algorithm: &self.prng_algorithm,
+                        prng_counter: self.prng_counter,
+                        shuffle_algorithm: &self.shuffle_algorithm,
+                        sampling_algorithm: &self.sampling_algorithm,
+                    }
+                }
+            }
+        )+
+    };
+}
+
+impl_stored_snapshot_record!(StoredGame, StoredCommandGame);
+
+pub(super) fn verify_persisted_snapshot(
+    game: &impl StoredSnapshotRecord,
     persisted: &PersistedSnapshot,
 ) -> Result<(), ApiError> {
+    let game = game.snapshot_metadata();
     let canonical_snapshot = serde_json::to_string(persisted)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     let verified_digest = format!(

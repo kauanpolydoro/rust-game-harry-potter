@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::{
     StoredRoomParticipant, codec::command_domain_state, codec::decode_persisted_snapshot,
-    hero_name, postgres,
+    codec::verify_persisted_snapshot, hero_name, postgres,
 };
 use crate::http_support::ApiError;
 
@@ -88,32 +88,7 @@ pub(crate) async fn projection_for_participant(
         return Ok(None);
     };
     let persisted = decode_persisted_snapshot(&game.snapshot_json)?;
-    let canonical_snapshot = serde_json::to_string(&persisted)
-        .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let verified_digest = format!(
-        "blake3:{}",
-        blake3::hash(canonical_snapshot.as_bytes()).to_hex()
-    );
-    if verified_digest != game.state_digest {
-        return Err(ApiError::internal());
-    }
-    let snapshot_metadata_matches = i16::try_from(persisted.snapshot_version).ok()
-        == Some(game.snapshot_version)
-        && i64::try_from(persisted.state_version).ok() == Some(game.state_version)
-        && i64::try_from(persisted.sequence).ok() == Some(game.sequence)
-        && persisted.status == game.status
-        && persisted.adventure_id == game.adventure_id
-        && i16::try_from(persisted.versions.manifest).ok() == Some(game.manifest_version)
-        && persisted.versions.content == game.content_version
-        && persisted.versions.ruleset == game.ruleset_version
-        && persisted.versions.manifest_digest == game.manifest_digest
-        && persisted.versions.prng == game.prng_algorithm
-        && persisted.versions.shuffle == game.shuffle_algorithm
-        && persisted.versions.sampling == game.sampling_algorithm
-        && i64::try_from(persisted.prng.counter).ok() == Some(game.prng_counter);
-    if !snapshot_metadata_matches {
-        return Err(ApiError::internal());
-    }
+    verify_persisted_snapshot(&game, &persisted)?;
     let participants = postgres::game_participants(database, game.id).await?;
     let current = participants
         .iter()
