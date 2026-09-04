@@ -28,7 +28,9 @@ struct ReadyRoom {
     database: PgPool,
     room_code: String,
     host_cookie: String,
+    host_recovery_token: String,
     guest_cookie: String,
+    guest_recovery_token: String,
     manifest: ContentManifest,
 }
 
@@ -308,7 +310,7 @@ fn session_cookie(response: &Response<Body>) -> String {
         .to_owned()
 }
 
-async fn create_room(app: &axum::Router) -> (String, String) {
+async fn create_room(app: &axum::Router) -> (String, String, String) {
     let response = app
         .clone()
         .oneshot(json_request(
@@ -332,10 +334,14 @@ async fn create_room(app: &axum::Router) -> (String, String) {
             .expect("the room code must be present")
             .to_owned(),
         cookie,
+        body["recovery_token"]
+            .as_str()
+            .expect("the host recovery token must be present")
+            .to_owned(),
     )
 }
 
-async fn join_room(app: &axum::Router, room_code: &str) -> String {
+async fn join_room(app: &axum::Router, room_code: &str) -> (String, String) {
     let response = app
         .clone()
         .oneshot(json_request(
@@ -348,7 +354,15 @@ async fn join_room(app: &axum::Router, room_code: &str) -> String {
         .await
         .expect("room join must receive a response");
     assert_eq!(response.status(), StatusCode::CREATED);
-    session_cookie(&response)
+    let cookie = session_cookie(&response);
+    let body = response_json(response).await;
+    (
+        cookie,
+        body["recovery_token"]
+            .as_str()
+            .expect("the guest recovery token must be present")
+            .to_owned(),
+    )
 }
 
 async fn select_hero(app: &axum::Router, cookie: &str, hero_id: &str) -> Response<Body> {
@@ -448,12 +462,12 @@ fn realtime_path(projection: &Value) -> String {
 async fn ready_room() -> ReadyRoom {
     let manifest = playable_manifest();
     let (app, database, state) = test_app(manifest.clone()).await;
-    let (room_code, host_cookie) = create_room(&app).await;
+    let (room_code, host_cookie, host_recovery_token) = create_room(&app).await;
     assert_eq!(
         select_hero(&app, &host_cookie, "harry").await.status(),
         StatusCode::OK
     );
-    let guest_cookie = join_room(&app, &room_code).await;
+    let (guest_cookie, guest_recovery_token) = join_room(&app, &room_code).await;
     assert_eq!(
         set_ready(&app, &host_cookie, true).await.status(),
         StatusCode::OK
@@ -469,7 +483,9 @@ async fn ready_room() -> ReadyRoom {
         database,
         room_code,
         host_cookie,
+        host_recovery_token,
         guest_cookie,
+        guest_recovery_token,
         manifest,
     }
 }
@@ -481,6 +497,22 @@ fn assert_initial_synchronization_projection(projection: &Value) {
     assert_eq!(projection["snapshot"]["cursor"], 0);
     assert_eq!(projection["legal_actions"], json!(["complete_dark_arts"]));
     assert_eq!(projection["choice"], json!({ "status": "none" }));
+}
+
+async fn expire_game(database: &PgPool, room_code: &str) {
+    sqlx::query(
+        r"
+        UPDATE games
+        SET
+            last_game_action_at = clock_timestamp() - INTERVAL '2 days',
+            expires_at = clock_timestamp() - INTERVAL '1 day'
+        WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+        ",
+    )
+    .bind(room_code)
+    .execute(database)
+    .await
+    .expect("the fixture game must be expired");
 }
 
 #[tokio::test]
@@ -585,6 +617,109 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
 }
 
 #[tokio::test]
+async fn recovery_restores_the_same_game_snapshot_without_renewing_retention() {
+    let room = ready_room().await;
+    let initial = start_ready_game(&room, "recover-started-game").await;
+    let expires_before = sqlx::query_scalar::<_, String>(
+        r"
+        SELECT games.expires_at::text
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the initial game expiration must be queryable");
+
+    let recovered_response = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recover",
+            &json!({
+                "recovery_token": room.host_recovery_token,
+                "recovery_password": "a long uncommon passphrase",
+                "recovery_attempt_id": uuid::Uuid::new_v4().to_string()
+            }),
+            None,
+            None,
+        ))
+        .await
+        .expect("participant recovery must receive a response");
+    assert_eq!(recovered_response.status(), StatusCode::OK);
+    assert!(
+        recovered_response
+            .headers()
+            .get(header::SET_COOKIE)
+            .is_some()
+    );
+    let recovered = response_json(recovered_response).await;
+
+    assert_eq!(recovered["participant"], initial["participant"]);
+    assert_eq!(recovered["participants"], initial["participants"]);
+    assert_eq!(recovered["snapshot"], initial["snapshot"]);
+    assert_eq!(recovered["game"], initial["game"]);
+
+    let (expires_after, active_sessions, credential_status) =
+        sqlx::query_as::<_, (String, i64, String)>(
+            r"
+            SELECT
+                games.expires_at::text,
+                (
+                    SELECT COUNT(*)
+                    FROM device_sessions
+                    JOIN guest_sessions
+                      ON guest_sessions.id = device_sessions.guest_session_id
+                    WHERE device_sessions.participant_id = rooms.host_participant_id
+                      AND device_sessions.status = 'active'
+                      AND guest_sessions.expires_at > clock_timestamp()
+                ),
+                recovery_credentials.status
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            JOIN recovery_credentials
+              ON recovery_credentials.participant_id = rooms.host_participant_id
+            WHERE rooms.code = $1
+            ",
+        )
+        .bind(&room.room_code)
+        .fetch_one(&room.database)
+        .await
+        .expect("the recovered session and retention must be queryable");
+    assert_eq!(expires_after, expires_before);
+    assert_eq!(active_sessions, 2);
+    assert_eq!(credential_status, "consumed");
+
+    expire_game(&room.database, &room.room_code).await;
+
+    let expired_recovery = room
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/session/recover",
+            &json!({
+                "recovery_token": room.guest_recovery_token,
+                "recovery_password": "a long uncommon passphrase",
+                "recovery_attempt_id": uuid::Uuid::new_v4().to_string()
+            }),
+            None,
+            None,
+        ))
+        .await
+        .expect("expired participant recovery must receive a response");
+    assert_eq!(expired_recovery.status(), StatusCode::UNAUTHORIZED);
+    assert!(expired_recovery.headers().get(header::SET_COOKIE).is_none());
+    assert_eq!(
+        response_json(expired_recovery).await["error"]["code"],
+        "RECOVERY_FAILED"
+    );
+}
+
+#[tokio::test]
 async fn concurrent_identical_start_retries_create_exactly_one_game() {
     let room = ready_room().await;
     let key = unique_key("concurrent-start");
@@ -645,7 +780,7 @@ async fn start_validates_host_count_heroes_readiness_and_authorization() {
     let manifest = playable_manifest();
     let (app, _, _) = test_app(manifest.clone()).await;
 
-    let (_, lone_host) = create_room(&app).await;
+    let (_, lone_host, _) = create_room(&app).await;
     assert_eq!(
         select_hero(&app, &lone_host, "harry").await.status(),
         StatusCode::OK
@@ -670,7 +805,7 @@ async fn start_validates_host_count_heroes_readiness_and_authorization() {
         "ROOM_PARTICIPANT_COUNT_INVALID"
     );
 
-    let (missing_hero_code, missing_hero_host) = create_room(&app).await;
+    let (missing_hero_code, missing_hero_host, _) = create_room(&app).await;
     let _ = join_room(&app, &missing_hero_code).await;
     let missing_hero = app
         .clone()
@@ -688,12 +823,12 @@ async fn start_validates_host_count_heroes_readiness_and_authorization() {
         "PARTICIPANT_HEROES_INVALID"
     );
 
-    let (not_ready_code, not_ready_host) = create_room(&app).await;
+    let (not_ready_code, not_ready_host, _) = create_room(&app).await;
     assert_eq!(
         select_hero(&app, &not_ready_host, "harry").await.status(),
         StatusCode::OK
     );
-    let not_ready_guest = join_room(&app, &not_ready_code).await;
+    let (not_ready_guest, _) = join_room(&app, &not_ready_code).await;
     let not_ready = app
         .clone()
         .oneshot(start_request(
@@ -734,14 +869,14 @@ async fn candidate_content_with_functional_gaps_cannot_start_a_game() {
     ))
     .expect("the candidate bundle must import");
     let (candidate_app, _, _) = test_app(candidate.clone()).await;
-    let (candidate_code, candidate_host) = create_room(&candidate_app).await;
+    let (candidate_code, candidate_host, _) = create_room(&candidate_app).await;
     assert_eq!(
         select_hero(&candidate_app, &candidate_host, "harry")
             .await
             .status(),
         StatusCode::OK
     );
-    let candidate_guest = join_room(&candidate_app, &candidate_code).await;
+    let (candidate_guest, _) = join_room(&candidate_app, &candidate_code).await;
     assert_eq!(
         set_ready(&candidate_app, &candidate_host, true)
             .await
@@ -2985,12 +3120,12 @@ async fn create_reference_recovery_game(
     app: axum::Router,
     manifest: ContentManifest,
 ) -> ReferenceRecoveryGame {
-    let (room_code, host_cookie) = create_room(&app).await;
+    let (room_code, host_cookie, _) = create_room(&app).await;
     assert_eq!(
         select_hero(&app, &host_cookie, "harry").await.status(),
         StatusCode::OK
     );
-    let guest_cookie = join_room(&app, &room_code).await;
+    let (guest_cookie, _) = join_room(&app, &room_code).await;
     assert_eq!(
         set_ready(&app, &host_cookie, true).await.status(),
         StatusCode::OK

@@ -89,6 +89,11 @@ export const useRoomCreationStore = defineStore('roomCreation', {
     }
   },
   actions: {
+    takeRoomCreation(): CreateRoomResponse | null {
+      const roomCreation = this.roomCreation
+      this.roomCreation = null
+      return roomCreation
+    },
     resetPendingRequest(): void {
       if (this.status === 'submitting') {
         return

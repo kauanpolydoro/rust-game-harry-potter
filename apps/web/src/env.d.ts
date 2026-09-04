@@ -6,3 +6,7 @@ declare module '*.vue' {
   const component: DefineComponent
   export default component
 }
+
+interface Window {
+  __HOGWARTS_RECOVERY_TOKEN__?: string | null
+}

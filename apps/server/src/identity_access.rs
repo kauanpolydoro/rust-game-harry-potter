@@ -14,6 +14,7 @@ use crate::{
     AppState,
     content_catalog::ContentManifestOption,
     http_support::{ApiError, idempotency_key, no_store_json},
+    match_runtime,
     session::authenticated_participant,
 };
 
@@ -24,12 +25,14 @@ use credentials::{hash_password, validate_display_name, validate_password, verif
 
 const ROOM_CODE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const ROOM_CODE_LENGTH: usize = 8;
+const RECOVERY_TOKEN_LENGTH: usize = 64;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/api/rooms", post(create_room))
         .route("/api/rooms/{room_code}", get(find_room))
         .route("/api/rooms/{room_code}/participants", post(join_room))
+        .route("/api/session/recover", post(recover_participation))
         .route("/api/session/hero", put(select_hero))
         .route("/api/session/readiness", put(set_readiness))
 }
@@ -58,6 +61,17 @@ struct SelectHeroRequest {
 #[serde(deny_unknown_fields)]
 struct SetReadinessRequest {
     ready: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoverParticipationRequest {
+    #[serde(rename = "recovery_token")]
+    token: String,
+    #[serde(rename = "recovery_password")]
+    password: String,
+    #[serde(rename = "recovery_attempt_id")]
+    attempt_id: String,
 }
 
 #[derive(Serialize)]
@@ -89,6 +103,13 @@ pub(crate) struct LobbyResponse {
     participants: Vec<ParticipantSummary>,
     heroes: Vec<HeroAvailability>,
     content_options: Vec<ContentManifestOption>,
+}
+
+#[derive(Serialize)]
+struct ParticipantAccessResponse {
+    #[serde(flatten)]
+    lobby: LobbyResponse,
+    recovery_token: String,
 }
 
 #[derive(Serialize)]
@@ -127,6 +148,17 @@ struct StoredParticipant {
     position: i16,
     hero_id: Option<String>,
     ready: bool,
+}
+
+#[derive(FromRow)]
+struct StoredRecoveryCandidate {
+    credential_id: Uuid,
+    participant_id: Uuid,
+    guest_identity_id: Uuid,
+    recovery_password_hash: String,
+    status: String,
+    recovery_attempt_id: Option<Uuid>,
+    session_max_age_seconds: Option<i64>,
 }
 
 struct StoredLobby {
@@ -193,14 +225,20 @@ async fn create_room(
 
     let session_token =
         state.idempotent_session_token("create_room", &idempotency_key, participant_id);
+    let recovery_token =
+        state.idempotent_recovery_token("create_room", &idempotency_key, participant_id);
+    let recovery_token_hmac = state.recovery_token_hmac(&recovery_token);
     let stored = postgres::persist_room_creation(
         &mut transaction,
-        room_id,
-        participant_id,
-        guest_session_id,
-        display_name,
-        &password_hash,
+        postgres::NewRoomCreation {
+            room_id,
+            participant_id,
+            guest_session_id,
+            display_name,
+            password_hash: &password_hash,
+        },
         &session_token,
+        &recovery_token_hmac,
     )
     .await?;
     transaction
@@ -304,6 +342,9 @@ async fn join_room(
 
     let session_token =
         state.idempotent_session_token("join_room", &idempotency_key, participant_id);
+    let recovery_token =
+        state.idempotent_recovery_token("join_room", &idempotency_key, participant_id);
+    let recovery_token_hmac = state.recovery_token_hmac(&recovery_token);
     let stored = postgres::persist_room_join(
         &mut transaction,
         postgres::NewRoomJoin {
@@ -316,6 +357,7 @@ async fn join_room(
             position,
         },
         &session_token,
+        &recovery_token_hmac,
     )
     .await?;
     transaction
@@ -324,6 +366,117 @@ async fn join_room(
         .map_err(|error| ApiError::internal_with("identity access application operation", error))?;
 
     room_joined_response(&state, stored, &idempotency_key).await
+}
+
+async fn recover_participation(
+    State(state): State<AppState>,
+    Json(request): Json<RecoverParticipationRequest>,
+) -> Result<Response, ApiError> {
+    let password_check_permit = state
+        .try_recovery_password_check()
+        .ok_or_else(ApiError::recovery_unavailable)?;
+    let token_is_well_formed = request.token.len() == RECOVERY_TOKEN_LENGTH
+        && request.token.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let token_for_hmac = if token_is_well_formed {
+        request.token.as_str()
+    } else {
+        "malformed-recovery-token"
+    };
+    let token_hmac = state.recovery_token_hmac(token_for_hmac);
+    let recovery_attempt_id = Uuid::parse_str(&request.attempt_id)
+        .ok()
+        .filter(|attempt_id| {
+            attempt_id.get_version_num() == 4 && attempt_id.get_variant() == Variant::RFC4122
+        });
+    let candidate =
+        postgres::load_recovery_candidate(&state.database, &token_hmac, recovery_attempt_id)
+            .await?;
+    let password_is_bounded =
+        !request.password.is_empty() && request.password.chars().count() <= 128;
+    let password_matches = if let Some(candidate) =
+        candidate.as_ref().filter(|_| password_is_bounded)
+    {
+        verify_password(
+            request.password.clone(),
+            candidate.recovery_password_hash.clone(),
+        )
+        .await?
+    } else {
+        let _timing_equalizer = hash_password("invalid participant recovery".to_owned()).await?;
+        false
+    };
+    let Some(candidate) = candidate
+        .filter(|_| token_is_well_formed && recovery_attempt_id.is_some() && password_matches)
+    else {
+        return Err(ApiError::recovery_failed());
+    };
+    let recovery_attempt_id = recovery_attempt_id.expect("the candidate requires a valid attempt");
+    drop(password_check_permit);
+
+    let mut response = recovered_participation_response(&state, candidate.participant_id).await?;
+
+    let mut transaction = state
+        .database
+        .begin()
+        .await
+        .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
+    let locked =
+        postgres::lock_recovery_candidate(&mut transaction, &token_hmac, recovery_attempt_id)
+            .await?
+            .filter(|locked| {
+                locked.credential_id == candidate.credential_id
+                    && locked.participant_id == candidate.participant_id
+                    && locked.guest_identity_id == candidate.guest_identity_id
+                    && locked.recovery_password_hash == candidate.recovery_password_hash
+            })
+            .ok_or_else(ApiError::recovery_failed)?;
+
+    let session_token = state.recovered_session_token(&request.token, locked.participant_id);
+    let session_max_age = if locked.status == "consumed"
+        && locked.recovery_attempt_id == Some(recovery_attempt_id)
+    {
+        locked
+            .session_max_age_seconds
+            .ok_or_else(ApiError::recovery_failed)?
+    } else {
+        if locked.status != "active"
+            || postgres::active_session_count(&mut transaction, locked.participant_id).await? >= 2
+        {
+            return Err(ApiError::recovery_failed());
+        }
+        postgres::consume_recovery_credential(
+            &mut transaction,
+            &locked,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            recovery_attempt_id,
+            &session_token,
+        )
+        .await?
+    };
+    transaction
+        .commit()
+        .await
+        .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
+
+    set_session_cookie(&mut response, &session_token, session_max_age);
+    Ok(response)
+}
+
+async fn recovered_participation_response(
+    state: &AppState,
+    participant_id: Uuid,
+) -> Result<Response, ApiError> {
+    if let Some(projection) =
+        match_runtime::projection_for_participant(&state.database, participant_id).await?
+    {
+        return Ok(no_store_json(StatusCode::OK, projection));
+    }
+
+    let lobby = postgres::load_lobby(&state.database, participant_id)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+    Ok(no_store_json(StatusCode::OK, lobby_response(state, lobby)))
 }
 
 pub(crate) async fn lobby_for_participant(
@@ -437,13 +590,21 @@ async fn room_joined_response(
 ) -> Result<Response, ApiError> {
     let session_token =
         state.idempotent_session_token("join_room", idempotency_key, stored.participant_id);
+    let recovery_token =
+        state.idempotent_recovery_token("join_room", idempotency_key, stored.participant_id);
     let session_max_age =
         postgres::ensure_room_join_session_token(&state.database, idempotency_key, &session_token)
             .await?;
     let lobby = postgres::load_lobby(&state.database, stored.participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
-    let mut response = no_store_json(StatusCode::CREATED, lobby_response(state, lobby));
+    let mut response = no_store_json(
+        StatusCode::CREATED,
+        ParticipantAccessResponse {
+            lobby: lobby_response(state, lobby),
+            recovery_token,
+        },
+    );
     set_session_cookie(&mut response, &session_token, session_max_age);
     Ok(response)
 }
@@ -562,6 +723,8 @@ async fn room_created_response(
 ) -> Result<Response, ApiError> {
     let session_token =
         state.idempotent_session_token("create_room", idempotency_key, stored.participant_id);
+    let recovery_token =
+        state.idempotent_recovery_token("create_room", idempotency_key, stored.participant_id);
     let session_max_age = postgres::ensure_room_creation_session_token(
         &state.database,
         idempotency_key,
@@ -571,7 +734,13 @@ async fn room_created_response(
     let lobby = postgres::load_lobby(&state.database, stored.participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
-    let mut response = no_store_json(StatusCode::CREATED, lobby_response(state, lobby));
+    let mut response = no_store_json(
+        StatusCode::CREATED,
+        ParticipantAccessResponse {
+            lobby: lobby_response(state, lobby),
+            recovery_token,
+        },
+    );
     set_session_cookie(&mut response, &session_token, session_max_age);
     Ok(response)
 }

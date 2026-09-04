@@ -12,8 +12,10 @@ blake3.workspace = true
 game-content = { path = "../../crates/game-content" }
 game-domain = { path = "../../crates/game-domain" }
 getrandom.workspace = true
+hmac.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true

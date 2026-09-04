@@ -6,7 +6,7 @@ use std::{
     },
     time::Duration,
 };
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, fmt::Write as _};
 
 use axum::{
     Json, Router,
@@ -16,9 +16,11 @@ use axum::{
     response::Response,
     routing::get,
 };
+use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
+use sha2::Sha256;
 use sqlx::{PgPool, migrate::Migrator};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, watch};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -31,6 +33,7 @@ mod session;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
+const MAX_CONCURRENT_RECOVERY_PASSWORD_CHECKS: usize = 4;
 
 tokio::task_local! {
     static REQUEST_CORRELATION_ID: Uuid;
@@ -46,6 +49,8 @@ pub struct AppState {
     game_event_fanout: GameEventFanout,
     game_presence_fanout: GameEventFanout,
     session_token_key: Arc<[u8; 32]>,
+    recovery_token_key: Arc<[u8; 32]>,
+    recovery_password_checks: Arc<Semaphore>,
     shutdown: watch::Sender<bool>,
 }
 
@@ -115,6 +120,7 @@ impl AppState {
         let mut session_token_key = [0_u8; 32];
         getrandom::fill(&mut session_token_key)
             .expect("the operating system must provide session key entropy");
+        let recovery_token_key = recovery_token_key(&session_token_key);
         let (shutdown, _) = watch::channel(false);
         Self {
             migration_database: database.clone(),
@@ -125,6 +131,10 @@ impl AppState {
             game_event_fanout: GameEventFanout::default(),
             game_presence_fanout: GameEventFanout::default(),
             session_token_key: Arc::new(session_token_key),
+            recovery_token_key: Arc::new(recovery_token_key),
+            recovery_password_checks: Arc::new(Semaphore::new(
+                MAX_CONCURRENT_RECOVERY_PASSWORD_CHECKS,
+            )),
             shutdown,
         }
     }
@@ -139,6 +149,7 @@ impl AppState {
     /// Configures the stable secret used to reproduce an idempotent session grant.
     #[must_use]
     pub fn with_session_token_key(mut self, session_token_key: [u8; 32]) -> Self {
+        self.recovery_token_key = Arc::new(recovery_token_key(&session_token_key));
         self.session_token_key = Arc::new(session_token_key);
         self
     }
@@ -208,6 +219,51 @@ impl AppState {
         hasher.finalize().to_hex().to_string()
     }
 
+    fn idempotent_recovery_token(
+        &self,
+        operation: &str,
+        idempotency_key: &str,
+        participant_id: Uuid,
+    ) -> String {
+        encode_hex(&hmac_sha256(
+            self.recovery_token_key.as_ref(),
+            &[
+                b"hogwarts-recovery-token-v1",
+                operation.as_bytes(),
+                idempotency_key.as_bytes(),
+                participant_id.as_bytes(),
+            ],
+        ))
+    }
+
+    fn recovery_token_hmac(&self, token: &str) -> String {
+        format!(
+            "hmac-sha256:{}",
+            encode_hex(&hmac_sha256(
+                self.recovery_token_key.as_ref(),
+                &[b"hogwarts-recovery-token-storage-v1", token.as_bytes()],
+            ))
+        )
+    }
+
+    fn recovered_session_token(&self, token: &str, participant_id: Uuid) -> String {
+        encode_hex(&hmac_sha256(
+            self.session_token_key.as_ref(),
+            &[
+                b"hogwarts-recovered-session-v1",
+                token.as_bytes(),
+                participant_id.as_bytes(),
+            ],
+        ))
+    }
+
+    fn try_recovery_password_check(&self) -> Option<OwnedSemaphorePermit> {
+        self.recovery_password_checks
+            .clone()
+            .try_acquire_owned()
+            .ok()
+    }
+
     fn subscribe_to_shutdown(&self) -> watch::Receiver<bool> {
         self.shutdown.subscribe()
     }
@@ -215,6 +271,28 @@ impl AppState {
     pub fn begin_shutdown(&self) {
         self.shutdown.send_replace(true);
     }
+}
+
+fn recovery_token_key(session_token_key: &[u8; 32]) -> [u8; 32] {
+    hmac_sha256(session_token_key, &[b"hogwarts-recovery-token-key-v1"])
+}
+
+fn hmac_sha256(key: &[u8], values: &[&[u8]]) -> [u8; 32] {
+    let mut hmac = <Hmac<Sha256> as KeyInit>::new_from_slice(key)
+        .expect("HMAC-SHA-256 accepts keys of any size");
+    for value in values {
+        hmac.update(&(value.len() as u64).to_be_bytes());
+        hmac.update(value);
+    }
+    hmac.finalize().into_bytes().into()
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
 }
 
 #[derive(Serialize)]
