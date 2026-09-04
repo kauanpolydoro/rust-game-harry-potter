@@ -22,13 +22,74 @@ fn executable_fixture_manifest() -> ContentManifest {
         }],
         "rules": [{
             "id": "rule:functional",
+            "trigger": "dark_arts_completed",
+            "cost": [{ "resource": "health", "amount": 1 }],
             "effect": {
-                "type": "apply",
-                "target": {
-                    "zone": "hero_hand",
-                    "cardinality": { "min": 1, "max": 1 }
-                },
-                "operation": { "type": "discard" }
+                "type": "sequence",
+                "effects": [
+                    {
+                        "type": "apply",
+                        "target": {
+                            "zone": "heroes",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "operation": {
+                            "type": "modify_resource",
+                            "resource": "influence",
+                            "amount": 2
+                        }
+                    },
+                    {
+                        "type": "condition",
+                        "condition": {
+                            "type": "resource_at_least",
+                            "target": {
+                                "zone": "heroes",
+                                "owner": "actor",
+                                "cardinality": { "min": 1, "max": 1 }
+                            },
+                            "resource": "influence",
+                            "amount": 2
+                        },
+                        "then": {
+                            "type": "repeat",
+                            "times": 2,
+                            "effect": {
+                                "type": "apply",
+                                "target": {
+                                    "zone": "heroes",
+                                    "owner": "actor",
+                                    "cardinality": { "min": 1, "max": 1 }
+                                },
+                                "operation": {
+                                    "type": "modify_resource",
+                                    "resource": "attack",
+                                    "amount": 1
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "type": "roll",
+                        "die": "d4",
+                        "outcomes": [
+                            { "type": "no_op" },
+                            { "type": "no_op" },
+                            { "type": "no_op" },
+                            { "type": "no_op" }
+                        ]
+                    },
+                    {
+                        "type": "apply",
+                        "target": {
+                            "zone": "hero_hand",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "operation": { "type": "discard" }
+                    }
+                ]
             }
         }],
         "entries": entries

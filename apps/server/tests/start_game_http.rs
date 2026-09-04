@@ -35,8 +35,16 @@ struct ReadyRoom {
 }
 
 fn playable_manifest() -> ContentManifest {
+    playable_manifest_variant(false)
+}
+
+fn terminal_manifest() -> ContentManifest {
+    playable_manifest_variant(true)
+}
+
+fn playable_manifest_variant(terminal: bool) -> ContentManifest {
     let entries = (0..171).map(playable_fixture_entry).collect::<Vec<_>>();
-    let bundle = serde_json::to_vec(&json!({
+    let mut candidate = json!({
         "schema_version": 1,
         "content_version": "fixture-v1",
         "ruleset_version": "fixture-rules-v1",
@@ -48,18 +56,86 @@ fn playable_manifest() -> ContentManifest {
         }],
         "rules": [{
             "id": "rule:functional",
+            "trigger": "dark_arts_completed",
+            "cost": [{ "resource": "health", "amount": 1 }],
             "effect": {
-                "type": "apply",
-                "target": {
-                    "zone": "hero_hand",
-                    "cardinality": { "min": 1, "max": 1 }
-                },
-                "operation": { "type": "discard" }
+                "type": "sequence",
+                "effects": [
+                    {
+                        "type": "apply",
+                        "target": {
+                            "zone": "heroes",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "operation": {
+                            "type": "modify_resource",
+                            "resource": "influence",
+                            "amount": 2
+                        }
+                    },
+                    {
+                        "type": "condition",
+                        "condition": {
+                            "type": "resource_at_least",
+                            "target": {
+                                "zone": "heroes",
+                                "owner": "actor",
+                                "cardinality": { "min": 1, "max": 1 }
+                            },
+                            "resource": "influence",
+                            "amount": 2
+                        },
+                        "then": {
+                            "type": "repeat",
+                            "times": 2,
+                            "effect": {
+                                "type": "apply",
+                                "target": {
+                                    "zone": "heroes",
+                                    "owner": "actor",
+                                    "cardinality": { "min": 1, "max": 1 }
+                                },
+                                "operation": {
+                                    "type": "modify_resource",
+                                    "resource": "attack",
+                                    "amount": 1
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "type": "roll",
+                        "die": "d4",
+                        "outcomes": [
+                            { "type": "no_op" },
+                            { "type": "no_op" },
+                            { "type": "no_op" },
+                            { "type": "no_op" }
+                        ]
+                    },
+                    {
+                        "type": "apply",
+                        "target": {
+                            "zone": "hero_hand",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "operation": { "type": "discard" }
+                    }
+                ]
             }
         }],
         "entries": entries
-    }))
-    .expect("the playable fixture must serialize");
+    });
+    if terminal {
+        candidate["rules"][0]["effect"] = json!({ "type": "terminal", "outcome": "won" });
+    }
+    import_playable_candidate(&candidate)
+}
+
+fn import_playable_candidate(candidate: &Value) -> ContentManifest {
+    let bundle = serde_json::to_vec(candidate).expect("the playable fixture must serialize");
 
     import_base_bundle_with_runtime_rules(
         &bundle,
@@ -461,6 +537,10 @@ fn realtime_path(projection: &Value) -> String {
 
 async fn ready_room() -> ReadyRoom {
     let manifest = playable_manifest();
+    ready_room_with_manifest(manifest).await
+}
+
+async fn ready_room_with_manifest(manifest: ContentManifest) -> ReadyRoom {
     let (app, database, state) = test_app(manifest.clone()).await;
     let (room_code, host_cookie, host_recovery_token) = create_room(&app).await;
     assert_eq!(
@@ -497,6 +577,14 @@ fn assert_initial_synchronization_projection(projection: &Value) {
     assert_eq!(projection["snapshot"]["cursor"], 0);
     assert_eq!(projection["legal_actions"], json!(["complete_dark_arts"]));
     assert_eq!(projection["choice"], json!({ "status": "none" }));
+    assert_eq!(
+        projection["effects"],
+        json!({ "status": "idle", "outcomes": [] })
+    );
+    assert_eq!(
+        projection["participant"]["resources"],
+        json!({ "health": 10, "attack": 0, "influence": 0 })
+    );
 }
 
 async fn expire_game(database: &PgPool, room_code: &str) {
@@ -1000,7 +1088,7 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
         .expect("every committed command artifact must be queryable together");
     assert_eq!(stored.0, 2);
     assert_eq!(stored.1, 1);
-    assert_eq!(stored.2, 0);
+    assert_eq!(stored.2, 1);
     assert_eq!(stored.4, "dark_arts_completed");
     assert_eq!(stored.6, 2);
     assert_eq!(stored.7, 1);
@@ -1011,9 +1099,13 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     assert_eq!(snapshot["state_version"], 2);
     assert_eq!(snapshot["sequence"], 1);
     assert_eq!(snapshot["turn"]["phase"], "hero_action");
-    assert_eq!(snapshot["prng"]["counter"], 0);
+    assert_eq!(snapshot["prng"]["counter"], 1);
+    assert_eq!(snapshot["effects"]["outcomes"], event["effects"]);
     assert_eq!(event["sequence"], 1);
     assert_eq!(event["state_version"], 2);
+    assert_eq!(event["event_version"], 2);
+    assert_eq!(event["effect_stop"], "stable");
+    assert_eq!(event["prng_counter"], 1);
 
     let anchors = sqlx::query_as::<_, (i64, bool)>(
         r"
@@ -1093,6 +1185,23 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
     assert_eq!(accepted["projection"]["snapshot"]["state_version"], 2);
     assert_eq!(accepted["projection"]["snapshot"]["sequence"], 1);
     assert_eq!(accepted["projection"]["legal_actions"], json!([]));
+    assert_eq!(
+        accepted["projection"]["participant"]["resources"],
+        json!({ "health": 9, "attack": 2, "influence": 2 })
+    );
+    assert_eq!(accepted["projection"]["effects"]["status"], "resolved");
+    let outcomes = accepted["projection"]["effects"]["outcomes"]
+        .as_array()
+        .expect("effect outcomes must be an array");
+    assert_eq!(outcomes.len(), 7);
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["type"] == "die_rolled"
+            && outcome["die"] == "d4"
+            && (1..=4).contains(&outcome["result"].as_u64().unwrap_or_default())
+    }));
+    assert!(outcomes.iter().any(|outcome| {
+        outcome["type"] == "no_op" && outcome["reason"] == "no_eligible_target"
+    }));
 
     assert_committed_command_artifacts(&room, &initial_expiration).await;
 
@@ -1115,6 +1224,50 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
         recovered["projection"]["snapshot"],
         accepted["projection"]["snapshot"]
     );
+}
+
+#[tokio::test]
+async fn a_terminal_effect_commits_the_same_status_to_snapshot_row_and_projection() {
+    let room = ready_room_with_manifest(terminal_manifest()).await;
+    start_ready_game(&room, "terminal-effect-start").await;
+
+    let response = room
+        .app
+        .clone()
+        .oneshot(command_request(&room.host_cookie, uuid::Uuid::new_v4(), 1))
+        .await
+        .expect("the terminal command must receive a response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let accepted = response_json(response).await;
+    assert_eq!(accepted["projection"]["game"]["status"], "won");
+    assert_eq!(accepted["projection"]["effects"]["status"], "terminal");
+    assert_eq!(accepted["projection"]["legal_actions"], json!([]));
+    assert_eq!(
+        accepted["projection"]["choice"],
+        json!({ "status": "none" })
+    );
+    assert!(
+        accepted["projection"]["effects"]["outcomes"]
+            .as_array()
+            .is_some_and(|outcomes| outcomes
+                .iter()
+                .any(|outcome| { outcome["type"] == "terminal" && outcome["outcome"] == "won" }))
+    );
+
+    let (status, snapshot_status) = sqlx::query_as::<_, (String, String)>(
+        r"
+        SELECT games.status, games.snapshot ->> 'status'
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        WHERE rooms.code = $1
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the terminal game state must be queryable");
+    assert_eq!((status.as_str(), snapshot_status.as_str()), ("won", "won"));
 }
 
 #[tokio::test]
@@ -1451,6 +1604,81 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
             .await
             .expect("the rejected event transaction must roll back");
     }
+}
+
+#[tokio::test]
+async fn a_v2_event_rejects_an_incomplete_closed_effect_outcome() {
+    let room = ready_room().await;
+    start_ready_game(&room, "event-v2-effect-start").await;
+    let mut transaction = room
+        .database
+        .begin()
+        .await
+        .expect("the v2 effect transaction must start");
+    let (game_id, room_id, actor_id) = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid)>(
+        r"
+            UPDATE games
+            SET sequence = 1,
+                state_version = 2
+            WHERE room_id = (SELECT id FROM rooms WHERE code = $1)
+            RETURNING id, room_id, started_by_participant_id
+            ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("the test snapshot must advance inside the transaction");
+    let malformed = json!({
+        "event_version": 2,
+        "type": "dark_arts_completed",
+        "sequence": 1,
+        "state_version": 2,
+        "turn": 1,
+        "actor_position": 1,
+        "effects": [{
+            "type": "die_rolled",
+            "rule_id": "rule:functional"
+        }],
+        "effect_stop": "stable",
+        "choice": null,
+        "prng_counter": 0
+    });
+
+    let error = sqlx::query(
+        r"
+        INSERT INTO game_events (
+            game_id,
+            room_id,
+            sequence,
+            event_version,
+            event_type,
+            command_id,
+            actor_participant_id,
+            state_version,
+            payload
+        )
+        VALUES ($1, $2, 1, 2, 'dark_arts_completed', $3, $4, 2, $5)
+        ",
+    )
+    .bind(game_id)
+    .bind(room_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(actor_id)
+    .bind(malformed)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("an incomplete closed effect outcome must be rejected");
+
+    assert_database_error_code(&error, "23514");
+    assert!(
+        error
+            .to_string()
+            .contains("event effect payload is invalid")
+    );
+    transaction
+        .rollback()
+        .await
+        .expect("the rejected v2 effect transaction must roll back");
 }
 
 #[tokio::test]

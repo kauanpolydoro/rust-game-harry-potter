@@ -13,7 +13,10 @@ use tokio::sync::{broadcast, watch};
 use uuid::Uuid;
 
 use super::codec::{command_domain_state, decode_persisted_event, decode_persisted_snapshot};
-use super::{GameProjectionResponse, StoredGameEvent, postgres, projection_for_participant};
+use super::{
+    GameProjectionResponse, PersistedEffectChoice, PersistedEffectOutcome, StoredGameEvent,
+    postgres, projection_for_participant,
+};
 use crate::{
     AppState,
     http_support::ApiError,
@@ -147,6 +150,11 @@ struct RealtimeGameEvent {
     state_version: i64,
     turn: u32,
     actor_position: i16,
+    effects: Vec<PersistedEffectOutcome>,
+    effect_stop: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice: Option<PersistedEffectChoice>,
+    prng_counter: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     command_id: Option<String>,
 }
@@ -197,7 +205,7 @@ pub(super) async fn game_events(
 
     let session = authenticated_session(&state, &headers).await?;
     let participant_id = session.participant_id;
-    let projection = projection_for_participant(&state.database, participant_id)
+    let projection = projection_for_participant(&state, participant_id)
         .await?
         .ok_or_else(ApiError::game_action_not_allowed)?;
     let game_id = Uuid::parse_str(&projection.game.id)
@@ -762,7 +770,7 @@ async fn send_realtime_presence(
     force: bool,
     protocol: RealtimeProtocol,
 ) -> Result<(), RealtimeFailure> {
-    let presence = realtime_presence(&state.database, game_id, protocol).await?;
+    let presence = realtime_presence(state, game_id, protocol).await?;
     if !force && last_presence.as_ref() == Some(&presence) {
         return Ok(());
     }
@@ -772,12 +780,12 @@ async fn send_realtime_presence(
 }
 
 async fn realtime_presence(
-    database: &sqlx::PgPool,
+    state: &AppState,
     game_id: Uuid,
     protocol: RealtimeProtocol,
 ) -> Result<RealtimePresenceMessage, RealtimeFailure> {
     let (snapshot_json, stored_participants) = postgres::game_presence(
-        database,
+        &state.database,
         game_id,
         REALTIME_ONLINE_WINDOW_SECONDS,
         REALTIME_RECONNECTING_WINDOW_SECONDS,
@@ -789,8 +797,14 @@ async fn realtime_presence(
         .map_err(|_| RealtimeFailure::InvalidData("decode presence decision state"))?;
     let domain_state = command_domain_state(&persisted)
         .map_err(|_| RealtimeFailure::InvalidData("restore presence decision state"))?;
+    let effect_rules = state
+        .content
+        .effect_rules(&persisted.versions.manifest_digest)
+        .ok_or(RealtimeFailure::InvalidData(
+            "manifest effect rules are unavailable",
+        ))?;
     let required_participant_position =
-        game_domain::required_participant_for_decision(&domain_state).map(i16::from);
+        game_domain::required_participant_for_decision(&domain_state, &effect_rules).map(i16::from);
     let participants = stored_participants
         .into_iter()
         .map(|(position, status)| {
@@ -854,7 +868,7 @@ async fn synchronize_socket(
         return Ok(());
     }
 
-    let projection = match projection_for_participant(&state.database, participant_id).await {
+    let projection = match projection_for_participant(state, participant_id).await {
         Ok(Some(projection)) if projection.game.id == game_id.to_string() => projection,
         Ok(Some(_) | None) => {
             return Err(RealtimeFailure::InvalidData(
@@ -1057,6 +1071,13 @@ fn realtime_event(
     if !metadata_matches || stored.event_type != "dark_arts_completed" {
         return Err(ApiError::internal());
     }
+    if !matches!(
+        payload.effect_stop.as_str(),
+        "stable" | "choice" | "terminal"
+    ) || (payload.effect_stop == "choice") != payload.choice.is_some()
+    {
+        return Err(ApiError::internal());
+    }
 
     Ok(RealtimeGameEvent {
         event_version: stored.event_version,
@@ -1065,6 +1086,10 @@ fn realtime_event(
         state_version: stored.state_version,
         turn: payload.turn,
         actor_position: stored.actor_position,
+        effects: payload.effects,
+        effect_stop: payload.effect_stop,
+        choice: payload.choice,
+        prng_counter: payload.prng_counter,
         command_id: (stored.actor_participant_id == participant_id)
             .then(|| stored.command_id.to_string()),
     })

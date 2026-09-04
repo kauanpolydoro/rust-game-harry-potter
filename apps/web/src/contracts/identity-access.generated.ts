@@ -121,7 +121,7 @@ export interface GameAdventure {
 
 export interface GameSummary {
   id: string
-  status: "in_progress"
+  status: "in_progress" | "won" | "lost"
   adventure: GameAdventure
   expires_at: string
 }
@@ -146,7 +146,41 @@ export interface SnapshotSummary {
 }
 
 export interface ChoiceSummary {
-  status: "none"
+  status: "none" | "pending"
+  id?: string
+  responsible_position?: number
+  kind?: "effect" | "target"
+  options?: Array<string>
+  min?: number
+  max?: number
+}
+
+export interface GameResources {
+  health: number
+  attack: number
+  influence: number
+}
+
+export interface EffectOutcomeSummary {
+  type: "die_rolled" | "moved" | "no_op" | "resource_changed" | "terminal"
+  rule_id: string
+  target_id?: string
+  target_position?: number
+  die?: "d4" | "d6" | "d8"
+  result?: number
+  from?: string
+  to?: string
+  reason?: "explicit" | "no_eligible_target" | "zero_cardinality"
+  resource?: "attack" | "control" | "health" | "influence"
+  before?: number
+  after?: number
+  cause?: "cost" | "effect"
+  outcome?: "lost" | "won"
+}
+
+export interface EffectResolutionSummary {
+  status: "idle" | "resolved" | "choice" | "terminal"
+  outcomes: Array<EffectOutcomeSummary>
 }
 
 export interface TurnSummary {
@@ -160,6 +194,7 @@ export interface GameParticipant {
   role: "host" | "guest"
   position: number
   hero: HeroSummary
+  resources: GameResources
 }
 
 export interface GameProjectionResponse {
@@ -170,15 +205,20 @@ export interface GameProjectionResponse {
   participants: Array<GameParticipant>
   legal_actions: Array<string>
   choice: ChoiceSummary
+  effects: EffectResolutionSummary
 }
 
 export interface RealtimeGameEvent {
-  event_version: 1
+  event_version: 1 | 2
   type: "dark_arts_completed"
   sequence: number
   state_version: number
   turn: number
   actor_position: number
+  effects: Array<EffectOutcomeSummary>
+  effect_stop: "stable" | "choice" | "terminal"
+  choice?: ChoiceSummary
+  prng_counter: number
   command_id?: string
 }
 
@@ -342,7 +382,7 @@ export function isGameAdventure(value: unknown): value is GameAdventure {
 }
 
 export function isGameSummary(value: unknown): value is GameSummary {
-  return isRecord(value) && Object.keys(value).every((key) => ["id","status","adventure","expires_at"].includes(key)) && typeof value["id"] === 'string' && isUuid(value["id"]) && typeof value["status"] === 'string' && (value["status"] === "in_progress") && isGameAdventure(value["adventure"]) && typeof value["expires_at"] === 'string' && isRfc3339DateTime(value["expires_at"])
+  return isRecord(value) && Object.keys(value).every((key) => ["id","status","adventure","expires_at"].includes(key)) && typeof value["id"] === 'string' && isUuid(value["id"]) && typeof value["status"] === 'string' && (value["status"] === "in_progress" || value["status"] === "won" || value["status"] === "lost") && isGameAdventure(value["adventure"]) && typeof value["expires_at"] === 'string' && isRfc3339DateTime(value["expires_at"])
 }
 
 export function isGameVersions(value: unknown): value is GameVersions {
@@ -354,7 +394,19 @@ export function isSnapshotSummary(value: unknown): value is SnapshotSummary {
 }
 
 export function isChoiceSummary(value: unknown): value is ChoiceSummary {
-  return isRecord(value) && Object.keys(value).every((key) => ["status"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "none")
+  return isRecord(value) && Object.keys(value).every((key) => ["status","id","responsible_position","kind","options","min","max"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "none" || value["status"] === "pending") && (!Object.hasOwn(value, "id") || (typeof value["id"] === 'string' && [...value["id"]].length >= 1)) && (!Object.hasOwn(value, "responsible_position") || (typeof value["responsible_position"] === 'number' && Number.isInteger(value["responsible_position"]) && value["responsible_position"] >= 1 && value["responsible_position"] <= 4)) && (!Object.hasOwn(value, "kind") || (typeof value["kind"] === 'string' && (value["kind"] === "effect" || value["kind"] === "target"))) && (!Object.hasOwn(value, "options") || (Array.isArray(value["options"]) && value["options"].every((entry) => typeof entry === 'string' && [...entry].length >= 1) && value["options"].length >= 2 && value["options"].length <= 4096)) && (!Object.hasOwn(value, "min") || (typeof value["min"] === 'number' && Number.isInteger(value["min"]) && value["min"] >= 0)) && (!Object.hasOwn(value, "max") || (typeof value["max"] === 'number' && Number.isInteger(value["max"]) && value["max"] >= 0))
+}
+
+export function isGameResources(value: unknown): value is GameResources {
+  return isRecord(value) && Object.keys(value).every((key) => ["health","attack","influence"].includes(key)) && typeof value["health"] === 'number' && Number.isInteger(value["health"]) && value["health"] >= 0 && value["health"] <= 65535 && typeof value["attack"] === 'number' && Number.isInteger(value["attack"]) && value["attack"] >= 0 && value["attack"] <= 65535 && typeof value["influence"] === 'number' && Number.isInteger(value["influence"]) && value["influence"] >= 0 && value["influence"] <= 65535
+}
+
+export function isEffectOutcomeSummary(value: unknown): value is EffectOutcomeSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["type","rule_id","target_id","target_position","die","result","from","to","reason","resource","before","after","cause","outcome"].includes(key)) && typeof value["type"] === 'string' && (value["type"] === "die_rolled" || value["type"] === "moved" || value["type"] === "no_op" || value["type"] === "resource_changed" || value["type"] === "terminal") && typeof value["rule_id"] === 'string' && [...value["rule_id"]].length >= 1 && (!Object.hasOwn(value, "target_id") || (typeof value["target_id"] === 'string' && [...value["target_id"]].length >= 1)) && (!Object.hasOwn(value, "target_position") || (typeof value["target_position"] === 'number' && Number.isInteger(value["target_position"]) && value["target_position"] >= 1 && value["target_position"] <= 4)) && (!Object.hasOwn(value, "die") || (typeof value["die"] === 'string' && (value["die"] === "d4" || value["die"] === "d6" || value["die"] === "d8"))) && (!Object.hasOwn(value, "result") || (typeof value["result"] === 'number' && Number.isInteger(value["result"]) && value["result"] >= 1 && value["result"] <= 8)) && (!Object.hasOwn(value, "from") || (typeof value["from"] === 'string' && [...value["from"]].length >= 1)) && (!Object.hasOwn(value, "to") || (typeof value["to"] === 'string' && [...value["to"]].length >= 1)) && (!Object.hasOwn(value, "reason") || (typeof value["reason"] === 'string' && (value["reason"] === "explicit" || value["reason"] === "no_eligible_target" || value["reason"] === "zero_cardinality"))) && (!Object.hasOwn(value, "resource") || (typeof value["resource"] === 'string' && (value["resource"] === "attack" || value["resource"] === "control" || value["resource"] === "health" || value["resource"] === "influence"))) && (!Object.hasOwn(value, "before") || (typeof value["before"] === 'number' && Number.isInteger(value["before"]) && value["before"] >= 0 && value["before"] <= 65535)) && (!Object.hasOwn(value, "after") || (typeof value["after"] === 'number' && Number.isInteger(value["after"]) && value["after"] >= 0 && value["after"] <= 65535)) && (!Object.hasOwn(value, "cause") || (typeof value["cause"] === 'string' && (value["cause"] === "cost" || value["cause"] === "effect"))) && (!Object.hasOwn(value, "outcome") || (typeof value["outcome"] === 'string' && (value["outcome"] === "lost" || value["outcome"] === "won")))
+}
+
+export function isEffectResolutionSummary(value: unknown): value is EffectResolutionSummary {
+  return isRecord(value) && Object.keys(value).every((key) => ["status","outcomes"].includes(key)) && typeof value["status"] === 'string' && (value["status"] === "idle" || value["status"] === "resolved" || value["status"] === "choice" || value["status"] === "terminal") && Array.isArray(value["outcomes"]) && value["outcomes"].every((entry) => isEffectOutcomeSummary(entry)) && value["outcomes"].length <= 4096
 }
 
 export function isTurnSummary(value: unknown): value is TurnSummary {
@@ -362,15 +414,15 @@ export function isTurnSummary(value: unknown): value is TurnSummary {
 }
 
 export function isGameParticipant(value: unknown): value is GameParticipant {
-  return isRecord(value) && Object.keys(value).every((key) => ["display_name","role","position","hero"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["role"] === 'string' && (value["role"] === "host" || value["role"] === "guest") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && isHeroSummary(value["hero"])
+  return isRecord(value) && Object.keys(value).every((key) => ["display_name","role","position","hero","resources"].includes(key)) && typeof value["display_name"] === 'string' && [...value["display_name"]].length >= 1 && [...value["display_name"]].length <= 40 && typeof value["role"] === 'string' && (value["role"] === "host" || value["role"] === "guest") && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && isHeroSummary(value["hero"]) && isGameResources(value["resources"])
 }
 
 export function isGameProjectionResponse(value: unknown): value is GameProjectionResponse {
-  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions","choice"].includes(key)) && isGameSummary(value["game"]) && isSnapshotSummary(value["snapshot"]) && isTurnSummary(value["turn"]) && isGameParticipant(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isGameParticipant(entry)) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string') && isChoiceSummary(value["choice"])
+  return isRecord(value) && Object.keys(value).every((key) => ["game","snapshot","turn","participant","participants","legal_actions","choice","effects"].includes(key)) && isGameSummary(value["game"]) && isSnapshotSummary(value["snapshot"]) && isTurnSummary(value["turn"]) && isGameParticipant(value["participant"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isGameParticipant(entry)) && Array.isArray(value["legal_actions"]) && value["legal_actions"].every((entry) => typeof entry === 'string') && isChoiceSummary(value["choice"]) && isEffectResolutionSummary(value["effects"])
 }
 
 export function isRealtimeGameEvent(value: unknown): value is RealtimeGameEvent {
-  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "dark_arts_completed") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
+  return isRecord(value) && Object.keys(value).every((key) => ["event_version","type","sequence","state_version","turn","actor_position","effects","effect_stop","choice","prng_counter","command_id"].includes(key)) && typeof value["event_version"] === 'number' && Number.isInteger(value["event_version"]) && (value["event_version"] === 1 || value["event_version"] === 2) && typeof value["type"] === 'string' && (value["type"] === "dark_arts_completed") && typeof value["sequence"] === 'number' && Number.isInteger(value["sequence"]) && value["sequence"] >= 1 && typeof value["state_version"] === 'number' && Number.isInteger(value["state_version"]) && value["state_version"] >= 2 && typeof value["turn"] === 'number' && Number.isInteger(value["turn"]) && value["turn"] >= 1 && typeof value["actor_position"] === 'number' && Number.isInteger(value["actor_position"]) && value["actor_position"] >= 1 && value["actor_position"] <= 4 && Array.isArray(value["effects"]) && value["effects"].every((entry) => isEffectOutcomeSummary(entry)) && value["effects"].length <= 4096 && typeof value["effect_stop"] === 'string' && (value["effect_stop"] === "stable" || value["effect_stop"] === "choice" || value["effect_stop"] === "terminal") && (!Object.hasOwn(value, "choice") || (isChoiceSummary(value["choice"]))) && typeof value["prng_counter"] === 'number' && Number.isInteger(value["prng_counter"]) && value["prng_counter"] >= 0 && (!Object.hasOwn(value, "command_id") || (typeof value["command_id"] === 'string' && isUuid(value["command_id"])))
 }
 
 export function isRealtimeSnapshotMessage(value: unknown): value is RealtimeSnapshotMessage {

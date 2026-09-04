@@ -51,6 +51,7 @@ class FakeWebSocket {
 function projection(cursor = 0): GameProjectionResponse {
   return {
     choice: { status: 'none' },
+    effects: { outcomes: [], status: 'idle' },
     game: {
       adventure: { id: 'adventure:001', name: 'Game 1' },
       expires_at: '2026-09-10T12:00:00Z',
@@ -62,6 +63,7 @@ function projection(cursor = 0): GameProjectionResponse {
       display_name: 'Minerva',
       hero: { id: 'harry', name: 'Harry' },
       position: 1,
+      resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
     },
     participants: [
@@ -69,12 +71,14 @@ function projection(cursor = 0): GameProjectionResponse {
         display_name: 'Minerva',
         hero: { id: 'harry', name: 'Harry' },
         position: 1,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
       },
       {
         display_name: 'Luna',
         hero: { id: 'hermione', name: 'Hermione' },
         position: 2,
+        resources: { attack: 0, health: 10, influence: 0 },
         role: 'guest',
       },
     ],
@@ -108,7 +112,10 @@ function eventBatch(fromCursor: number, cursor: number) {
     events: Array.from({ length: cursor - fromCursor }, (_, index) => ({
       actor_position: 1,
       command_id: '8cbef381-3a98-4731-b16f-8b55db5e8f63',
+      effect_stop: 'stable',
+      effects: [],
       event_version: 1,
+      prng_counter: 0,
       sequence: fromCursor + index + 1,
       state_version: fromCursor + index + 2,
       turn: 1,

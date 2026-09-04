@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use game_content::{
-    CardInstanceId, CatalogId, FunctionalField, ProvenanceSource, RuleId, SourceKind,
-    import_base_bundle, import_base_bundle_with_runtime_rules,
+    CardInstanceId, CatalogId, EffectTrigger, FunctionalField, ProvenanceSource, RuleId,
+    SourceKind, import_base_bundle, import_base_bundle_with_runtime_rules,
     import_base_bundle_with_trusted_sources,
 };
 use serde_json::json;
@@ -75,7 +75,7 @@ fn require_effect(bundle: &mut serde_json::Value) {
 fn structurally_complete_but_semantically_empty_bundle_is_not_playable() {
     let manifest = import_base_bundle(&complete_bundle()).expect("bundle should be valid");
 
-    assert_eq!(manifest.manifest_version, 1);
+    assert_eq!(manifest.manifest_version, 2);
     assert_eq!(manifest.content_version, "fixture-v1");
     assert_eq!(manifest.ruleset_version, "fixture-rules-v1");
     assert!(manifest.digest.starts_with("blake3:"));
@@ -556,6 +556,146 @@ fn operation_incompatible_with_its_zone_prevents_manifest_publication() {
         .expect_err("an incompatible operation and zone must prevent publication");
 
     assert!(failure.contains("operation discard is incompatible with zone market"));
+}
+
+#[test]
+fn closed_effect_ast_preserves_every_supported_construct_for_the_runtime() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{
+        "id": "rule:closed-language",
+        "trigger": "dark_arts_completed",
+        "cost": [{ "resource": "influence", "amount": 1 }],
+        "effect": {
+            "type": "sequence",
+            "effects": [
+                {
+                    "type": "apply",
+                    "target": {
+                        "zone": "heroes",
+                        "owner": "actor",
+                        "cardinality": { "min": 1, "max": 1 },
+                        "eligibility": [{
+                            "type": "resource_at_least",
+                            "resource": "health",
+                            "amount": 1
+                        }]
+                    },
+                    "operation": {
+                        "type": "modify_resource",
+                        "resource": "attack",
+                        "amount": 1
+                    }
+                },
+                {
+                    "type": "condition",
+                    "condition": {
+                        "type": "resource_at_least",
+                        "target": {
+                            "zone": "heroes",
+                            "owner": "actor",
+                            "cardinality": { "min": 1, "max": 1 }
+                        },
+                        "resource": "attack",
+                        "amount": 1
+                    },
+                    "then": {
+                        "type": "choice",
+                        "options": [
+                            { "type": "no_op" },
+                            {
+                                "type": "repeat",
+                                "times": 2,
+                                "effect": {
+                                    "type": "apply",
+                                    "target": {
+                                        "zone": "hero_hand",
+                                        "cardinality": { "min": 1, "max": 1 }
+                                    },
+                                    "operation": {
+                                        "type": "move",
+                                        "to": "hero_discard_pile"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "roll",
+                    "die": "d4",
+                    "outcomes": [
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "no_op" },
+                        { "type": "terminal", "outcome": "won" }
+                    ]
+                }
+            ]
+        }
+    }]);
+    let rule_id = RuleId::parse("rule:closed-language").expect("fixture rule ID should be valid");
+
+    let manifest = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id.clone()]),
+    )
+    .expect("the complete closed AST should import");
+
+    assert_eq!(manifest.rules.len(), 1);
+    assert_eq!(manifest.rules[0].id, rule_id);
+    assert_eq!(manifest.rules[0].trigger, EffectTrigger::DarkArtsCompleted);
+}
+
+#[test]
+fn arbitrary_script_nodes_cannot_enter_the_effect_ast() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{
+        "id": "rule:script",
+        "effect": {
+            "type": "script",
+            "source": "state.players[0].attack = 999"
+        }
+    }]);
+
+    let failure = import_value(&bundle).expect_err("arbitrary scripting must fail closed");
+
+    assert!(failure.contains("unknown variant `script`"));
+}
+
+#[test]
+fn executable_effects_cannot_exceed_the_runtime_step_limit() {
+    let mut bundle = bundle_value();
+    let repeated = |effect| {
+        json!({
+            "type": "repeat",
+            "times": 16,
+            "effect": effect
+        })
+    };
+    let effect = repeated(repeated(repeated(repeated(json!({
+        "type": "apply",
+        "target": {
+            "zone": "hero_hand",
+            "cardinality": { "min": 1, "max": 1 }
+        },
+        "operation": { "type": "discard" }
+    })))));
+    bundle["rules"] = json!([{
+        "id": "rule:unbounded",
+        "trigger": "dark_arts_completed",
+        "effect": effect
+    }]);
+    let rule_id = RuleId::parse("rule:unbounded").expect("fixture rule ID should be valid");
+
+    let failure = import_base_bundle_with_runtime_rules(
+        &serde_json::to_vec(&bundle).expect("fixture should serialize"),
+        &[],
+        &BTreeSet::from([rule_id]),
+    )
+    .expect_err("validated executable effects must always fit the runtime step bound");
+
+    assert!(failure.to_string().contains("effect execution limit"));
 }
 
 #[test]

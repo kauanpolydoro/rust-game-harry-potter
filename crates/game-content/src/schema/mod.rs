@@ -5,13 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CatalogId, ContentGap, ContentManifest, ContentSet, EntryKind, FunctionalConfidence,
-    FunctionalField, FunctionalProvenance, ImportFailure, ManifestEntry, ProvenanceSource, RuleId,
-    SourceKind,
+    CatalogId, ContentGap, ContentManifest, ContentSet, Effect, EffectRule, EntryKind,
+    FunctionalConfidence, FunctionalField, FunctionalProvenance, ImportFailure, ManifestEntry,
+    ProvenanceSource, RuleId, SourceKind,
 };
 
 const BASE_RECORD_COUNT: usize = 171;
 const BASE_CARD_COUNT: u32 = 252;
+const MANIFEST_VERSION: u16 = 2;
 const REQUIRED_BASE_ENTRY_KINDS: [EntryKind; 12] = [
     EntryKind::Adventure,
     EntryKind::Catalog,
@@ -99,6 +100,8 @@ pub fn import_base_bundle_with_runtime_rules(
         .intersection(executable_rules)
         .cloned()
         .collect::<BTreeSet<_>>();
+    validation::validate_runtime_rules(&bundle, &substantive_rules)?;
+    let runtime_rules = bundle.rule_closure(&substantive_rules);
     let entries = bundle
         .entries
         .iter()
@@ -127,6 +130,7 @@ pub fn import_base_bundle_with_runtime_rules(
         })
         .collect();
     let digest_input = ManifestDigestInput {
+        manifest_version: MANIFEST_VERSION,
         bundle: &bundle,
         trusted_source_kinds: &source_kinds,
         executable_rules: &substantive_rules,
@@ -136,7 +140,7 @@ pub fn import_base_bundle_with_runtime_rules(
     })?;
 
     Ok(ContentManifest {
-        manifest_version: 1,
+        manifest_version: MANIFEST_VERSION,
         content_version: bundle.content_version,
         ruleset_version: bundle.ruleset_version,
         digest: format!("blake3:{}", blake3::hash(&canonical).to_hex()),
@@ -145,12 +149,20 @@ pub fn import_base_bundle_with_runtime_rules(
         playable: gaps.is_empty() && has_required_catalog_shape && has_executable_rules,
         gaps,
         entries,
+        executable_rules: substantive_rules,
+        rules: bundle
+            .rules
+            .iter()
+            .filter(|rule| runtime_rules.contains(&rule.id))
+            .cloned()
+            .collect(),
         sources,
     })
 }
 
 #[derive(Serialize)]
 struct ManifestDigestInput<'a> {
+    manifest_version: u16,
     bundle: &'a CandidateBundle,
     trusted_source_kinds: &'a BTreeMap<String, SourceKind>,
     executable_rules: &'a BTreeSet<RuleId>,
@@ -164,7 +176,7 @@ struct CandidateBundle {
     ruleset_version: String,
     locale: String,
     sources: Vec<Source>,
-    rules: Vec<RuleDefinition>,
+    rules: Vec<EffectRule>,
     entries: Vec<CandidateEntry>,
 }
 
@@ -198,6 +210,26 @@ impl CandidateBundle {
             .map(|rule| rule.id.clone())
             .collect()
     }
+
+    fn rule_closure(&self, roots: &BTreeSet<RuleId>) -> BTreeSet<RuleId> {
+        let rules = self
+            .rules
+            .iter()
+            .map(|rule| (&rule.id, &rule.effect))
+            .collect::<BTreeMap<_, _>>();
+        let mut pending = roots.iter().collect::<Vec<_>>();
+        let mut closure = roots.clone();
+        while let Some(rule_id) = pending.pop() {
+            if let Some(effect) = rules.get(rule_id) {
+                for reference in effect.references() {
+                    if closure.insert(reference.clone()) {
+                        pending.push(reference);
+                    }
+                }
+            }
+        }
+        closure
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -206,66 +238,6 @@ struct Source {
     id: String,
     uri: String,
     kind: SourceKind,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct RuleDefinition {
-    id: RuleId,
-    effect: Effect,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum Effect {
-    Apply {
-        target: Selector,
-        operation: Operation,
-    },
-    Choice {
-        options: Vec<Effect>,
-    },
-    NoOp,
-    Reference {
-        rule: RuleId,
-    },
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Selector {
-    zone: Zone,
-    cardinality: Cardinality,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Cardinality {
-    min: u16,
-    max: u16,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Zone {
-    ActiveLocation,
-    ActiveVillains,
-    DarkArtsDeck,
-    DarkArtsDiscard,
-    HeroDiscardPile,
-    HeroDrawPile,
-    HeroHand,
-    HeroPlayArea,
-    Heroes,
-    HogwartsDeck,
-    Market,
-    VillainDeck,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum Operation {
-    Discard,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -369,16 +341,48 @@ impl FunctionalDefinition {
 }
 
 impl Effect {
+    fn references(&self) -> Vec<&RuleId> {
+        match self {
+            Self::Choice { options }
+            | Self::Roll {
+                outcomes: options, ..
+            }
+            | Self::Sequence { effects: options } => {
+                options.iter().flat_map(Self::references).collect()
+            }
+            Self::Condition {
+                then, otherwise, ..
+            } => {
+                let mut references = then.references();
+                if let Some(otherwise) = otherwise {
+                    references.extend(otherwise.references());
+                }
+                references
+            }
+            Self::Repeat { effect, .. } => effect.references(),
+            Self::Reference { rule } => vec![rule],
+            Self::Apply { .. } | Self::NoOp | Self::Terminal { .. } => Vec::new(),
+        }
+    }
+
     fn has_operation(
         &self,
         rules: &BTreeMap<&RuleId, &Self>,
         visited: &mut BTreeSet<RuleId>,
     ) -> bool {
         match self {
-            Self::Apply { .. } => true,
+            Self::Apply { .. } | Self::Terminal { .. } => true,
             Self::Choice { options } => options
                 .iter()
                 .any(|option| option.has_operation(rules, visited)),
+            Self::Condition {
+                then, otherwise, ..
+            } => {
+                then.has_operation(rules, visited)
+                    || otherwise
+                        .as_deref()
+                        .is_some_and(|effect| effect.has_operation(rules, visited))
+            }
             Self::NoOp => false,
             Self::Reference { rule } => {
                 visited.insert(rule.clone())
@@ -386,6 +390,13 @@ impl Effect {
                         .get(rule)
                         .is_some_and(|effect| effect.has_operation(rules, visited))
             }
+            Self::Repeat { effect, .. } => effect.has_operation(rules, visited),
+            Self::Roll { outcomes, .. } => outcomes
+                .iter()
+                .any(|outcome| outcome.has_operation(rules, visited)),
+            Self::Sequence { effects } => effects
+                .iter()
+                .any(|effect| effect.has_operation(rules, visited)),
         }
     }
 }

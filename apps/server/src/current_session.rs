@@ -21,7 +21,7 @@ async fn restore_session(
 ) -> Result<Response, ApiError> {
     let participant_id = authenticated_participant(&state, &headers).await?;
     if let Some(projection) =
-        match_runtime::projection_for_participant(&state.database, participant_id).await?
+        match_runtime::projection_for_participant(&state, participant_id).await?
     {
         return Ok(no_store_json(StatusCode::OK, projection));
     }
