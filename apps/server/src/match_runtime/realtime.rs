@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
 use uuid::Uuid;
 
-use super::codec::decode_persisted_event;
+use super::codec::{command_domain_state, decode_persisted_event, decode_persisted_snapshot};
 use super::{GameProjectionResponse, StoredGameEvent, postgres, projection_for_participant};
 use crate::{
     AppState,
@@ -20,15 +20,44 @@ use crate::{
     session::{AuthenticatedSession, authenticated_session, session_is_active},
 };
 
-const REALTIME_PROTOCOL_VERSION: u16 = 1;
-const REALTIME_SUBPROTOCOL: &str = "hogwarts.realtime.v1";
+const REALTIME_SUBPROTOCOL_V1: &str = "hogwarts.realtime.v1";
+const REALTIME_SUBPROTOCOL_V2: &str = "hogwarts.realtime.v2";
 const REALTIME_REPLAY_LIMIT: u64 = 100;
 const REALTIME_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(30);
 const REALTIME_SESSION_REVALIDATION_INTERVAL: Duration = Duration::from_secs(30);
 const REALTIME_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const REALTIME_CLIENT_WATCHDOG: Duration = Duration::from_secs(60);
+const REALTIME_PRESENCE_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(5);
+const REALTIME_ONLINE_WINDOW_SECONDS: i64 = 40;
+const REALTIME_RECONNECTING_WINDOW_SECONDS: i64 = 60;
 const REALTIME_MAX_CONNECTION_AGE: Duration = Duration::from_hours(6);
 const REALTIME_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy)]
+enum RealtimeProtocol {
+    V1,
+    V2,
+}
+
+impl RealtimeProtocol {
+    const fn version(self) -> u16 {
+        match self {
+            Self::V1 => 1,
+            Self::V2 => 2,
+        }
+    }
+
+    const fn subprotocol(self) -> &'static str {
+        match self {
+            Self::V1 => REALTIME_SUBPROTOCOL_V1,
+            Self::V2 => REALTIME_SUBPROTOCOL_V2,
+        }
+    }
+
+    const fn publishes_presence(self) -> bool {
+        matches!(self, Self::V2)
+    }
+}
 
 #[derive(Debug)]
 enum RealtimeFailure {
@@ -91,6 +120,24 @@ struct RealtimeSynchronizedMessage<'a> {
     digest: &'a str,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct RealtimePresenceMessage {
+    protocol_version: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    game_id: String,
+    participants: Vec<RealtimeParticipantPresence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_participant_position: Option<i16>,
+    blocked: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct RealtimeParticipantPresence {
+    position: i16,
+    status: &'static str,
+}
+
 #[derive(Serialize)]
 struct RealtimeGameEvent {
     event_version: i16,
@@ -111,8 +158,18 @@ struct RealtimePosition {
     synchronized: bool,
 }
 
+#[derive(Clone, Copy)]
+struct RealtimeConnectionContext<'a> {
+    state: &'a AppState,
+    session: AuthenticatedSession,
+    game_id: Uuid,
+    connection_id: Uuid,
+    protocol: RealtimeProtocol,
+}
+
 enum RealtimeLoopAction {
     Continue,
+    Presence,
     Synchronize,
     Stop,
 }
@@ -124,12 +181,19 @@ pub(super) async fn game_events(
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     require_realtime_origin(&state, &headers)?;
-    if !websocket
-        .requested_protocols()
-        .any(|protocol| protocol.as_bytes() == REALTIME_SUBPROTOCOL.as_bytes())
-    {
-        return Err(ApiError::upgrade_required());
+    let mut accepts_v1 = false;
+    let mut accepts_v2 = false;
+    for requested in websocket.requested_protocols() {
+        accepts_v1 |= requested.as_bytes() == REALTIME_SUBPROTOCOL_V1.as_bytes();
+        accepts_v2 |= requested.as_bytes() == REALTIME_SUBPROTOCOL_V2.as_bytes();
     }
+    let protocol = if accepts_v2 {
+        RealtimeProtocol::V2
+    } else if accepts_v1 {
+        RealtimeProtocol::V1
+    } else {
+        return Err(ApiError::upgrade_required());
+    };
 
     let session = authenticated_session(&state, &headers).await?;
     let participant_id = session.participant_id;
@@ -140,9 +204,11 @@ pub(super) async fn game_events(
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
 
     Ok(websocket
-        .protocols([REALTIME_SUBPROTOCOL])
+        .protocols([protocol.subprotocol()])
         .max_message_size(4 * 1024)
-        .on_upgrade(move |socket| serve_game_events(socket, state, session, game_id, query)))
+        .on_upgrade(move |socket| {
+            serve_game_events(socket, state, session, game_id, query, protocol)
+        }))
 }
 
 fn require_realtime_origin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
@@ -163,6 +229,7 @@ async fn serve_game_events(
     session: AuthenticatedSession,
     game_id: Uuid,
     query: RealtimeQuery,
+    protocol: RealtimeProtocol,
 ) {
     let participant_id = session.participant_id;
     let mut position = RealtimePosition {
@@ -172,11 +239,14 @@ async fn serve_game_events(
         synchronized: false,
     };
     let signal = state.subscribe_to_game_events(game_id);
+    let presence_signal = state.subscribe_to_game_presence(game_id);
     let shutdown = state.subscribe_to_shutdown();
     if *shutdown.borrow() {
         close_socket(&mut socket, close_code::RESTART, "server is shutting down").await;
         drop(signal);
+        drop(presence_signal);
         state.prune_game_event_channel(game_id);
+        state.prune_game_presence_channel(game_id);
         return;
     }
     let force_initial_snapshot = query.cursor.is_none() || position.cursor.is_none();
@@ -187,6 +257,7 @@ async fn serve_game_events(
         game_id,
         &mut position,
         force_initial_snapshot,
+        protocol,
     )
     .await
     {
@@ -203,49 +274,121 @@ async fn serve_game_events(
         )
         .await;
         drop(signal);
+        drop(presence_signal);
         state.prune_game_event_channel(game_id);
+        state.prune_game_presence_channel(game_id);
         return;
     }
 
-    realtime_event_loop(
-        &mut socket,
-        &state,
+    let Some((connection_id, mut last_presence)) =
+        register_connection_presence(&mut socket, &state, session, game_id, protocol).await
+    else {
+        drop(signal);
+        drop(presence_signal);
+        state.prune_game_event_channel(game_id);
+        state.prune_game_presence_channel(game_id);
+        return;
+    };
+    let context = RealtimeConnectionContext {
+        state: &state,
         session,
         game_id,
+        connection_id,
+        protocol,
+    };
+
+    realtime_event_loop(
+        &mut socket,
+        context,
         &mut position,
+        &mut last_presence,
         signal,
+        presence_signal,
         shutdown,
     )
     .await;
+    disconnect_presence(&state, connection_id, game_id, participant_id).await;
     state.prune_game_event_channel(game_id);
+    state.prune_game_presence_channel(game_id);
 }
 
-async fn realtime_event_loop(
+async fn register_connection_presence(
     socket: &mut WebSocket,
     state: &AppState,
     session: AuthenticatedSession,
     game_id: Uuid,
+    protocol: RealtimeProtocol,
+) -> Option<(Uuid, Option<RealtimePresenceMessage>)> {
+    let participant_id = session.participant_id;
+    let connection_id = Uuid::new_v4();
+    match postgres::register_realtime_connection(
+        &state.database,
+        connection_id,
+        game_id,
+        participant_id,
+        session.session_id,
+    )
+    .await
+    {
+        Ok(true) => state.signal_game_presence(game_id),
+        Ok(false) => {
+            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+            return None;
+        }
+        Err(_error) => {
+            tracing::warn!(%game_id, %participant_id, "realtime presence registration failed");
+            close_socket(socket, close_code::ERROR, "presence registration failed").await;
+            return None;
+        }
+    }
+
+    let mut last_presence = None;
+    if protocol.publishes_presence()
+        && let Err(error) =
+            send_realtime_presence(socket, state, game_id, &mut last_presence, true, protocol).await
+    {
+        tracing::warn!(error = %error, %game_id, %participant_id, "initial realtime presence failed");
+        close_socket(socket, close_code::ERROR, "initial presence failed").await;
+        disconnect_presence(state, connection_id, game_id, participant_id).await;
+        return None;
+    }
+    Some((connection_id, last_presence))
+}
+
+async fn realtime_event_loop(
+    socket: &mut WebSocket,
+    context: RealtimeConnectionContext<'_>,
     position: &mut RealtimePosition,
+    last_presence: &mut Option<RealtimePresenceMessage>,
     mut signal: broadcast::Receiver<()>,
+    mut presence_signal: broadcast::Receiver<()>,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let RealtimeConnectionContext {
+        state,
+        session,
+        game_id,
+        connection_id,
+        protocol,
+    } = context;
     let participant_id = session.participant_id;
     let now = tokio::time::Instant::now();
-    let mut reconciliation = tokio::time::interval_at(
+    let mut reconciliation = realtime_interval(
         now + REALTIME_RECONCILIATION_INTERVAL + reconciliation_jitter(game_id, participant_id),
         REALTIME_RECONCILIATION_INTERVAL,
     );
-    reconciliation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut session_revalidation = tokio::time::interval_at(
+    let mut session_revalidation = realtime_interval(
         now + REALTIME_SESSION_REVALIDATION_INTERVAL,
         REALTIME_SESSION_REVALIDATION_INTERVAL,
     );
-    session_revalidation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut heartbeat = tokio::time::interval_at(
+    let mut heartbeat = realtime_interval(
         now + REALTIME_HEARTBEAT_INTERVAL,
         REALTIME_HEARTBEAT_INTERVAL,
     );
-    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut presence_reconciliation = realtime_interval(
+        now + REALTIME_PRESENCE_RECONCILIATION_INTERVAL,
+        REALTIME_PRESENCE_RECONCILIATION_INTERVAL,
+    );
     let connection_lifetime = tokio::time::sleep(REALTIME_MAX_CONNECTION_AGE);
     tokio::pin!(connection_lifetime);
     let mut last_client_activity = now;
@@ -257,7 +400,9 @@ async fn realtime_event_loop(
                     socket,
                     message,
                     game_id,
-                    participant_id,
+                    state,
+                    session,
+                    connection_id,
                     &mut last_client_activity,
                 )
                 .await
@@ -270,7 +415,18 @@ async fn realtime_event_loop(
                     Err(broadcast::error::RecvError::Closed) => RealtimeLoopAction::Continue,
                 }
             }
+            notification = presence_signal.recv(), if protocol.publishes_presence() => {
+                match notification {
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                        RealtimeLoopAction::Presence
+                    }
+                    Err(broadcast::error::RecvError::Closed) => RealtimeLoopAction::Continue,
+                }
+            }
             _ = reconciliation.tick() => RealtimeLoopAction::Synchronize,
+            _ = presence_reconciliation.tick(), if protocol.publishes_presence() => {
+                RealtimeLoopAction::Presence
+            },
             _ = session_revalidation.tick() => {
                 validate_realtime_session(socket, state, session, game_id).await
             }
@@ -302,25 +458,93 @@ async fn realtime_event_loop(
             }
         };
 
-        match action {
-            RealtimeLoopAction::Continue => {}
-            RealtimeLoopAction::Stop => return,
-            RealtimeLoopAction::Synchronize => {
-                if !synchronize_connection(socket, state, session, game_id, position).await {
-                    return;
-                }
-            }
+        if !apply_realtime_loop_action(action, socket, context, position, last_presence).await {
+            return;
         }
     }
+}
+
+fn realtime_interval(first_tick: tokio::time::Instant, period: Duration) -> tokio::time::Interval {
+    let mut interval = tokio::time::interval_at(first_tick, period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    interval
+}
+
+async fn apply_realtime_loop_action(
+    action: RealtimeLoopAction,
+    socket: &mut WebSocket,
+    context: RealtimeConnectionContext<'_>,
+    position: &mut RealtimePosition,
+    last_presence: &mut Option<RealtimePresenceMessage>,
+) -> bool {
+    let RealtimeConnectionContext {
+        state,
+        session,
+        game_id,
+        protocol,
+        ..
+    } = context;
+    match action {
+        RealtimeLoopAction::Continue => true,
+        RealtimeLoopAction::Stop => false,
+        RealtimeLoopAction::Presence => {
+            synchronize_presence(
+                socket,
+                context,
+                last_presence,
+                "realtime presence synchronization failed",
+            )
+            .await
+        }
+        RealtimeLoopAction::Synchronize => {
+            if !synchronize_connection(socket, state, session, game_id, position, protocol).await {
+                return false;
+            }
+            !protocol.publishes_presence()
+                || synchronize_presence(
+                    socket,
+                    context,
+                    last_presence,
+                    "realtime presence after official synchronization failed",
+                )
+                .await
+        }
+    }
+}
+
+async fn synchronize_presence(
+    socket: &mut WebSocket,
+    context: RealtimeConnectionContext<'_>,
+    last_presence: &mut Option<RealtimePresenceMessage>,
+    failure_message: &'static str,
+) -> bool {
+    let RealtimeConnectionContext {
+        state,
+        session,
+        game_id,
+        protocol,
+        ..
+    } = context;
+    if let Err(error) =
+        send_realtime_presence(socket, state, game_id, last_presence, false, protocol).await
+    {
+        tracing::warn!(error = %error, %game_id, participant_id = %session.participant_id, failure_message);
+        close_socket(socket, close_code::ERROR, "presence synchronization failed").await;
+        return false;
+    }
+    true
 }
 
 async fn handle_client_message(
     socket: &mut WebSocket,
     message: Option<Result<Message, axum::Error>>,
     game_id: Uuid,
-    participant_id: Uuid,
+    state: &AppState,
+    session: AuthenticatedSession,
+    connection_id: Uuid,
     last_client_activity: &mut tokio::time::Instant,
 ) -> RealtimeLoopAction {
+    let participant_id = session.participant_id;
     match message {
         Some(Ok(Message::Close(frame))) => {
             tracing::info!(
@@ -342,7 +566,28 @@ async fn handle_client_message(
         }
         Some(Ok(Message::Ping(_) | Message::Pong(_))) => {
             *last_client_activity = tokio::time::Instant::now();
-            RealtimeLoopAction::Continue
+            match postgres::touch_realtime_connection(
+                &state.database,
+                connection_id,
+                participant_id,
+                session.session_id,
+            )
+            .await
+            {
+                Ok(true) => {
+                    state.signal_game_presence(game_id);
+                    RealtimeLoopAction::Continue
+                }
+                Ok(false) => {
+                    close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                    RealtimeLoopAction::Stop
+                }
+                Err(_error) => {
+                    tracing::warn!(%game_id, %participant_id, "realtime presence heartbeat failed");
+                    close_socket(socket, close_code::ERROR, "presence heartbeat failed").await;
+                    RealtimeLoopAction::Stop
+                }
+            }
         }
         Some(Err(error)) => {
             tracing::warn!(
@@ -420,6 +665,7 @@ async fn synchronize_connection(
     session: AuthenticatedSession,
     game_id: Uuid,
     position: &mut RealtimePosition,
+    protocol: RealtimeProtocol,
 ) -> bool {
     match revalidate_socket_session(state, session, game_id).await {
         Ok(true) => {}
@@ -440,6 +686,7 @@ async fn synchronize_connection(
         game_id,
         position,
         false,
+        protocol,
     )
     .await
     {
@@ -493,6 +740,98 @@ async fn close_socket(socket: &mut WebSocket, code: u16, reason: &'static str) {
     }
 }
 
+async fn disconnect_presence(
+    state: &AppState,
+    connection_id: Uuid,
+    game_id: Uuid,
+    participant_id: Uuid,
+) {
+    if let Err(_error) =
+        postgres::disconnect_realtime_connection(&state.database, connection_id).await
+    {
+        tracing::warn!(%game_id, %participant_id, "realtime presence disconnect failed");
+    }
+    state.signal_game_presence(game_id);
+}
+
+async fn send_realtime_presence(
+    socket: &mut WebSocket,
+    state: &AppState,
+    game_id: Uuid,
+    last_presence: &mut Option<RealtimePresenceMessage>,
+    force: bool,
+    protocol: RealtimeProtocol,
+) -> Result<(), RealtimeFailure> {
+    let presence = realtime_presence(&state.database, game_id, protocol).await?;
+    if !force && last_presence.as_ref() == Some(&presence) {
+        return Ok(());
+    }
+    send_realtime_message(socket, &presence).await?;
+    *last_presence = Some(presence);
+    Ok(())
+}
+
+async fn realtime_presence(
+    database: &sqlx::PgPool,
+    game_id: Uuid,
+    protocol: RealtimeProtocol,
+) -> Result<RealtimePresenceMessage, RealtimeFailure> {
+    let (snapshot_json, stored_participants) = postgres::game_presence(
+        database,
+        game_id,
+        REALTIME_ONLINE_WINDOW_SECONDS,
+        REALTIME_RECONNECTING_WINDOW_SECONDS,
+    )
+    .await
+    .map_err(|_| RealtimeFailure::Database("load game presence"))?
+    .ok_or(RealtimeFailure::InvalidData("game presence is unavailable"))?;
+    let persisted = decode_persisted_snapshot(&snapshot_json)
+        .map_err(|_| RealtimeFailure::InvalidData("decode presence decision state"))?;
+    let domain_state = command_domain_state(&persisted)
+        .map_err(|_| RealtimeFailure::InvalidData("restore presence decision state"))?;
+    let required_participant_position =
+        game_domain::required_participant_for_decision(&domain_state).map(i16::from);
+    let participants = stored_participants
+        .into_iter()
+        .map(|(position, status)| {
+            let status = match status.as_str() {
+                "online" => "online",
+                "reconnecting" => "reconnecting",
+                "offline" => "offline",
+                _ => {
+                    return Err(RealtimeFailure::InvalidData(
+                        "presence status is not supported",
+                    ));
+                }
+            };
+            Ok(RealtimeParticipantPresence { position, status })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if required_participant_position.is_some_and(|required| {
+        !participants
+            .iter()
+            .any(|participant| participant.position == required)
+    }) {
+        return Err(RealtimeFailure::InvalidData(
+            "required participant is absent from presence",
+        ));
+    }
+    let blocked = required_participant_position.is_some_and(|required| {
+        participants
+            .iter()
+            .any(|participant| participant.position == required && participant.status != "online")
+    });
+
+    Ok(RealtimePresenceMessage {
+        protocol_version: protocol.version(),
+        message_type: "presence",
+        game_id: game_id.to_string(),
+        participants,
+        required_participant_position,
+        blocked,
+    })
+}
+
 async fn synchronize_socket(
     socket: &mut WebSocket,
     state: &AppState,
@@ -500,6 +839,7 @@ async fn synchronize_socket(
     game_id: Uuid,
     position: &mut RealtimePosition,
     force_snapshot: bool,
+    protocol: RealtimeProtocol,
 ) -> Result<(), RealtimeFailure> {
     let observed = load_realtime_position(&state.database, participant_id, game_id).await?;
     if !force_snapshot
@@ -508,7 +848,7 @@ async fn synchronize_socket(
         && position.digest == observed.digest
     {
         if !position.synchronized {
-            send_realtime_synchronized(socket, &observed).await?;
+            send_realtime_synchronized(socket, &observed, protocol).await?;
             position.synchronized = true;
         }
         return Ok(());
@@ -545,6 +885,7 @@ async fn synchronize_socket(
             current_cursor,
             current_snapshot_version,
             position,
+            protocol,
         )
         .await?;
         return Ok(());
@@ -581,13 +922,14 @@ async fn synchronize_socket(
             current_cursor,
             current_snapshot_version,
             position,
+            protocol,
         )
         .await?;
         return Ok(());
     }
 
     let message = RealtimeEventBatchMessage {
-        protocol_version: REALTIME_PROTOCOL_VERSION,
+        protocol_version: protocol.version(),
         message_type: "events",
         from_cursor,
         cursor: current_cursor,
@@ -655,6 +997,7 @@ async fn load_realtime_position(
 async fn send_realtime_synchronized(
     socket: &mut WebSocket,
     observed: &RealtimePosition,
+    protocol: RealtimeProtocol,
 ) -> Result<(), RealtimeFailure> {
     let (Some(cursor), Some(snapshot_version), Some(digest)) = (
         observed.cursor,
@@ -668,7 +1011,7 @@ async fn send_realtime_synchronized(
     send_realtime_message(
         socket,
         &RealtimeSynchronizedMessage {
-            protocol_version: REALTIME_PROTOCOL_VERSION,
+            protocol_version: protocol.version(),
             message_type: "synchronized",
             cursor,
             snapshot_version,
@@ -684,10 +1027,11 @@ async fn send_realtime_snapshot(
     cursor: i64,
     snapshot_version: u16,
     position: &mut RealtimePosition,
+    protocol: RealtimeProtocol,
 ) -> Result<(), RealtimeFailure> {
     let digest = projection.snapshot.digest.clone();
     let message = RealtimeSnapshotMessage {
-        protocol_version: REALTIME_PROTOCOL_VERSION,
+        protocol_version: protocol.version(),
         message_type: "snapshot",
         cursor,
         projection,

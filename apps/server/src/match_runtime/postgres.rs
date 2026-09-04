@@ -692,3 +692,190 @@ pub(super) async fn game_participants(
     .await
     .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
+
+pub(super) async fn register_realtime_connection(
+    database: &PgPool,
+    connection_id: Uuid,
+    game_id: Uuid,
+    participant_id: Uuid,
+    guest_session_id: Uuid,
+) -> Result<bool, ApiError> {
+    let registered = sqlx::query_scalar::<_, Uuid>(
+        r"
+        INSERT INTO game_realtime_connections (
+            id,
+            game_id,
+            participant_id,
+            guest_session_id
+        )
+        SELECT $1, games.id, participants.id, guest_sessions.id
+        FROM games
+        JOIN participants
+          ON participants.room_id = games.room_id
+         AND participants.id = $3
+        JOIN device_sessions
+          ON device_sessions.participant_id = participants.id
+         AND device_sessions.guest_session_id = $4
+         AND device_sessions.status = 'active'
+        JOIN guest_sessions
+          ON guest_sessions.id = device_sessions.guest_session_id
+         AND guest_sessions.expires_at > clock_timestamp()
+        WHERE games.id = $2
+        RETURNING id
+        ",
+    )
+    .bind(connection_id)
+    .bind(game_id)
+    .bind(participant_id)
+    .bind(guest_session_id)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("register realtime presence", error))?
+    .is_some();
+
+    if registered {
+        sqlx::query(
+            r"
+            DELETE FROM game_realtime_connections
+            WHERE game_id = $1
+              AND last_heartbeat_at < clock_timestamp() - INTERVAL '1 day'
+            ",
+        )
+        .bind(game_id)
+        .execute(database)
+        .await
+        .map_err(|error| ApiError::internal_with("prune realtime presence", error))?;
+    }
+
+    Ok(registered)
+}
+
+pub(super) async fn touch_realtime_connection(
+    database: &PgPool,
+    connection_id: Uuid,
+    participant_id: Uuid,
+    guest_session_id: Uuid,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r"
+        UPDATE game_realtime_connections AS connections
+        SET last_heartbeat_at = clock_timestamp()
+        FROM device_sessions, guest_sessions
+        WHERE connections.id = $1
+          AND connections.participant_id = $2
+          AND connections.guest_session_id = $3
+          AND connections.disconnected_at IS NULL
+          AND device_sessions.participant_id = connections.participant_id
+          AND device_sessions.guest_session_id = connections.guest_session_id
+          AND device_sessions.status = 'active'
+          AND guest_sessions.id = device_sessions.guest_session_id
+          AND guest_sessions.expires_at > clock_timestamp()
+        RETURNING connections.id
+        ",
+    )
+    .bind(connection_id)
+    .bind(participant_id)
+    .bind(guest_session_id)
+    .fetch_optional(database)
+    .await
+    .map(|connection| connection.is_some())
+    .map_err(|error| ApiError::internal_with("refresh realtime presence", error))
+}
+
+pub(super) async fn disconnect_realtime_connection(
+    database: &PgPool,
+    connection_id: Uuid,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r"
+        UPDATE game_realtime_connections
+        SET disconnected_at = clock_timestamp()
+        WHERE id = $1
+          AND disconnected_at IS NULL
+        ",
+    )
+    .bind(connection_id)
+    .execute(database)
+    .await
+    .map(|_| ())
+    .map_err(|error| ApiError::internal_with("disconnect realtime presence", error))
+}
+
+pub(super) async fn game_presence(
+    database: &PgPool,
+    game_id: Uuid,
+    online_window_seconds: i64,
+    reconnecting_window_seconds: i64,
+) -> Result<Option<(String, Vec<(i16, String)>)>, ApiError> {
+    let snapshot_json = sqlx::query_scalar::<_, String>(
+        r"
+        SELECT snapshot::text
+        FROM games
+        WHERE id = $1
+        ",
+    )
+    .bind(game_id)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("load realtime presence game", error))?;
+    let Some(snapshot_json) = snapshot_json else {
+        return Ok(None);
+    };
+
+    let participants = sqlx::query_as::<_, (i16, String)>(
+        r"
+        WITH observed AS (
+            SELECT clock_timestamp() AS now
+        )
+        SELECT
+            participants.position,
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM game_realtime_connections AS connections
+                    JOIN device_sessions
+                      ON device_sessions.participant_id = connections.participant_id
+                     AND device_sessions.guest_session_id = connections.guest_session_id
+                     AND device_sessions.status = 'active'
+                    JOIN guest_sessions
+                      ON guest_sessions.id = device_sessions.guest_session_id
+                    WHERE connections.game_id = games.id
+                      AND connections.participant_id = participants.id
+                      AND connections.disconnected_at IS NULL
+                      AND connections.last_heartbeat_at >= observed.now -
+                          make_interval(secs => $2::double precision)
+                      AND guest_sessions.expires_at > observed.now
+                ) THEN 'online'
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM game_realtime_connections AS connections
+                    JOIN device_sessions
+                      ON device_sessions.participant_id = connections.participant_id
+                     AND device_sessions.guest_session_id = connections.guest_session_id
+                     AND device_sessions.status = 'active'
+                    JOIN guest_sessions
+                      ON guest_sessions.id = device_sessions.guest_session_id
+                    WHERE connections.game_id = games.id
+                      AND connections.participant_id = participants.id
+                      AND connections.last_heartbeat_at >= observed.now -
+                          make_interval(secs => $3::double precision)
+                      AND guest_sessions.expires_at > observed.now
+                ) THEN 'reconnecting'
+                ELSE 'offline'
+            END AS status
+        FROM games
+        JOIN participants ON participants.room_id = games.room_id
+        CROSS JOIN observed
+        WHERE games.id = $1
+        ORDER BY participants.position
+        ",
+    )
+    .bind(game_id)
+    .bind(online_window_seconds)
+    .bind(reconnecting_window_seconds)
+    .fetch_all(database)
+    .await
+    .map_err(|error| ApiError::internal_with("load realtime presence", error))?;
+
+    Ok(Some((snapshot_json, participants)))
+}

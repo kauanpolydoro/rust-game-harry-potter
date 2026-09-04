@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isErrorResponse,
   isGameProjectionResponse,
+  isRealtimePresenceMessage,
 } from './identity-access.generated'
 
 function projection() {
@@ -80,6 +81,29 @@ describe('generated identity contract guards', () => {
       isGameProjectionResponse({
         ...projection(),
         game: { ...projection().game, expires_at: 'September someday' },
+      }),
+    ).toBe(false)
+  })
+
+  it('validates ephemeral presence without accepting official state fields', () => {
+    const presence = {
+      blocked: true,
+      game_id: 'dc8213d3-2941-4ef0-9ce8-b97cc6623410',
+      participants: [
+        { position: 1, status: 'reconnecting' },
+        { position: 2, status: 'online' },
+      ],
+      protocol_version: 2,
+      required_participant_position: 1,
+      type: 'presence',
+    }
+
+    expect(isRealtimePresenceMessage(presence)).toBe(true)
+    expect(isRealtimePresenceMessage({ ...presence, state_version: 1 })).toBe(false)
+    expect(
+      isRealtimePresenceMessage({
+        ...presence,
+        participants: [{ position: 1, status: 'unknown' }],
       }),
     ).toBe(false)
   })

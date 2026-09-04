@@ -116,7 +116,7 @@ function eventBatch(fromCursor: number, cursor: number) {
     })),
     from_cursor: fromCursor,
     projection: projection(cursor),
-    protocol_version: 1,
+    protocol_version: 2,
     type: 'events',
   }
 }
@@ -125,9 +125,27 @@ function synchronizedMessage(game: GameProjectionResponse) {
   return {
     cursor: game.snapshot.cursor,
     digest: game.snapshot.digest,
-    protocol_version: 1,
+    protocol_version: 2,
     snapshot_version: game.snapshot.snapshot_version,
     type: 'synchronized',
+  }
+}
+
+function presenceMessage(
+  statuses: Array<'online' | 'reconnecting' | 'offline'>,
+  requiredParticipantPosition?: number,
+) {
+  return {
+    blocked:
+      requiredParticipantPosition !== undefined &&
+      statuses[requiredParticipantPosition - 1] !== 'online',
+    game_id: projection().game.id,
+    participants: statuses.map((status, index) => ({ position: index + 1, status })),
+    protocol_version: 2,
+    ...(requiredParticipantPosition === undefined
+      ? {}
+      : { required_participant_position: requiredParticipantPosition }),
+    type: 'presence',
   }
 }
 
@@ -155,7 +173,7 @@ describe('official game synchronization', () => {
     sync.connect(roomAccess.game)
 
     const socket = FakeWebSocket.instances[0]
-    expect(socket?.requestedProtocol).toBe('hogwarts.realtime.v1')
+    expect(socket?.requestedProtocol).toBe('hogwarts.realtime.v2')
     expect(socket?.url).toContain('/api/games/current/events?cursor=0&snapshot_version=1')
     expect(socket?.url).toContain(encodeURIComponent(projection().snapshot.digest))
     socket?.open()
@@ -169,12 +187,61 @@ describe('official game synchronization', () => {
     socket?.receive({
       cursor: 1,
       projection: replacement,
-      protocol_version: 1,
+      protocol_version: 2,
       type: 'snapshot',
     })
 
     expect(roomAccess.game).toEqual(replacement)
     expect(sync.cursor).toBe(1)
+  })
+
+  it('derives the coordination block only from the required participant presence', () => {
+    const roomAccess = useRoomAccessStore()
+    const officialProjection = projection()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    socket?.receive(synchronizedMessage(roomAccess.game))
+
+    socket?.receive(presenceMessage(['offline', 'online'], 1))
+
+    expect(sync.participantPresence).toEqual({ 1: 'offline', 2: 'online' })
+    expect(sync.requiredParticipantPosition).toBe(1)
+    expect(sync.gameBlocked).toBe(true)
+    expect(roomAccess.game).toEqual(officialProjection)
+    expect(sync.cursor).toBe(0)
+    expect(sync.commandsFrozen).toBe(false)
+
+    socket?.receive(presenceMessage(['online', 'offline'], 1))
+    expect(sync.gameBlocked).toBe(false)
+
+    socket?.receive(presenceMessage(['offline', 'offline']))
+    expect(sync.gameBlocked).toBe(false)
+    expect(sync.requiredParticipantPosition).toBeNull()
+  })
+
+  it('does not let malformed presence alter official synchronization', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+
+    socket?.receive({
+      ...presenceMessage(['online', 'offline'], 1),
+      blocked: true,
+    })
+
+    expect(sync.participantPresence).toEqual({})
+    expect(sync.commandsFrozen).toBe(true)
+    vi.advanceTimersByTime(250)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    socket?.receive(synchronizedMessage(roomAccess.game))
+    expect(sync.commandsFrozen).toBe(false)
   })
 
   it('applies a contiguous event batch once and ignores its redelivery', () => {
@@ -247,7 +314,7 @@ describe('official game synchronization', () => {
     socket?.receive({
       cursor: 0,
       projection: projection(0),
-      protocol_version: 1,
+      protocol_version: 2,
       type: 'snapshot',
     })
 
@@ -381,7 +448,7 @@ describe('official game synchronization', () => {
     manualSocket?.receive({
       cursor: 0,
       projection: projection(),
-      protocol_version: 1,
+      protocol_version: 2,
       type: 'snapshot',
     })
     vi.advanceTimersByTime(500)

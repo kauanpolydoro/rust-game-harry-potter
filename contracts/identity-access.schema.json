@@ -345,7 +345,7 @@
       "additionalProperties": false,
       "required": ["protocol_version", "type", "cursor", "projection"],
       "properties": {
-        "protocol_version": { "type": "integer", "enum": [1] },
+        "protocol_version": { "type": "integer", "enum": [2] },
         "type": { "type": "string", "enum": ["snapshot"] },
         "cursor": { "type": "integer", "minimum": 0 },
         "projection": { "$ref": "#/$defs/GameProjectionResponse" }
@@ -362,11 +362,45 @@
         "digest"
       ],
       "properties": {
-        "protocol_version": { "type": "integer", "enum": [1] },
+        "protocol_version": { "type": "integer", "enum": [2] },
         "type": { "type": "string", "enum": ["synchronized"] },
         "cursor": { "type": "integer", "minimum": 0 },
         "snapshot_version": { "type": "integer", "minimum": 1 },
         "digest": { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" }
+      }
+    },
+    "ParticipantPresence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position", "status"],
+      "properties": {
+        "position": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "status": {
+          "type": "string",
+          "enum": ["online", "reconnecting", "offline"]
+        }
+      }
+    },
+    "RealtimePresenceMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "game_id", "participants", "blocked"],
+      "properties": {
+        "protocol_version": { "type": "integer", "enum": [2] },
+        "type": { "type": "string", "enum": ["presence"] },
+        "game_id": { "type": "string", "format": "uuid" },
+        "participants": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/ParticipantPresence" }
+        },
+        "required_participant_position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "blocked": { "type": "boolean" }
       }
     },
     "RealtimeEventBatchMessage": {
@@ -381,7 +415,7 @@
         "projection"
       ],
       "properties": {
-        "protocol_version": { "type": "integer", "enum": [1] },
+        "protocol_version": { "type": "integer", "enum": [2] },
         "type": { "type": "string", "enum": ["events"] },
         "from_cursor": { "type": "integer", "minimum": 0 },
         "cursor": { "type": "integer", "minimum": 1 },

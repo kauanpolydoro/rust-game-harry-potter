@@ -167,22 +167,36 @@ export interface RealtimeGameEvent {
 }
 
 export interface RealtimeSnapshotMessage {
-  protocol_version: 1
+  protocol_version: 2
   type: "snapshot"
   cursor: number
   projection: GameProjectionResponse
 }
 
 export interface RealtimeSynchronizedMessage {
-  protocol_version: 1
+  protocol_version: 2
   type: "synchronized"
   cursor: number
   snapshot_version: number
   digest: string
 }
 
+export interface ParticipantPresence {
+  position: number
+  status: "online" | "reconnecting" | "offline"
+}
+
+export interface RealtimePresenceMessage {
+  protocol_version: 2
+  type: "presence"
+  game_id: string
+  participants: Array<ParticipantPresence>
+  required_participant_position?: number
+  blocked: boolean
+}
+
 export interface RealtimeEventBatchMessage {
-  protocol_version: 1
+  protocol_version: 2
   type: "events"
   from_cursor: number
   cursor: number
@@ -336,15 +350,23 @@ export function isRealtimeGameEvent(value: unknown): value is RealtimeGameEvent 
 }
 
 export function isRealtimeSnapshotMessage(value: unknown): value is RealtimeSnapshotMessage {
-  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","projection"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "snapshot") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && isGameProjectionResponse(value["projection"])
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","projection"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 2) && typeof value["type"] === 'string' && (value["type"] === "snapshot") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && isGameProjectionResponse(value["projection"])
 }
 
 export function isRealtimeSynchronizedMessage(value: unknown): value is RealtimeSynchronizedMessage {
-  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","snapshot_version","digest"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "synchronized") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && typeof value["snapshot_version"] === 'number' && Number.isInteger(value["snapshot_version"]) && value["snapshot_version"] >= 1 && typeof value["digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["digest"])
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","cursor","snapshot_version","digest"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 2) && typeof value["type"] === 'string' && (value["type"] === "synchronized") && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 0 && typeof value["snapshot_version"] === 'number' && Number.isInteger(value["snapshot_version"]) && value["snapshot_version"] >= 1 && typeof value["digest"] === 'string' && new RegExp("^blake3:[0-9a-f]{64}$").test(value["digest"])
+}
+
+export function isParticipantPresence(value: unknown): value is ParticipantPresence {
+  return isRecord(value) && Object.keys(value).every((key) => ["position","status"].includes(key)) && typeof value["position"] === 'number' && Number.isInteger(value["position"]) && value["position"] >= 1 && value["position"] <= 4 && typeof value["status"] === 'string' && (value["status"] === "online" || value["status"] === "reconnecting" || value["status"] === "offline")
+}
+
+export function isRealtimePresenceMessage(value: unknown): value is RealtimePresenceMessage {
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","game_id","participants","required_participant_position","blocked"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 2) && typeof value["type"] === 'string' && (value["type"] === "presence") && typeof value["game_id"] === 'string' && isUuid(value["game_id"]) && Array.isArray(value["participants"]) && value["participants"].every((entry) => isParticipantPresence(entry)) && value["participants"].length >= 2 && value["participants"].length <= 4 && (!Object.hasOwn(value, "required_participant_position") || (typeof value["required_participant_position"] === 'number' && Number.isInteger(value["required_participant_position"]) && value["required_participant_position"] >= 1 && value["required_participant_position"] <= 4)) && typeof value["blocked"] === 'boolean'
 }
 
 export function isRealtimeEventBatchMessage(value: unknown): value is RealtimeEventBatchMessage {
-  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","from_cursor","cursor","events","projection"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 1) && typeof value["type"] === 'string' && (value["type"] === "events") && typeof value["from_cursor"] === 'number' && Number.isInteger(value["from_cursor"]) && value["from_cursor"] >= 0 && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 1 && Array.isArray(value["events"]) && value["events"].every((entry) => isRealtimeGameEvent(entry)) && value["events"].length >= 1 && isGameProjectionResponse(value["projection"])
+  return isRecord(value) && Object.keys(value).every((key) => ["protocol_version","type","from_cursor","cursor","events","projection"].includes(key)) && typeof value["protocol_version"] === 'number' && Number.isInteger(value["protocol_version"]) && (value["protocol_version"] === 2) && typeof value["type"] === 'string' && (value["type"] === "events") && typeof value["from_cursor"] === 'number' && Number.isInteger(value["from_cursor"]) && value["from_cursor"] >= 0 && typeof value["cursor"] === 'number' && Number.isInteger(value["cursor"]) && value["cursor"] >= 1 && Array.isArray(value["events"]) && value["events"].every((entry) => isRealtimeGameEvent(entry)) && value["events"].length >= 1 && isGameProjectionResponse(value["projection"])
 }
 
 export function isGameCommandReceipt(value: unknown): value is GameCommandReceipt {

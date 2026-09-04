@@ -256,6 +256,29 @@ input {
   min-height: 2.75rem;
 }
 
+.presence-block {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  padding: 0.85rem;
+  border-left: 2px solid var(--warning);
+  background: rgb(226 171 85 / 8%);
+}
+
+.presence-block strong {
+  color: var(--warning);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.presence-block p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--chalk-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .room-form {
   display: grid;
   gap: 1.1rem;
@@ -543,6 +566,15 @@ input {
 
 .participant-lineup li span:nth-child(even) {
   text-align: right;
+}
+
+.presence-label--online {
+  color: var(--ready);
+}
+
+.presence-label--reconnecting,
+.presence-label--offline {
+  color: var(--warning);
 }
 
 .ready-label {

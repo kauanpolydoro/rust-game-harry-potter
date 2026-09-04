@@ -601,6 +601,20 @@ pub fn legal_game_commands(state: &InitialGameState, actor_position: u8) -> Vec<
     }
 }
 
+/// Returns the participant who must make the current human decision.
+///
+/// Automatic resolution points expose no legal command and therefore do not
+/// require a connected participant. Availability remains an application-layer
+/// concern and must never change the rule decision itself.
+#[must_use]
+pub fn required_participant_for_decision(state: &InitialGameState) -> Option<u8> {
+    state
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .find(|position| !legal_game_commands(state, *position).is_empty())
+}
+
 /// Applies one official event to a game state using the same transition as a
 /// live command decision.
 ///
@@ -857,6 +871,8 @@ mod tests {
             decision.state
         );
         assert!(legal_game_commands(&decision.state, 1).is_empty());
+        assert_eq!(required_participant_for_decision(&initial), Some(1));
+        assert_eq!(required_participant_for_decision(&decision.state), None);
     }
 
     #[test]

@@ -9,6 +9,7 @@ class SynchronizedWebSocket {
   static readonly CONNECTING = 0
   static readonly OPEN = 1
   static readonly CLOSED = 3
+  static instances: SynchronizedWebSocket[] = []
 
   readonly url: string
   readonly requestedProtocol: string
@@ -22,6 +23,7 @@ class SynchronizedWebSocket {
   constructor(url: string | URL, protocol: string | string[]) {
     this.url = String(url)
     this.requestedProtocol = Array.isArray(protocol) ? (protocol[0] ?? '') : protocol
+    SynchronizedWebSocket.instances.push(this)
     queueMicrotask(() => {
       this.readyState = SynchronizedWebSocket.OPEN
       this.protocol = this.requestedProtocol
@@ -31,12 +33,16 @@ class SynchronizedWebSocket {
         data: JSON.stringify({
           cursor: Number(request.searchParams.get('cursor')),
           digest: request.searchParams.get('digest'),
-          protocol_version: 1,
+          protocol_version: 2,
           snapshot_version: Number(request.searchParams.get('snapshot_version')),
           type: 'synchronized',
         }),
       })
     })
+  }
+
+  receive(message: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(message) })
   }
 
   close(): void {
@@ -241,6 +247,7 @@ function guestLobbyResponse() {
 
 describe('application shell', () => {
   beforeEach(() => {
+    SynchronizedWebSocket.instances = []
     vi.stubGlobal('WebSocket', SynchronizedWebSocket)
   })
 
@@ -952,6 +959,66 @@ describe('application shell', () => {
     )
   })
 
+  it('shows ephemeral availability and waits only for the required offline participant', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'ready' }), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(gameProjectionResponse()), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 200,
+          }),
+        ),
+    )
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    expect(
+      await screen.findByRole('button', { name: 'Concluir Artes das Trevas' }),
+    ).toBeEnabled()
+    const socket = SynchronizedWebSocket.instances[0]
+    socket?.receive({
+      blocked: true,
+      game_id: gameProjectionResponse().game.id,
+      participants: [
+        { position: 1, status: 'offline' },
+        { position: 2, status: 'online' },
+      ],
+      protocol_version: 2,
+      required_participant_position: 1,
+      type: 'presence',
+    })
+
+    expect(await screen.findByText('Aguardando Minerva')).toBeVisible()
+    expect(screen.getByText(/Não há bot, timeout ou pulo automático/)).toBeVisible()
+    expect(screen.getByText('Offline · Você')).toBeVisible()
+    expect(screen.getByText('Online')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Concluir Artes das Trevas' })).toBeEnabled()
+
+    socket?.receive({
+      blocked: false,
+      game_id: gameProjectionResponse().game.id,
+      participants: [
+        { position: 1, status: 'online' },
+        { position: 2, status: 'offline' },
+      ],
+      protocol_version: 2,
+      required_participant_position: 1,
+      type: 'presence',
+    })
+    await waitFor(() => expect(screen.queryByText('Aguardando Minerva')).not.toBeInTheDocument())
+    expect(screen.getByText('Online · Você')).toBeVisible()
+    expect(screen.getByText('Offline')).toBeVisible()
+  })
+
   it('confirms readiness and moves focus to the newly available primary action', async () => {
     localStorage.setItem('hogwarts.session.expected', 'true')
     const request = vi
@@ -1176,7 +1243,7 @@ describe('application shell', () => {
     ControlledWebSocket.instance?.receive({
       cursor: 0,
       digest: game.snapshot.digest,
-      protocol_version: 1,
+      protocol_version: 2,
       snapshot_version: 1,
       type: 'synchronized',
     })
@@ -1201,7 +1268,7 @@ describe('application shell', () => {
       ],
       from_cursor: 1,
       projection: gapProjection,
-      protocol_version: 1,
+      protocol_version: 2,
       type: 'events',
     })
 

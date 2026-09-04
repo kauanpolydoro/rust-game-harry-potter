@@ -44,6 +44,7 @@ pub struct AppState {
     content: content_catalog::ContentCatalog,
     application_origin: Arc<str>,
     game_event_fanout: GameEventFanout,
+    game_presence_fanout: GameEventFanout,
     session_token_key: Arc<[u8; 32]>,
     shutdown: watch::Sender<bool>,
 }
@@ -122,6 +123,7 @@ impl AppState {
             content: content_catalog::ContentCatalog::new(manifests),
             application_origin: Arc::from(DEFAULT_APPLICATION_ORIGIN),
             game_event_fanout: GameEventFanout::default(),
+            game_presence_fanout: GameEventFanout::default(),
             session_token_key: Arc::new(session_token_key),
             shutdown,
         }
@@ -173,6 +175,18 @@ impl AppState {
 
     fn prune_game_event_channel(&self, game_id: Uuid) {
         self.game_event_fanout.prune(game_id);
+    }
+
+    fn subscribe_to_game_presence(&self, game_id: Uuid) -> broadcast::Receiver<()> {
+        self.game_presence_fanout.subscribe(game_id)
+    }
+
+    fn signal_game_presence(&self, game_id: Uuid) {
+        self.game_presence_fanout.signal(game_id);
+    }
+
+    fn prune_game_presence_channel(&self, game_id: Uuid) {
+        self.game_presence_fanout.prune(game_id);
     }
 
     fn idempotent_session_token(

@@ -16,6 +16,11 @@ const activeParticipant = computed(() =>
   ),
 )
 const currentParticipantPosition = computed(() => game.value?.participant.position)
+const requiredParticipant = computed(() =>
+  game.value?.participants.find(
+    (participant) => participant.position === gameSync.requiredParticipantPosition,
+  ),
+)
 const commandIsBusy = computed(() =>
   ['submitting', 'recovering', 'resyncing'].includes(gameCommand.status),
 )
@@ -74,6 +79,19 @@ function formatExpiration(value: string): string {
     timeStyle: 'short',
   }).format(expiration)
 }
+
+function presenceLabel(position: number): string {
+  switch (gameSync.presenceFor(position)) {
+    case 'online':
+      return 'Online'
+    case 'reconnecting':
+      return 'Reconectando'
+    case 'offline':
+      return 'Offline'
+    default:
+      return 'Confirmando presença'
+  }
+}
 </script>
 
 <template>
@@ -116,6 +134,19 @@ function formatExpiration(value: string): string {
         >
           Reconectar atualizações
         </button>
+      </div>
+
+      <div
+        v-if="gameSync.gameBlocked && requiredParticipant"
+        class="presence-block"
+        role="status"
+        aria-live="polite"
+      >
+        <strong>Aguardando {{ requiredParticipant.display_name }}</strong>
+        <p>
+          Esta decisão continua exclusivamente com esse participante. Não há bot, timeout ou pulo
+          automático.
+        </p>
       </div>
 
       <div
@@ -217,7 +248,13 @@ function formatExpiration(value: string): string {
             <span>Posição {{ participant.position }}</span>
             <strong>{{ participant.display_name }}</strong>
             <span>{{ participant.hero.name }}</span>
-            <span v-if="participant.position === currentParticipantPosition">Você</span>
+            <span
+              class="presence-label"
+              :class="`presence-label--${gameSync.presenceFor(participant.position) ?? 'unknown'}`"
+            >
+              {{ presenceLabel(participant.position) }}
+              <template v-if="participant.position === currentParticipantPosition"> · Você</template>
+            </span>
           </li>
         </ol>
       </div>

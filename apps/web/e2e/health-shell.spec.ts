@@ -230,6 +230,8 @@ test('a player replays a missed event and falls back to Snapshot within recovery
 
     await expect(hostPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
     await expect(guestPage.getByText('Atualizações em tempo real conectadas.')).toBeVisible()
+    await expect(hostPage.locator('.presence-label--online')).toHaveCount(2)
+    await expect(guestPage.locator('.presence-label--online')).toHaveCount(2)
 
     await guestContext.setOffline(true)
     await guestPage.evaluate(() => {
@@ -243,6 +245,8 @@ test('a player replays a missed event and falls back to Snapshot within recovery
     await expect(guestPage.locator('.realtime-status')).toContainText(
       /Reconectando|interrompidas/,
     )
+    await expect(hostPage.locator('.presence-label--reconnecting')).toContainText('Reconectando')
+    await expect(hostPage.locator('.presence-block')).toHaveCount(0)
     await hostPage.getByRole('button', { name: 'Concluir Artes das Trevas' }).click()
     await guestContext.setOffline(false)
 
@@ -338,7 +342,7 @@ test('a stale command resynchronizes before the player can decide again', async 
             data: JSON.stringify({
               cursor: Number(request.searchParams.get('cursor')),
               digest: request.searchParams.get('digest'),
-              protocol_version: 1,
+              protocol_version: 2,
               snapshot_version: Number(request.searchParams.get('snapshot_version')),
               type: 'synchronized',
             }),
