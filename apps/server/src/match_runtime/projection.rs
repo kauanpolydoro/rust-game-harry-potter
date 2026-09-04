@@ -39,7 +39,7 @@ pub(super) struct SnapshotSummary {
     state_version: i64,
     sequence: i64,
     pub(super) cursor: i64,
-    digest: String,
+    pub(super) digest: String,
     versions: GameVersions,
 }
 

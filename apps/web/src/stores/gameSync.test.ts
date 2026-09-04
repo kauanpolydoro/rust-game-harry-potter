@@ -121,6 +121,16 @@ function eventBatch(fromCursor: number, cursor: number) {
   }
 }
 
+function synchronizedMessage(game: GameProjectionResponse) {
+  return {
+    cursor: game.snapshot.cursor,
+    digest: game.snapshot.digest,
+    protocol_version: 1,
+    snapshot_version: game.snapshot.snapshot_version,
+    type: 'synchronized',
+  }
+}
+
 describe('official game synchronization', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -147,8 +157,13 @@ describe('official game synchronization', () => {
     const socket = FakeWebSocket.instances[0]
     expect(socket?.requestedProtocol).toBe('hogwarts.realtime.v1')
     expect(socket?.url).toContain('/api/games/current/events?cursor=0&snapshot_version=1')
+    expect(socket?.url).toContain(encodeURIComponent(projection().snapshot.digest))
     socket?.open()
+    expect(sync.status).toBe('connecting')
+    expect(sync.commandsFrozen).toBe(true)
+    socket?.receive(synchronizedMessage(projection()))
     expect(sync.status).toBe('connected')
+    expect(sync.commandsFrozen).toBe(false)
 
     const replacement = projection(1)
     socket?.receive({
@@ -198,6 +213,7 @@ describe('official game synchronization', () => {
     expect(FakeWebSocket.instances).toHaveLength(2)
     expect(FakeWebSocket.instances[1]?.url).toContain('snapshot_version=0')
     expect(roomAccess.game?.snapshot.cursor).toBe(0)
+    expect(sync.commandsFrozen).toBe(true)
   })
 
   it('rejects event payload fields outside the public allowlist without a tight loop', () => {
@@ -218,10 +234,12 @@ describe('official game synchronization', () => {
     expect(roomAccess.game?.snapshot.cursor).toBe(0)
   })
 
-  it('rejects a regressive snapshot without replacing newer confirmed state', () => {
+  it('replaces a newer local cache from a full authoritative snapshot and cancels animations', () => {
     const roomAccess = useRoomAccessStore()
     roomAccess.game = projection(1)
     const sync = useGameSyncStore()
+    const cancelAnimation = vi.fn()
+    sync.registerAnimationCancellation(cancelAnimation)
     sync.connect(roomAccess.game)
     const socket = FakeWebSocket.instances[0]
     socket?.open()
@@ -233,9 +251,48 @@ describe('official game synchronization', () => {
       type: 'snapshot',
     })
 
-    expect(roomAccess.game?.snapshot.cursor).toBe(1)
-    expect(sync.cursor).toBe(1)
+    expect(roomAccess.game?.snapshot.cursor).toBe(0)
+    expect(sync.cursor).toBe(0)
+    expect(cancelAnimation).toHaveBeenCalledOnce()
+    expect(sync.status).toBe('connected')
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('falls back to a full snapshot when a synchronization acknowledgement has another digest', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    const incompatible = synchronizedMessage(roomAccess.game)
+    incompatible.digest = `blake3:${'f'.repeat(64)}`
+
+    socket?.receive(incompatible)
+
+    expect(sync.commandsFrozen).toBe(true)
+    expect(sync.status).toBe('reconnecting')
+    vi.advanceTimersByTime(250)
+    expect(FakeWebSocket.instances[1]?.url).toContain('snapshot_version=0')
+  })
+
+  it('keeps commands frozen and requests a Snapshot when synchronization times out', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    FakeWebSocket.instances[0]?.open()
+
+    vi.advanceTimersByTime(4_999)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(sync.commandsFrozen).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(sync.status).toBe('reconnecting')
+    vi.advanceTimersByTime(250)
+
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(FakeWebSocket.instances[1]?.url).toContain('snapshot_version=0')
+    expect(sync.commandsFrozen).toBe(true)
   })
 
   it('recovers instead of applying an event batch with a regressive state version', () => {
@@ -301,6 +358,7 @@ describe('official game synchronization', () => {
     vi.advanceTimersByTime(250)
     const recovered = FakeWebSocket.instances[1]
     recovered?.open()
+    recovered?.receive(synchronizedMessage(projection()))
     vi.advanceTimersByTime(5_000)
     recovered?.serverClose()
 
@@ -320,6 +378,12 @@ describe('official game synchronization', () => {
     sync.resynchronize()
     const manualSocket = FakeWebSocket.instances[1]
     manualSocket?.open()
+    manualSocket?.receive({
+      cursor: 0,
+      projection: projection(),
+      protocol_version: 1,
+      type: 'snapshot',
+    })
     vi.advanceTimersByTime(500)
 
     expect(FakeWebSocket.instances).toHaveLength(2)
@@ -375,7 +439,7 @@ describe('official game synchronization', () => {
     window.dispatchEvent(new Event('online'))
     vi.advanceTimersByTime(250)
     expect(FakeWebSocket.instances).toHaveLength(1)
-    expect(sync.status).toBe('connecting')
+    expect(sync.status).toBe('reconnecting')
   })
 
   it('keeps sockets and timers isolated between Pinia instances', () => {

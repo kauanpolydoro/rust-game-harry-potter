@@ -58,6 +58,7 @@ impl std::fmt::Display for RealtimeFailure {
 pub(super) struct RealtimeQuery {
     cursor: Option<u64>,
     snapshot_version: Option<u16>,
+    digest: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -81,6 +82,16 @@ struct RealtimeEventBatchMessage {
 }
 
 #[derive(Serialize)]
+struct RealtimeSynchronizedMessage<'a> {
+    protocol_version: u16,
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    cursor: i64,
+    snapshot_version: u16,
+    digest: &'a str,
+}
+
+#[derive(Serialize)]
 struct RealtimeGameEvent {
     event_version: i16,
     #[serde(rename = "type")]
@@ -93,10 +104,11 @@ struct RealtimeGameEvent {
     command_id: Option<String>,
 }
 
-#[derive(Clone, Copy)]
 struct RealtimePosition {
     cursor: Option<i64>,
     snapshot_version: Option<u16>,
+    digest: Option<String>,
+    synchronized: bool,
 }
 
 enum RealtimeLoopAction {
@@ -156,6 +168,8 @@ async fn serve_game_events(
     let mut position = RealtimePosition {
         cursor: query.cursor.and_then(|value| i64::try_from(value).ok()),
         snapshot_version: query.snapshot_version,
+        digest: query.digest,
+        synchronized: false,
     };
     let signal = state.subscribe_to_game_events(game_id);
     let shutdown = state.subscribe_to_shutdown();
@@ -491,7 +505,12 @@ async fn synchronize_socket(
     if !force_snapshot
         && position.cursor == observed.cursor
         && position.snapshot_version == observed.snapshot_version
+        && position.digest == observed.digest
     {
+        if !position.synchronized {
+            send_realtime_synchronized(socket, &observed).await?;
+            position.synchronized = true;
+        }
         return Ok(());
     }
 
@@ -511,13 +530,13 @@ async fn synchronize_socket(
         ));
     };
     let requested_cursor = position.cursor;
-    let replay_distance = requested_cursor
-        .and_then(|value| current_cursor.checked_sub(value))
-        .and_then(|value| u64::try_from(value).ok());
+    let anchor_matches =
+        requested_anchor_matches(&state.database, participant_id, game_id, position).await?;
     let needs_snapshot = force_snapshot
         || position.snapshot_version != Some(current_snapshot_version)
         || requested_cursor.is_none_or(|value| value > current_cursor)
-        || replay_distance.is_none_or(|distance| distance > REALTIME_REPLAY_LIMIT);
+        || replay_gap_requires_snapshot(requested_cursor, current_cursor)
+        || !anchor_matches;
 
     if needs_snapshot {
         send_realtime_snapshot(
@@ -575,10 +594,42 @@ async fn synchronize_socket(
         events,
         projection,
     };
+    let digest = message.projection.snapshot.digest.clone();
     send_realtime_message(socket, &message).await?;
     position.cursor = Some(current_cursor);
     position.snapshot_version = Some(current_snapshot_version);
+    position.digest = Some(digest);
+    position.synchronized = true;
     Ok(())
+}
+
+fn replay_gap_requires_snapshot(requested_cursor: Option<i64>, current_cursor: i64) -> bool {
+    requested_cursor
+        .and_then(|value| current_cursor.checked_sub(value))
+        .and_then(|distance| u64::try_from(distance).ok())
+        .is_none_or(|distance| distance > REALTIME_REPLAY_LIMIT)
+}
+
+async fn requested_anchor_matches(
+    database: &sqlx::PgPool,
+    participant_id: Uuid,
+    game_id: Uuid,
+    position: &RealtimePosition,
+) -> Result<bool, RealtimeFailure> {
+    let (Some(cursor), Some(snapshot_version), Some(digest)) = (
+        position.cursor,
+        position.snapshot_version,
+        position.digest.as_deref(),
+    ) else {
+        return Ok(false);
+    };
+    let stored =
+        postgres::game_state_anchor_for_participant(database, participant_id, game_id, cursor)
+            .await
+            .map_err(|_| RealtimeFailure::Database("load game state replay anchor"))?;
+    Ok(stored.is_some_and(|(stored_version, stored_digest)| {
+        i16::try_from(snapshot_version).ok() == Some(stored_version) && digest == stored_digest
+    }))
 }
 
 async fn load_realtime_position(
@@ -596,7 +647,35 @@ async fn load_realtime_position(
     Ok(RealtimePosition {
         cursor: Some(stored.0),
         snapshot_version: Some(snapshot_version),
+        digest: Some(stored.2),
+        synchronized: true,
     })
+}
+
+async fn send_realtime_synchronized(
+    socket: &mut WebSocket,
+    observed: &RealtimePosition,
+) -> Result<(), RealtimeFailure> {
+    let (Some(cursor), Some(snapshot_version), Some(digest)) = (
+        observed.cursor,
+        observed.snapshot_version,
+        observed.digest.as_deref(),
+    ) else {
+        return Err(RealtimeFailure::InvalidData(
+            "current synchronization coordinates are incomplete",
+        ));
+    };
+    send_realtime_message(
+        socket,
+        &RealtimeSynchronizedMessage {
+            protocol_version: REALTIME_PROTOCOL_VERSION,
+            message_type: "synchronized",
+            cursor,
+            snapshot_version,
+            digest,
+        },
+    )
+    .await
 }
 
 async fn send_realtime_snapshot(
@@ -606,6 +685,7 @@ async fn send_realtime_snapshot(
     snapshot_version: u16,
     position: &mut RealtimePosition,
 ) -> Result<(), RealtimeFailure> {
+    let digest = projection.snapshot.digest.clone();
     let message = RealtimeSnapshotMessage {
         protocol_version: REALTIME_PROTOCOL_VERSION,
         message_type: "snapshot",
@@ -615,6 +695,8 @@ async fn send_realtime_snapshot(
     send_realtime_message(socket, &message).await?;
     position.cursor = Some(cursor);
     position.snapshot_version = Some(snapshot_version);
+    position.digest = Some(digest);
+    position.synchronized = true;
     Ok(())
 }
 
@@ -675,4 +757,17 @@ async fn send_realtime_message(
     .await
     .map_err(|_| RealtimeFailure::WriteTimeout)?
     .map_err(|error| RealtimeFailure::Send(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replay_gap_requires_snapshot;
+
+    #[test]
+    fn replay_gap_is_bounded_to_the_incremental_recovery_window() {
+        assert!(!replay_gap_requires_snapshot(Some(0), 100));
+        assert!(replay_gap_requires_snapshot(Some(0), 101));
+        assert!(replay_gap_requires_snapshot(Some(2), 1));
+        assert!(replay_gap_requires_snapshot(None, 1));
+    }
 }

@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import {
   isRealtimeEventBatchMessage,
   isRealtimeSnapshotMessage,
+  isRealtimeSynchronizedMessage,
   type GameProjectionResponse,
   type RealtimeEventBatchMessage,
 } from '../contracts/identity-access.generated'
@@ -14,6 +15,7 @@ const baseReconnectDelayMilliseconds = 500
 const maximumReconnectDelayMilliseconds = 30_000
 const hiddenReconnectFloorMilliseconds = 15_000
 const stableConnectionMilliseconds = 5_000
+const synchronizationTimeoutMilliseconds = 5_000
 
 export type GameSyncStatus =
   | 'disconnected'
@@ -24,6 +26,7 @@ export type GameSyncStatus =
 
 interface ConnectionRequest {
   cursor: number
+  digest: string
   forceSnapshot: boolean
   gameId: string
   snapshotVersion: number
@@ -31,33 +34,46 @@ interface ConnectionRequest {
 
 interface ConnectionCallbacks {
   currentRequest: () => ConnectionRequest | null
+  discardAnimations: () => void
   receive: (serialized: unknown) => void
   updateStatus: (status: GameSyncStatus) => void
 }
 
-function realtimeUrl(cursor: number, snapshotVersion: number): string {
+function realtimeUrl(cursor: number, snapshotVersion: number, digest: string): string {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const query = new URLSearchParams({
     cursor: String(cursor),
     snapshot_version: String(snapshotVersion),
+    digest,
   })
   return `${scheme}//${window.location.host}/api/games/current/events?${query}`
 }
 
 function eventBatchContinuesFrom(message: RealtimeEventBatchMessage, cursor: number): boolean {
-  if (message.cursor <= cursor) {
-    return true
-  }
   const batchIsContiguous =
     message.events.length === message.cursor - message.from_cursor &&
     message.events.every(
-      (event, index) => event.sequence === message.from_cursor + index + 1,
+      (event, index) =>
+        event.sequence === message.from_cursor + index + 1 &&
+        event.state_version === event.sequence + 1,
     )
+  if (!batchIsContiguous) {
+    return false
+  }
+  if (message.cursor <= cursor) {
+    return true
+  }
   const unseen = message.events.filter((event) => event.sequence > cursor)
   return (
-    batchIsContiguous &&
     unseen.length === message.cursor - cursor &&
     unseen.every((event, index) => event.sequence === cursor + index + 1)
+  )
+}
+
+function projectionHasCanonicalCursor(projection: GameProjectionResponse): boolean {
+  return (
+    projection.snapshot.cursor === projection.snapshot.sequence &&
+    projection.snapshot.state_version === projection.snapshot.sequence + 1
   )
 }
 
@@ -68,6 +84,7 @@ class GameSyncConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private socket: WebSocket | null = null
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  private synchronizationTimer: ReturnType<typeof setTimeout> | null = null
   private forceSnapshotOnRetry = false
   private listeningForBrowserState = false
 
@@ -104,7 +121,7 @@ class GameSyncConnection {
     let socket: WebSocket
     try {
       socket = new WebSocket(
-        realtimeUrl(request.cursor, requestedVersion),
+        realtimeUrl(request.cursor, requestedVersion, request.digest),
         realtimeSubprotocol,
       )
     } catch {
@@ -114,7 +131,15 @@ class GameSyncConnection {
       return
     }
     this.socket = socket
-    this.callbacks.updateStatus(request.forceSnapshot ? 'reconnecting' : 'connecting')
+    this.callbacks.updateStatus(
+      request.forceSnapshot || this.reconnectAttempt > 0 ? 'reconnecting' : 'connecting',
+    )
+    this.clearSynchronizationTimer()
+    this.synchronizationTimer = setTimeout(() => {
+      if (this.isCurrent(socket, generation)) {
+        this.requestRecovery(true)
+      }
+    }, synchronizationTimeoutMilliseconds)
 
     socket.onopen = () => {
       if (!this.isCurrent(socket, generation)) {
@@ -122,15 +147,7 @@ class GameSyncConnection {
       }
       if (socket.protocol !== realtimeSubprotocol) {
         this.requestRecovery(true)
-        return
       }
-      this.callbacks.updateStatus('connected')
-      this.clearStabilityTimer()
-      this.stabilityTimer = setTimeout(() => {
-        if (this.isCurrent(socket, generation) && socket.readyState === WebSocket.OPEN) {
-          this.reconnectAttempt = 0
-        }
-      }, stableConnectionMilliseconds)
     }
     socket.onmessage = (event) => {
       if (this.isCurrent(socket, generation)) {
@@ -148,6 +165,8 @@ class GameSyncConnection {
       }
       this.socket = null
       this.clearStabilityTimer()
+      this.clearSynchronizationTimer()
+      this.callbacks.discardAnimations()
       if (event.code === 1008) {
         this.callbacks.updateStatus('failed')
         return
@@ -162,6 +181,7 @@ class GameSyncConnection {
       return
     }
     this.forceSnapshotOnRetry ||= forceSnapshot
+    this.callbacks.discardAnimations()
     this.closeCurrentSocket()
     this.callbacks.updateStatus(this.isOnline() ? 'reconnecting' : 'failed')
     this.scheduleReconnect(this.generation)
@@ -171,10 +191,27 @@ class GameSyncConnection {
     this.closeCurrentSocket()
     this.clearReconnectTimer()
     this.clearStabilityTimer()
+    this.clearSynchronizationTimer()
     this.activeGameId = null
     this.forceSnapshotOnRetry = false
     this.reconnectAttempt = 0
     this.detachBrowserStateListeners()
+  }
+
+  markSynchronized(): void {
+    const socket = this.socket
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return
+    }
+    this.callbacks.updateStatus('connected')
+    this.clearSynchronizationTimer()
+    this.clearStabilityTimer()
+    const generation = this.generation
+    this.stabilityTimer = setTimeout(() => {
+      if (this.isCurrent(socket, generation) && socket.readyState === WebSocket.OPEN) {
+        this.reconnectAttempt = 0
+      }
+    }, stableConnectionMilliseconds)
   }
 
   private scheduleReconnect(generation: number): void {
@@ -219,6 +256,7 @@ class GameSyncConnection {
     const socket = this.socket
     this.socket = null
     this.clearStabilityTimer()
+    this.clearSynchronizationTimer()
     if (socket) {
       socket.onclose = null
       socket.onerror = null
@@ -239,6 +277,13 @@ class GameSyncConnection {
     if (this.stabilityTimer) {
       clearTimeout(this.stabilityTimer)
       this.stabilityTimer = null
+    }
+  }
+
+  private clearSynchronizationTimer(): void {
+    if (this.synchronizationTimer) {
+      clearTimeout(this.synchronizationTimer)
+      this.synchronizationTimer = null
     }
   }
 
@@ -280,6 +325,10 @@ class GameSyncConnection {
   }
 
   private readonly handleVisibilityChange = (): void => {
+    if (this.isHidden()) {
+      this.callbacks.discardAnimations()
+      return
+    }
     if (!this.isHidden() && !this.socket && this.activeGameId) {
       if (this.reconnectTimer) {
         this.reconnectAttempt = Math.max(0, this.reconnectAttempt - 1)
@@ -295,8 +344,23 @@ export const useGameSyncStore = defineStore('gameSync', () => {
   const roomAccess = useRoomAccessStore()
   const status = ref<GameSyncStatus>('disconnected')
   const cursor = ref(0)
+  const digest = ref('')
   const snapshotVersion = ref(1)
   const currentGameId = ref<string | null>(null)
+  const animationCancellations = new Set<() => void>()
+  const commandsFrozen = computed(() => status.value !== 'connected')
+
+  function discardAnimations(): void {
+    const cancellations = [...animationCancellations]
+    animationCancellations.clear()
+    for (const cancel of cancellations) {
+      try {
+        cancel()
+      } catch {
+        // A broken visual effect must not prevent authoritative convergence.
+      }
+    }
+  }
 
   const connection = new GameSyncConnection({
     currentRequest: () => {
@@ -306,11 +370,13 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       }
       return {
         cursor: cursor.value,
+        digest: digest.value,
         forceSnapshot: false,
         gameId: game.game.id,
         snapshotVersion: snapshotVersion.value,
       }
     },
+    discardAnimations,
     receive,
     updateStatus: (nextStatus) => {
       status.value = nextStatus
@@ -323,13 +389,18 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       snapshotVersion.value = 1
       currentGameId.value = game.game.id
       cursor.value = game.snapshot.cursor
+      digest.value = game.snapshot.digest
       snapshotVersion.value = game.snapshot.snapshot_version
     } else {
       cursor.value = Math.max(cursor.value, game.snapshot.cursor)
+      if (cursor.value === game.snapshot.cursor) {
+        digest.value = game.snapshot.digest
+      }
       snapshotVersion.value = game.snapshot.snapshot_version
     }
     connection.connect({
       cursor: cursor.value,
+      digest: digest.value,
       forceSnapshot,
       gameId: game.game.id,
       snapshotVersion: snapshotVersion.value,
@@ -357,20 +428,33 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       if (
         message.cursor !== message.projection.snapshot.cursor ||
         message.cursor !== message.projection.snapshot.sequence ||
-        message.projection.game.id !== current.game.id
+        message.projection.game.id !== current.game.id ||
+        !projectionHasCanonicalCursor(message.projection)
       ) {
         connection.requestRecovery(true)
         return
       }
-      if (
-        message.cursor < cursor.value ||
-        message.projection.snapshot.state_version < current.snapshot.state_version
-      ) {
-        return
-      }
+      discardAnimations()
       cursor.value = message.cursor
+      digest.value = message.projection.snapshot.digest
       snapshotVersion.value = message.projection.snapshot.snapshot_version
       roomAccess.replaceGameProjection(message.projection)
+      connection.markSynchronized()
+      return
+    }
+    if (isRealtimeSynchronizedMessage(message)) {
+      if (
+        message.cursor !== cursor.value ||
+        message.cursor !== current.snapshot.cursor ||
+        message.snapshot_version !== snapshotVersion.value ||
+        message.snapshot_version !== current.snapshot.snapshot_version ||
+        message.digest !== digest.value ||
+        message.digest !== current.snapshot.digest
+      ) {
+        connection.requestRecovery(true)
+        return
+      }
+      connection.markSynchronized()
       return
     }
     if (isRealtimeEventBatchMessage(message)) {
@@ -378,7 +462,9 @@ export const useGameSyncStore = defineStore('gameSync', () => {
         message.projection.game.id !== current.game.id ||
         message.cursor !== message.projection.snapshot.cursor ||
         message.cursor !== message.projection.snapshot.sequence ||
+        message.projection.snapshot.snapshot_version !== snapshotVersion.value ||
         message.projection.snapshot.state_version < current.snapshot.state_version ||
+        !projectionHasCanonicalCursor(message.projection) ||
         message.from_cursor > cursor.value ||
         !eventBatchContinuesFrom(message, cursor.value)
       ) {
@@ -389,8 +475,10 @@ export const useGameSyncStore = defineStore('gameSync', () => {
         return
       }
       cursor.value = message.cursor
+      digest.value = message.projection.snapshot.digest
       snapshotVersion.value = message.projection.snapshot.snapshot_version
       roomAccess.replaceGameProjection(message.projection)
+      connection.markSynchronized()
       return
     }
     connection.requestRecovery(true)
@@ -408,13 +496,22 @@ export const useGameSyncStore = defineStore('gameSync', () => {
     currentGameId.value = null
     status.value = 'disconnected'
     cursor.value = 0
+    digest.value = ''
     snapshotVersion.value = 1
+    discardAnimations()
+  }
+
+  function registerAnimationCancellation(cancel: () => void): () => void {
+    animationCancellations.add(cancel)
+    return () => animationCancellations.delete(cancel)
   }
 
   return {
+    commandsFrozen,
     connect,
     cursor,
     disconnect,
+    registerAnimationCancellation,
     receive,
     resynchronize,
     snapshotVersion,

@@ -190,8 +190,16 @@ pub(super) async fn persist_game(
     .bind(game.state.sampling_algorithm())
     .execute(&mut **transaction)
     .await
-    .map(|_| ())
-    .map_err(|error| ApiError::internal_with("match persistence operation", error))
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))?;
+
+    insert_game_state_anchor(
+        transaction,
+        game.id,
+        game.state.sequence(),
+        game.state.snapshot_version(),
+        game.state_digest,
+    )
+    .await
 }
 
 pub(super) async fn seal_room(
@@ -335,8 +343,45 @@ pub(super) async fn persist_game_command(
             .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
     };
     let (room_id, expires_at) = update_game_after_command(transaction, &command, &counters).await?;
+    insert_game_state_anchor(
+        transaction,
+        command.game_id,
+        command.state.sequence(),
+        command.state.snapshot_version(),
+        command.state_digest,
+    )
+    .await?;
     insert_game_event(transaction, &command, room_id, &counters).await?;
     insert_command_receipt(transaction, &command, room_id, &expires_at, &counters).await
+}
+
+async fn insert_game_state_anchor(
+    transaction: &mut Transaction<'_, Postgres>,
+    game_id: Uuid,
+    sequence: u64,
+    snapshot_version: u16,
+    state_digest: &str,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r"
+        INSERT INTO game_state_anchors (game_id, sequence, snapshot_version, state_digest)
+        VALUES ($1, $2, $3, $4)
+        ",
+    )
+    .bind(game_id)
+    .bind(
+        i64::try_from(sequence)
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
+    .bind(
+        i16::try_from(snapshot_version)
+            .map_err(|error| ApiError::internal_with("match persistence operation", error))?,
+    )
+    .bind(state_digest)
+    .execute(&mut **transaction)
+    .await
+    .map(|_| ())
+    .map_err(|error| ApiError::internal_with("persist game state replay anchor", error))
 }
 
 async fn update_game_after_command(
@@ -579,10 +624,10 @@ pub(super) async fn game_cursor_for_participant(
     database: &PgPool,
     participant_id: Uuid,
     game_id: Uuid,
-) -> Result<Option<(i64, i16)>, ApiError> {
-    sqlx::query_as::<_, (i64, i16)>(
+) -> Result<Option<(i64, i16, String)>, ApiError> {
+    sqlx::query_as::<_, (i64, i16, String)>(
         r"
-        SELECT games.sequence, games.snapshot_version
+        SELECT games.sequence, games.snapshot_version, games.state_digest
         FROM games
         JOIN participants
           ON participants.room_id = games.room_id
@@ -592,6 +637,32 @@ pub(super) async fn game_cursor_for_participant(
     )
     .bind(participant_id)
     .bind(game_id)
+    .fetch_optional(database)
+    .await
+    .map_err(|error| ApiError::internal_with("match persistence operation", error))
+}
+
+pub(super) async fn game_state_anchor_for_participant(
+    database: &PgPool,
+    participant_id: Uuid,
+    game_id: Uuid,
+    sequence: i64,
+) -> Result<Option<(i16, String)>, ApiError> {
+    sqlx::query_as::<_, (i16, String)>(
+        r"
+        SELECT anchors.snapshot_version, anchors.state_digest
+        FROM game_state_anchors AS anchors
+        JOIN games ON games.id = anchors.game_id
+        JOIN participants
+          ON participants.room_id = games.room_id
+         AND participants.id = $1
+        WHERE anchors.game_id = $2
+          AND anchors.sequence = $3
+        ",
+    )
+    .bind(participant_id)
+    .bind(game_id)
+    .bind(sequence)
     .fetch_optional(database)
     .await
     .map_err(|error| ApiError::internal_with("match persistence operation", error))

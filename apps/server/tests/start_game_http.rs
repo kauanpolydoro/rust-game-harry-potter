@@ -9,10 +9,16 @@ use game_content::{
 use harry_potter_server::{AppState, build_router, initialize};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use std::{collections::BTreeSet, fmt::Write as _, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    fmt::Write as _,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::Barrier,
+    task::JoinSet,
 };
 use tower::ServiceExt;
 
@@ -422,6 +428,21 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
         .expect("game start must receive a response");
     assert_eq!(response.status(), StatusCode::CREATED);
     response_json(response).await
+}
+
+fn realtime_path(projection: &Value) -> String {
+    format!(
+        "/api/games/current/events?cursor={}&snapshot_version={}&digest={}",
+        projection["snapshot"]["cursor"]
+            .as_u64()
+            .expect("the projection cursor must be present"),
+        projection["snapshot"]["snapshot_version"]
+            .as_u64()
+            .expect("the Snapshot version must be present"),
+        projection["snapshot"]["digest"]
+            .as_str()
+            .expect("the projection digest must be present")
+    )
 }
 
 async fn ready_room() -> ReadyRoom {
@@ -858,6 +879,30 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     assert_eq!(snapshot["prng"]["counter"], 0);
     assert_eq!(event["sequence"], 1);
     assert_eq!(event["state_version"], 2);
+
+    let anchors = sqlx::query_as::<_, (i64, bool)>(
+        r"
+        SELECT
+            COUNT(*),
+            bool_and(
+                anchors.snapshot_version = games.snapshot_version
+                AND (
+                    anchors.sequence < games.sequence
+                    OR anchors.state_digest = games.state_digest
+                )
+            )
+        FROM games
+        JOIN rooms ON rooms.id = games.room_id
+        JOIN game_state_anchors AS anchors ON anchors.game_id = games.id
+        WHERE rooms.code = $1
+        GROUP BY games.id
+        ",
+    )
+    .bind(&room.room_code)
+    .fetch_one(&room.database)
+    .await
+    .expect("the immutable replay anchors must be queryable");
+    assert_eq!(anchors, (2, true));
 }
 
 #[tokio::test]
@@ -938,7 +983,7 @@ async fn active_command_commits_snapshot_prng_receipt_event_sequence_and_expirat
 }
 
 #[tokio::test]
-async fn committed_events_and_receipts_are_append_only() {
+async fn committed_events_receipts_and_replay_anchors_are_append_only() {
     let room = ready_room().await;
     start_ready_game(&room, "append-only-start").await;
     let response = room
@@ -988,6 +1033,25 @@ async fn committed_events_and_receipts_are_append_only() {
             WHERE rooms.code = $1
         )
         ",
+        r"
+        UPDATE game_state_anchors
+        SET state_digest = 'blake3:0000000000000000000000000000000000000000000000000000000000000000'
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ",
+        r"
+        DELETE FROM game_state_anchors
+        WHERE game_id = (
+            SELECT games.id
+            FROM games
+            JOIN rooms ON rooms.id = games.room_id
+            WHERE rooms.code = $1
+        )
+        ",
     ] {
         let error = sqlx::query(statement)
             .bind(&room.room_code)
@@ -999,11 +1063,12 @@ async fn committed_events_and_receipts_are_append_only() {
 
     assert_history_prevents_game_deletion(&room).await;
 
-    let artifact_counts = sqlx::query_as::<_, (i64, i64)>(
+    let artifact_counts = sqlx::query_as::<_, (i64, i64, i64)>(
         r"
         SELECT
             (SELECT COUNT(*) FROM game_events WHERE game_id = games.id),
-            (SELECT COUNT(*) FROM game_command_receipts WHERE game_id = games.id)
+            (SELECT COUNT(*) FROM game_command_receipts WHERE game_id = games.id),
+            (SELECT COUNT(*) FROM game_state_anchors WHERE game_id = games.id)
         FROM games
         JOIN rooms ON rooms.id = games.room_id
         WHERE rooms.code = $1
@@ -1013,7 +1078,7 @@ async fn committed_events_and_receipts_are_append_only() {
     .fetch_one(&room.database)
     .await
     .expect("the protected history must remain queryable");
-    assert_eq!(artifact_counts, (1, 1));
+    assert_eq!(artifact_counts, (1, 1, 2));
 }
 
 #[tokio::test]
@@ -2244,13 +2309,13 @@ async fn websocket_handshake(
 #[tokio::test]
 async fn websocket_handshake_requires_the_session_exact_origin_and_current_protocol() {
     let room = ready_room().await;
-    start_ready_game(&room, "realtime-handshake").await;
+    let projection = start_ready_game(&room, "realtime-handshake").await;
     let (address, server) = start_network_server(room.app.clone()).await;
-    let path = "/api/games/current/events?cursor=0&snapshot_version=1";
+    let path = realtime_path(&projection);
 
     let (status, _, _) = websocket_handshake(
         address,
-        path,
+        &path,
         Some(&room.host_cookie),
         Some("https://attacker.invalid"),
         Some("hogwarts.realtime.v1"),
@@ -2260,7 +2325,7 @@ async fn websocket_handshake_requires_the_session_exact_origin_and_current_proto
 
     let (status, _, _) = websocket_handshake(
         address,
-        path,
+        &path,
         Some(&room.host_cookie),
         Some("http://127.0.0.1:5173"),
         Some("hogwarts.realtime.v0"),
@@ -2270,7 +2335,7 @@ async fn websocket_handshake_requires_the_session_exact_origin_and_current_proto
 
     let (status, _, _) = websocket_handshake(
         address,
-        path,
+        &path,
         None,
         Some("http://127.0.0.1:5173"),
         Some("hogwarts.realtime.v1"),
@@ -2280,7 +2345,7 @@ async fn websocket_handshake_requires_the_session_exact_origin_and_current_proto
 
     let (status, headers, _) = websocket_handshake(
         address,
-        path,
+        &path,
         Some(&room.host_cookie),
         Some("http://127.0.0.1:5173"),
         Some("hogwarts.realtime.v1"),
@@ -2478,18 +2543,25 @@ async fn a_revoked_session_closes_its_existing_websocket_before_delivering_an_ev
 }
 
 #[tokio::test]
-async fn an_incompatible_snapshot_version_or_cursor_gap_receives_a_full_snapshot() {
+async fn an_incompatible_snapshot_version_cursor_or_digest_receives_a_full_snapshot() {
     let room = ready_room().await;
-    start_ready_game(&room, "realtime-resync").await;
+    let projection = start_ready_game(&room, "realtime-resync").await;
     let (address, server) = start_network_server(room.app.clone()).await;
+    let digest = projection["snapshot"]["digest"]
+        .as_str()
+        .expect("the initial projection digest must be present");
 
     for path in [
-        "/api/games/current/events?cursor=8&snapshot_version=1",
-        "/api/games/current/events?cursor=0&snapshot_version=999",
+        format!("/api/games/current/events?cursor=8&snapshot_version=1&digest={digest}"),
+        format!("/api/games/current/events?cursor=0&snapshot_version=999&digest={digest}"),
+        format!(
+            "/api/games/current/events?cursor=0&snapshot_version=1&digest=blake3:{}",
+            "0".repeat(64)
+        ),
     ] {
         let (status, _, mut socket) = websocket_handshake(
             address,
-            path,
+            &path,
             Some(&room.host_cookie),
             Some("http://127.0.0.1:5173"),
             Some("hogwarts.realtime.v1"),
@@ -2567,18 +2639,27 @@ async fn database_rejects_a_gap_in_the_official_event_sequence() {
 #[tokio::test]
 async fn committed_log_replays_contiguous_events_and_redacts_another_participants_command() {
     let room = ready_room().await;
-    start_ready_game(&room, "realtime-events").await;
+    let projection = start_ready_game(&room, "realtime-events").await;
     let (address, server) = start_network_server(room.app.clone()).await;
-    let path = "/api/games/current/events?cursor=0&snapshot_version=1";
+    let path = realtime_path(&projection);
     let (status, _, mut host_socket) = websocket_handshake(
         address,
-        path,
+        &path,
         Some(&room.host_cookie),
         Some("http://127.0.0.1:5173"),
         Some("hogwarts.realtime.v1"),
     )
     .await;
     assert_eq!(status, 101);
+    let synchronized = tokio::time::timeout(Duration::from_secs(2), host_socket.read_text())
+        .await
+        .expect("the matching cursor must receive a synchronization acknowledgement");
+    let synchronized: Value =
+        serde_json::from_str(&synchronized).expect("synchronization must be JSON");
+    assert_eq!(synchronized["type"], "synchronized");
+    assert_eq!(synchronized["cursor"], 0);
+    assert_eq!(synchronized["snapshot_version"], 1);
+    assert_eq!(synchronized["digest"], projection["snapshot"]["digest"]);
 
     let command_id = uuid::Uuid::new_v4();
     let response = room
@@ -2613,7 +2694,7 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
 
     let (status, _, mut guest_socket) = websocket_handshake(
         address,
-        path,
+        &path,
         Some(&room.guest_cookie),
         Some("http://127.0.0.1:5173"),
         Some("hogwarts.realtime.v1"),
@@ -2632,7 +2713,7 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
 
     let (status, _, mut redelivery_socket) = websocket_handshake(
         address,
-        path,
+        &path,
         Some(&room.guest_cookie),
         Some("http://127.0.0.1:5173"),
         Some("hogwarts.realtime.v1"),
@@ -2650,4 +2731,209 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
         1
     );
     server.abort();
+}
+
+struct ReferenceRecoveryGame {
+    host_cookie: String,
+    guest_cookie: String,
+    replay_path: String,
+    snapshot_path: String,
+}
+
+async fn create_reference_recovery_game(
+    app: axum::Router,
+    manifest: ContentManifest,
+) -> ReferenceRecoveryGame {
+    let (room_code, host_cookie) = create_room(&app).await;
+    assert_eq!(
+        select_hero(&app, &host_cookie, "harry").await.status(),
+        StatusCode::OK
+    );
+    let guest_cookie = join_room(&app, &room_code).await;
+    assert_eq!(
+        set_ready(&app, &host_cookie, true).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        set_ready(&app, &guest_cookie, true).await.status(),
+        StatusCode::OK
+    );
+    let response = app
+        .clone()
+        .oneshot(start_request(
+            &host_cookie,
+            &unique_key("reference-recovery-start"),
+            &manifest,
+            "adventure:001",
+        ))
+        .await
+        .expect("the reference game must receive its initial Snapshot");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let projection = response_json(response).await;
+    let replay_path = realtime_path(&projection);
+    let snapshot_path = format!(
+        "/api/games/current/events?cursor=0&snapshot_version=1&digest=blake3:{}",
+        "0".repeat(64)
+    );
+    ReferenceRecoveryGame {
+        host_cookie,
+        guest_cookie,
+        replay_path,
+        snapshot_path,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ReferenceRecoveryMode {
+    Replay,
+    Snapshot,
+}
+
+fn percentile_95(durations: &mut [Duration]) -> Duration {
+    durations.sort_unstable();
+    durations[(durations.len() * 95).div_ceil(100) - 1]
+}
+
+async fn recover_reference_connection(
+    address: std::net::SocketAddr,
+    path: String,
+    cookie: String,
+    mode: ReferenceRecoveryMode,
+    lose_first_attempt: bool,
+    reference_rtt: Duration,
+    start_barrier: Arc<Barrier>,
+) -> (ReferenceRecoveryMode, Duration) {
+    start_barrier.wait().await;
+    let started = Instant::now();
+    if lose_first_attempt {
+        let (_, _, lost_socket) = websocket_handshake(
+            address,
+            &path,
+            Some(&cookie),
+            Some("http://127.0.0.1:5173"),
+            Some("hogwarts.realtime.v1"),
+        )
+        .await;
+        drop(lost_socket);
+        tokio::time::sleep(reference_rtt).await;
+    }
+    tokio::time::sleep(reference_rtt).await;
+    let (status, _, mut socket) = websocket_handshake(
+        address,
+        &path,
+        Some(&cookie),
+        Some("http://127.0.0.1:5173"),
+        Some("hogwarts.realtime.v1"),
+    )
+    .await;
+    assert_eq!(status, 101);
+    let serialized = tokio::time::timeout(Duration::from_secs(10), socket.read_text())
+        .await
+        .expect("reference recovery must produce an official message");
+    let message: Value = serde_json::from_str(&serialized).expect("recovery message must be JSON");
+    let expected_type = match mode {
+        ReferenceRecoveryMode::Replay => "events",
+        ReferenceRecoveryMode::Snapshot => "snapshot",
+    };
+    assert_eq!(message["type"], expected_type);
+    (mode, started.elapsed())
+}
+
+#[tokio::test]
+#[ignore = "reference load profile; run make check-reconnect-profile"]
+async fn reference_reconnect_profile_meets_replay_and_snapshot_slos() {
+    const GAME_COUNT: usize = 100;
+    const CONNECTIONS_PER_GAME: usize = 4;
+    const REFERENCE_RTT: Duration = Duration::from_millis(150);
+    const REPLAY_SLO: Duration = Duration::from_secs(3);
+    const SNAPSHOT_SLO: Duration = Duration::from_secs(5);
+
+    let manifest = playable_manifest();
+    let (app, _, _) = test_app(manifest.clone()).await;
+    let mut setups = JoinSet::new();
+    for _ in 0..GAME_COUNT {
+        let app = app.clone();
+        let manifest = manifest.clone();
+        setups.spawn(create_reference_recovery_game(app, manifest));
+    }
+    let mut games = Vec::with_capacity(GAME_COUNT);
+    while let Some(result) = setups.join_next().await {
+        games.push(result.expect("reference game setup must finish"));
+    }
+
+    let (address, server) = start_network_server(app.clone()).await;
+    let mut command_pacer = tokio::time::interval(Duration::from_millis(50));
+    command_pacer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    for game in &games {
+        command_pacer.tick().await;
+        let response = app
+            .clone()
+            .oneshot(command_request(&game.host_cookie, uuid::Uuid::new_v4(), 1))
+            .await
+            .expect("the reference command must receive a response");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let connection_count = GAME_COUNT * CONNECTIONS_PER_GAME;
+    let start_barrier = Arc::new(Barrier::new(connection_count + 1));
+    let mut recoveries = JoinSet::new();
+    for (game_index, game) in games.into_iter().enumerate() {
+        for connection_index in 0..CONNECTIONS_PER_GAME {
+            let mode = if connection_index < 2 {
+                ReferenceRecoveryMode::Replay
+            } else {
+                ReferenceRecoveryMode::Snapshot
+            };
+            let path = match mode {
+                ReferenceRecoveryMode::Replay => game.replay_path.clone(),
+                ReferenceRecoveryMode::Snapshot => game.snapshot_path.clone(),
+            };
+            let cookie = if connection_index % 2 == 0 {
+                game.host_cookie.clone()
+            } else {
+                game.guest_cookie.clone()
+            };
+            let ordinal = game_index * CONNECTIONS_PER_GAME + connection_index;
+            let lose_first_attempt = ordinal.is_multiple_of(101);
+            let start_barrier = Arc::clone(&start_barrier);
+            recoveries.spawn(recover_reference_connection(
+                address,
+                path,
+                cookie,
+                mode,
+                lose_first_attempt,
+                REFERENCE_RTT,
+                start_barrier,
+            ));
+        }
+    }
+    start_barrier.wait().await;
+
+    let mut replay_durations = Vec::with_capacity(connection_count / 2);
+    let mut snapshot_durations = Vec::with_capacity(connection_count / 2);
+    while let Some(result) = recoveries.join_next().await {
+        let (mode, duration) = result.expect("reference recovery must finish");
+        match mode {
+            ReferenceRecoveryMode::Replay => replay_durations.push(duration),
+            ReferenceRecoveryMode::Snapshot => snapshot_durations.push(duration),
+        }
+    }
+    server.abort();
+
+    let replay_p95 = percentile_95(&mut replay_durations);
+    let snapshot_p95 = percentile_95(&mut snapshot_durations);
+    println!(
+        "reference recovery: games={GAME_COUNT}, sockets={connection_count}, rtt_ms={}, loss_percent=1, replay_p95_ms={}, snapshot_p95_ms={}",
+        REFERENCE_RTT.as_millis(),
+        replay_p95.as_millis(),
+        snapshot_p95.as_millis()
+    );
+    assert!(
+        replay_p95 <= REPLAY_SLO,
+        "replay p95 {replay_p95:?} exceeded {REPLAY_SLO:?}"
+    );
+    assert!(
+        snapshot_p95 <= SNAPSHOT_SLO,
+        "Snapshot p95 {snapshot_p95:?} exceeded {SNAPSHOT_SLO:?}"
+    );
 }

@@ -351,6 +351,24 @@
         "projection": { "$ref": "#/$defs/GameProjectionResponse" }
       }
     },
+    "RealtimeSynchronizedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "cursor",
+        "snapshot_version",
+        "digest"
+      ],
+      "properties": {
+        "protocol_version": { "type": "integer", "enum": [1] },
+        "type": { "type": "string", "enum": ["synchronized"] },
+        "cursor": { "type": "integer", "minimum": 0 },
+        "snapshot_version": { "type": "integer", "minimum": 1 },
+        "digest": { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" }
+      }
+    },
     "RealtimeEventBatchMessage": {
       "type": "object",
       "additionalProperties": false,
