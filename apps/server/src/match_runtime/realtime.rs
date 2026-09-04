@@ -1245,11 +1245,11 @@ fn realtime_event(
     match (payload.event_version, payload.event_type.as_str()) {
         (1..=3, "dark_arts_completed")
         | (3, "choice_resolved")
-        | (3 | 4, "card_played" | "attack_assigned" | "card_acquired") => {
+        | (3..=5, "card_played" | "attack_assigned" | "card_acquired") => {
             realtime_legacy_event(stored, payload, command_id)
         }
-        (4, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
-        (4, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
+        (4 | 5, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
+        (4 | 5, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
         _ => Err(ApiError::internal()),
     }
 }
@@ -1506,9 +1506,9 @@ fn realtime_event_type(
     match (payload.event_version, stored_event_type) {
         (1..=3, "dark_arts_completed") => Ok("dark_arts_completed"),
         (3, "choice_resolved") => Ok("choice_resolved"),
-        (3 | 4, "card_played") => Ok("card_played"),
-        (3 | 4, "attack_assigned") => Ok("attack_assigned"),
-        (3 | 4, "card_acquired") => Ok("card_acquired"),
+        (3..=5, "card_played") => Ok("card_played"),
+        (3..=5, "attack_assigned") => Ok("attack_assigned"),
+        (3..=5, "card_acquired") => Ok("card_acquired"),
         _ => Err(ApiError::internal()),
     }
 }
@@ -1520,10 +1520,11 @@ fn realtime_effect_progress(
     if payload.event_version == 1 && event_type == "dark_arts_completed" {
         return Ok((Some("stable".to_owned()), Some(0)));
     }
-    if !matches!(
+    if !(matches!(
         event_type,
         "dark_arts_completed" | "choice_resolved" | "card_played"
-    ) {
+    ) || (payload.event_version == 5 && event_type == "attack_assigned"))
+    {
         return Ok((None, None));
     }
 

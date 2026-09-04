@@ -15,14 +15,16 @@ pub use effects::{
     EffectEntityPlacement, EffectExecutionError, EffectGameOutcome, EffectNoOpReason,
     EffectOperation, EffectOutcome, EffectPathSegment, EffectResource, EffectResourceCost,
     EffectRoller, EffectRule, EffectSelector, EffectStop, EffectTargetBinding, EffectTargetOwner,
-    EffectTrigger, EffectWorld, EffectZone, MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH,
-    MAX_EFFECT_ROLL_INDEX, PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect,
-    effect_action_is_affordable,
+    EffectTrigger, EffectWorld, EffectZone, HERO_MAX_HEALTH, MAX_EFFECT_BRANCH_INDEX,
+    MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, PendingEffectChoice, PendingEffectChoiceKind,
+    QueuedEffect, effect_action_is_affordable,
 };
 
-pub const SNAPSHOT_VERSION: u16 = 3;
+pub const SNAPSHOT_VERSION: u16 = 4;
+const HERO_ACTION_SNAPSHOT_VERSION: u16 = 3;
 const PARTICIPANT_CHOICE_SNAPSHOT_VERSION: u16 = 2;
 const LEGACY_SNAPSHOT_VERSION: u16 = 1;
+const STRUCTURAL_OUTCOME_RULE_ID: &str = "system:game-outcome";
 pub const INITIAL_STATE_VERSION: u64 = 1;
 pub const INITIAL_SEQUENCE: u64 = 0;
 pub const MAX_TURN_STEPS: usize = 3;
@@ -137,6 +139,7 @@ pub struct InitialGameState {
     shuffle_algorithm: &'static str,
     sampling_algorithm: &'static str,
     prng_counter: u64,
+    active_villain_limit: u8,
     players: Vec<InitialPlayer>,
     effect_world: EffectWorld,
     last_effects: Vec<EffectOutcome>,
@@ -225,6 +228,13 @@ pub struct GameIntentDecision {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EndTurnOutcome {
+    LocationAdvanced {
+        location_id: String,
+        next_location_id: Option<String>,
+    },
+    VillainRevealed {
+        villain_id: String,
+    },
     CardMoved {
         card_id: String,
         from: EffectZone,
@@ -238,6 +248,11 @@ pub enum EndTurnOutcome {
     ResourceReset {
         resource: EffectResource,
         before: u16,
+    },
+    HeroRecovered {
+        position: u8,
+        before: u16,
+        after: u16,
     },
 }
 
@@ -327,6 +342,7 @@ const fn effect_trigger_order(trigger: EffectTrigger) -> u8 {
         EffectTrigger::DarkArts | EffectTrigger::DarkArtsCompleted => 0,
         EffectTrigger::Villains => 1,
         EffectTrigger::Manual => 2,
+        EffectTrigger::VillainReward => 3,
     }
 }
 
@@ -467,7 +483,7 @@ impl<'rules> GameEngine<'rules> {
         let choice_cause = pending.cause.clone();
         let phase = current.phase;
         let mut next = current.clone();
-        let resolution = effects::resume_effects(
+        let mut resolution = effects::resume_effects(
             &mut next.effect_world,
             pending,
             &selected_options,
@@ -475,6 +491,11 @@ impl<'rules> GameEngine<'rules> {
             random,
         )
         .map_err(game_intent_effect_error)?;
+        settle_structural_outcome(
+            &next.effect_world,
+            &mut resolution.outcomes,
+            &mut resolution.stop,
+        );
         next.prng_counter = next
             .prng_counter
             .checked_add(resolution.rolls_consumed)
@@ -549,31 +570,55 @@ impl<'rules> GameEngine<'rules> {
             effects: Vec::new(),
         }];
 
-        let (end_turn, samples_consumed) =
-            perform_end_turn(&mut next.effect_world, actor_position, random)?;
+        let (end_turn, samples_consumed) = perform_end_turn(
+            &mut next.effect_world,
+            actor_position,
+            next.active_villain_limit,
+            random,
+        )?;
         next.prng_counter = next
             .prng_counter
             .checked_add(samples_consumed)
             .ok_or(GameIntentError::VersionOverflow)?;
-        let player_index = next
-            .players
-            .iter()
-            .position(|player| player.position == actor_position)
-            .ok_or(GameIntentError::ActorNotResponsible)?;
-        let next_player_index = (player_index + 1) % next.players.len();
-        next.active_position = next.players[next_player_index].position;
-        next.turn = next
-            .turn
-            .checked_add(1)
-            .ok_or(GameIntentError::VersionOverflow)?;
-        next.phase = GamePhase::DarkArts;
-        next.queued_phases = vec![
-            GamePhase::Villains,
-            GamePhase::HeroActions,
-            GamePhase::EndTurn,
-        ];
-        settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
-            .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+        let final_location_controlled = end_turn.iter().any(|outcome| {
+            matches!(
+                outcome,
+                EndTurnOutcome::LocationAdvanced {
+                    next_location_id: None,
+                    ..
+                }
+            )
+        });
+        if final_location_controlled {
+            next.last_effects.push(EffectOutcome::Terminal {
+                rule_id: STRUCTURAL_OUTCOME_RULE_ID.to_owned(),
+                outcome: EffectGameOutcome::Lost,
+            });
+            next.last_turn_steps[0]
+                .effects
+                .clone_from(&next.last_effects);
+            finish_terminal_state(&mut next, EffectGameOutcome::Lost);
+        } else {
+            let player_index = next
+                .players
+                .iter()
+                .position(|player| player.position == actor_position)
+                .ok_or(GameIntentError::ActorNotResponsible)?;
+            let next_player_index = (player_index + 1) % next.players.len();
+            next.active_position = next.players[next_player_index].position;
+            next.turn = next
+                .turn
+                .checked_add(1)
+                .ok_or(GameIntentError::VersionOverflow)?;
+            next.phase = GamePhase::DarkArts;
+            next.queued_phases = vec![
+                GamePhase::Villains,
+                GamePhase::HeroActions,
+                GamePhase::EndTurn,
+            ];
+            settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
+                .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+        }
         next.sequence = sequence;
         next.state_version = state_version;
 
@@ -718,6 +763,8 @@ pub enum GameEvent {
         villain_id: String,
         amount: u16,
         effects: Vec<EffectOutcome>,
+        stop: EffectStop,
+        prng_counter: u64,
     },
     CardAcquired {
         sequence: u64,
@@ -793,6 +840,7 @@ pub struct GameStateRestoreInput<'a> {
     pub shuffle_algorithm: &'a str,
     pub sampling_algorithm: &'a str,
     pub prng_counter: u64,
+    pub active_villain_limit: u8,
     pub players: Vec<InitialPlayer>,
     pub effect_world: EffectWorld,
     pub last_effects: Vec<EffectOutcome>,
@@ -909,6 +957,11 @@ impl InitialGameState {
     #[must_use]
     pub const fn prng_counter(&self) -> u64 {
         self.prng_counter
+    }
+
+    #[must_use]
+    pub const fn active_villain_limit(&self) -> u8 {
+        self.active_villain_limit
     }
 
     #[must_use]
@@ -1033,6 +1086,9 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
             .chain(input.content.initial_entities.iter().cloned())
             .collect(),
     );
+    let active_villain_limit =
+        u8::try_from(effect_world.entities_in(EffectZone::ActiveVillains).len())
+            .map_err(|_| StartGameError::InvalidInitialEntities)?;
     let player_positions = players
         .iter()
         .map(InitialPlayer::position)
@@ -1058,6 +1114,7 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: 0,
+        active_villain_limit,
         effect_world,
         last_effects: Vec::new(),
         pending_choice: None,
@@ -1125,13 +1182,18 @@ fn settle_automatic_phases(
                 return Ok(resolved_steps);
             }
         };
-        let resolution = effects::execute_effects(
+        let mut resolution = effects::execute_effects(
             &mut state.effect_world,
             state.active_position,
             rules,
             trigger,
             roller,
         )?;
+        settle_structural_outcome(
+            &state.effect_world,
+            &mut resolution.outcomes,
+            &mut resolution.stop,
+        );
         let effects::EffectResolution {
             outcomes,
             stop,
@@ -1209,6 +1271,33 @@ fn finish_terminal_state(state: &mut InitialGameState, outcome: EffectGameOutcom
     state.queued_effects.clear();
 }
 
+fn settle_structural_outcome(
+    world: &EffectWorld,
+    outcomes: &mut Vec<EffectOutcome>,
+    stop: &mut EffectStop,
+) {
+    if !matches!(
+        stop,
+        EffectStop::Stable | EffectStop::Terminal(EffectGameOutcome::Won)
+    ) {
+        return;
+    }
+    let Some(outcome) = world.structural_game_outcome() else {
+        return;
+    };
+    if matches!(stop, EffectStop::Terminal(EffectGameOutcome::Won)) {
+        if outcome != EffectGameOutcome::Lost {
+            return;
+        }
+        outcomes.pop();
+    }
+    outcomes.push(EffectOutcome::Terminal {
+        rule_id: STRUCTURAL_OUTCOME_RULE_ID.to_owned(),
+        outcome,
+    });
+    *stop = EffectStop::Terminal(outcome);
+}
+
 fn append_phase_effects(history: &mut Vec<TurnStep>, phase: GamePhase, effects: &[EffectOutcome]) {
     if let Some(step) = history.last_mut().filter(|step| step.phase == phase) {
         step.effects.extend_from_slice(effects);
@@ -1242,12 +1331,37 @@ impl EngineControl {
     }
 }
 
+fn advance_shared_table(
+    world: &mut EffectWorld,
+    active_villain_limit: u8,
+) -> Result<Vec<EndTurnOutcome>, EffectExecutionError> {
+    let mut outcomes = Vec::new();
+    if let Some((location_id, next_location_id)) = world.advance_controlled_location()? {
+        outcomes.push(EndTurnOutcome::LocationAdvanced {
+            location_id,
+            next_location_id,
+        });
+    }
+    outcomes.extend(
+        world
+            .refill_villains(active_villain_limit)?
+            .into_iter()
+            .map(|villain_id| EndTurnOutcome::VillainRevealed { villain_id }),
+    );
+    Ok(outcomes)
+}
+
 fn perform_end_turn(
     world: &mut EffectWorld,
     actor_position: u8,
+    active_villain_limit: u8,
     random: &mut dyn EffectRoller,
 ) -> Result<(Vec<EndTurnOutcome>, u64), GameIntentError> {
     let mut outcomes = Vec::new();
+    outcomes.extend(
+        advance_shared_table(world, active_villain_limit)
+            .map_err(|_| GameIntentError::EffectExecutionFailed)?,
+    );
     for from in [EffectZone::HeroPlayArea, EffectZone::HeroHand] {
         for card_id in world.card_ids_in_zone(actor_position, from) {
             world
@@ -1269,6 +1383,17 @@ fn perform_end_turn(
             .reset_hero_resource(actor_position, resource, before)
             .map_err(|_| GameIntentError::EffectExecutionFailed)?;
         outcomes.push(EndTurnOutcome::ResourceReset { resource, before });
+    }
+
+    for (position, after) in world
+        .recover_stunned_heroes()
+        .map_err(|_| GameIntentError::EffectExecutionFailed)?
+    {
+        outcomes.push(EndTurnOutcome::HeroRecovered {
+            position,
+            before: 0,
+            after,
+        });
     }
 
     let mut samples_consumed = 0_u64;
@@ -1342,6 +1467,7 @@ pub fn restore_game_state(
     input: GameStateRestoreInput<'_>,
 ) -> Result<InitialGameState, GameStateRestoreError> {
     let supported_snapshot = input.snapshot_version == SNAPSHOT_VERSION
+        || input.snapshot_version == HERO_ACTION_SNAPSHOT_VERSION
         || input.snapshot_version == PARTICIPANT_CHOICE_SNAPSHOT_VERSION
         || (input.snapshot_version == LEGACY_SNAPSHOT_VERSION && input.pending_choice.is_none());
     if !supported_snapshot {
@@ -1394,13 +1520,17 @@ pub fn restore_game_state(
         || !input
             .effect_world
             .is_valid_for_positions(&participant_positions)
+        || !valid_villain_capacity(&input.effect_world, input.active_villain_limit)
         || input
             .pending_choice
             .as_ref()
             .is_some_and(|choice| !choice.is_valid_for_positions(&participant_positions))
         || (input.pending_choice.is_some()
             && (input.status != GameStatus::InProgress
-                || !matches!(input.phase, GamePhase::DarkArts | GamePhase::Villains)))
+                || !matches!(
+                    input.phase,
+                    GamePhase::DarkArts | GamePhase::Villains | GamePhase::HeroActions
+                )))
     {
         return Err(GameStateRestoreError::InvalidPlayers);
     }
@@ -1428,6 +1558,7 @@ pub fn restore_game_state(
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: input.prng_counter,
+        active_villain_limit: input.active_villain_limit,
         players,
         effect_world: input.effect_world,
         last_effects: input.last_effects,
@@ -1437,6 +1568,14 @@ pub fn restore_game_state(
         decision_point: input.decision_point,
         last_turn_steps: input.last_turn_steps,
     })
+}
+
+fn valid_villain_capacity(world: &EffectWorld, capacity: u8) -> bool {
+    world.entities_in(EffectZone::ActiveVillains).len() <= usize::from(capacity)
+        && (capacity > 0
+            || !world
+                .entities()
+                .any(|(_, entity)| entity.kind() == EffectEntityKind::Villain))
 }
 
 fn restored_control_is_valid(input: &GameStateRestoreInput<'_>) -> bool {
@@ -1488,12 +1627,15 @@ fn restored_control_is_valid(input: &GameStateRestoreInput<'_>) -> bool {
         }
         GamePhase::HeroActions => {
             input.queued_phases == [GamePhase::EndTurn]
-                && input.queued_effects.is_empty()
-                && input.pending_choice.is_none()
-                && input.decision_point
-                    == Some(DecisionPoint::PlayerIntent {
-                        responsible_position: input.active_position,
-                    })
+                && if input.pending_choice.is_some() {
+                    automatic_decision_is_valid(input)
+                } else {
+                    input.queued_effects.is_empty()
+                        && input.decision_point
+                            == Some(DecisionPoint::PlayerIntent {
+                                responsible_position: input.active_position,
+                            })
+                }
         }
         GamePhase::EndTurn => {
             input.queued_phases.is_empty()
@@ -1581,9 +1723,15 @@ pub fn decide_game_command(
             card_id,
             targets,
         ),
-        GameCommand::AssignAttack { villain_id, amount } => {
-            decide_assign_attack(state, actor_position, &legal_intentions, villain_id, amount)
-        }
+        GameCommand::AssignAttack { villain_id, amount } => decide_assign_attack(
+            state,
+            actor_position,
+            &legal_intentions,
+            effect_rules,
+            die_roller,
+            villain_id,
+            amount,
+        ),
         GameCommand::AcquireCard { card_id } => {
             decide_acquire_card(state, actor_position, &legal_intentions, card_id)
         }
@@ -1662,11 +1810,21 @@ fn decide_choice_response(
         die_roller,
     )
     .map_err(game_command_effect_error)?;
-    let prng_counter = next_prng_counter(state, resolution.rolls_consumed)?;
+    let effects::EffectResolution {
+        mut outcomes,
+        mut stop,
+        rolls_consumed,
+        queue,
+    } = resolution;
+    settle_structural_outcome(&effect_world, &mut outcomes, &mut stop);
+    let prng_counter = next_prng_counter(state, rolls_consumed)?;
     let mut control = EngineControl::from_state(state);
-    let mut steps = vec![TurnStep::new(state.phase, resolution.outcomes)];
-    match &resolution.stop {
+    let mut steps = vec![TurnStep::new(state.phase, outcomes)];
+    match &stop {
         EffectStop::Choice(choice) => {
+            if queue != choice.continuation.queue {
+                return Err(GameCommandError::EffectExecutionFailed);
+            }
             control
                 .queued_effects
                 .clone_from(&choice.continuation.queue);
@@ -1819,15 +1977,23 @@ fn decide_play_card(
         &mut effect_world,
         actor_position,
         rule,
+        effect_rules,
         &targets,
         die_roller,
     )
     .map_err(map_effect_execution_error)?;
+    let effects::EffectResolution {
+        mut outcomes,
+        mut stop,
+        rolls_consumed,
+        ..
+    } = resolution;
+    settle_structural_outcome(&effect_world, &mut outcomes, &mut stop);
     let prng_counter = state
         .prng_counter
-        .checked_add(resolution.rolls_consumed)
+        .checked_add(rolls_consumed)
         .ok_or(GameCommandError::VersionOverflow)?;
-    let mut event_effects = Vec::with_capacity(resolution.outcomes.len() + 1);
+    let mut event_effects = Vec::with_capacity(outcomes.len() + 2);
     event_effects.push(EffectOutcome::Moved {
         rule_id: "system:play-card".to_owned(),
         target_id: card_id.clone(),
@@ -1835,7 +2001,7 @@ fn decide_play_card(
         from: EffectZone::HeroHand,
         to: EffectZone::HeroPlayArea,
     });
-    event_effects.extend(resolution.outcomes);
+    event_effects.extend(outcomes);
     let event = GameEvent::CardPlayed {
         sequence,
         state_version,
@@ -1844,7 +2010,7 @@ fn decide_play_card(
         card_id,
         targets,
         effects: event_effects,
-        stop: resolution.stop,
+        stop,
         prng_counter,
     };
     let state = apply_game_event(state, &event).map_err(map_game_event_error)?;
@@ -1855,6 +2021,8 @@ fn decide_assign_attack(
     state: &InitialGameState,
     actor_position: u8,
     legal_intentions: &LegalGameIntentions,
+    effect_rules: &[EffectRule],
+    die_roller: &mut dyn EffectRoller,
     villain_id: String,
     amount: u16,
 ) -> Result<GameCommandDecision, GameCommandError> {
@@ -1882,6 +2050,7 @@ fn decide_assign_attack(
     if amount > available_attack || amount > villain_health {
         return Err(GameCommandError::CommandNotLegal);
     }
+    let reward_rule_id = villain.reward_rule_id().map(str::to_owned);
     let sequence = state
         .sequence
         .checked_add(1)
@@ -1890,7 +2059,46 @@ fn decide_assign_attack(
         .state_version
         .checked_add(1)
         .ok_or(GameCommandError::VersionOverflow)?;
-    let effects = attack_assignment_effects(hero, actor_position, villain, amount);
+    let mut effects = attack_assignment_effects(hero, actor_position, villain, amount);
+    let defeated = amount == villain_health;
+    if defeated {
+        effects.push(EffectOutcome::Moved {
+            rule_id: "system:defeat-villain".to_owned(),
+            target_id: villain_id.clone(),
+            target_position: None,
+            from: EffectZone::ActiveVillains,
+            to: EffectZone::VillainDiscard,
+        });
+    }
+    let mut effect_world = state.effect_world.clone();
+    effects::apply_effect_outcomes(&mut effect_world, &effects)
+        .map_err(map_effect_execution_error)?;
+    let (mut stop, rolls_consumed) =
+        if let Some(reward_rule_id) = reward_rule_id.filter(|_| defeated) {
+            let matching_rules = effect_rules
+                .iter()
+                .filter(|rule| {
+                    rule.id == reward_rule_id && rule.trigger == EffectTrigger::VillainReward
+                })
+                .collect::<Vec<_>>();
+            let [reward_rule] = matching_rules.as_slice() else {
+                return Err(GameCommandError::EffectExecutionFailed);
+            };
+            let resolution = effects::execute_forced_effect_rule(
+                &mut effect_world,
+                actor_position,
+                reward_rule,
+                effect_rules,
+                die_roller,
+            )
+            .map_err(map_effect_execution_error)?;
+            effects.extend(resolution.outcomes);
+            (resolution.stop, resolution.rolls_consumed)
+        } else {
+            (EffectStop::Stable, 0)
+        };
+    settle_structural_outcome(&effect_world, &mut effects, &mut stop);
+    let prng_counter = next_prng_counter(state, rolls_consumed)?;
     let event = GameEvent::AttackAssigned {
         sequence,
         state_version,
@@ -1899,6 +2107,8 @@ fn decide_assign_attack(
         villain_id,
         amount,
         effects,
+        stop,
+        prng_counter,
     };
     let state = apply_game_event(state, &event).map_err(map_game_event_error)?;
     Ok(GameCommandDecision { state, event })
@@ -2399,8 +2609,18 @@ pub fn apply_game_event(
             villain_id,
             amount,
             effects,
+            stop,
+            prng_counter,
             ..
-        } => apply_attack_assigned_event(state, metadata, villain_id, *amount, effects),
+        } => apply_attack_assigned_event(
+            state,
+            metadata,
+            villain_id,
+            *amount,
+            effects,
+            stop,
+            *prng_counter,
+        ),
         GameEvent::CardAcquired {
             card_id,
             cost,
@@ -2758,7 +2978,18 @@ fn apply_turn_completed_event(
     validate_turn_steps(steps, control, &participant_positions)?;
 
     let mut next = state.clone();
-    apply_end_turn_outcomes(&mut next.effect_world, *actor_position, end_turn)?;
+    apply_end_turn_outcomes(
+        &mut next.effect_world,
+        *actor_position,
+        state.active_villain_limit,
+        end_turn,
+    )?;
+    if control.phase == GamePhase::EndTurn
+        && (control.status != GameStatus::Lost
+            || next.effect_world.structural_game_outcome() != Some(EffectGameOutcome::Lost))
+    {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
     for step in steps.iter().skip(1) {
         effects::apply_effect_outcomes(&mut next.effect_world, &step.effects)
             .map_err(|_| GameEventError::EffectTransitionInvalid)?;
@@ -2775,7 +3006,6 @@ fn apply_turn_completed_event(
     apply_engine_control(&mut next, control);
     next.last_effects = steps
         .iter()
-        .skip(1)
         .flat_map(|step| step.effects.iter().cloned())
         .collect();
     next.last_turn_steps.clone_from(steps);
@@ -2812,17 +3042,21 @@ fn validate_turn_event_metadata(
     if state.state_version.checked_add(1) != Some(state_version) {
         return Err(GameEventError::StateVersionMismatch);
     }
-    let expected_turn = state
-        .turn
-        .checked_add(1)
-        .ok_or(GameEventError::VersionOverflow)?;
-    let player_index = state
-        .players
-        .iter()
-        .position(|player| player.position == actor_position)
-        .ok_or(GameEventError::ActorNotActive)?;
-    let expected_active = state.players[(player_index + 1) % state.players.len()].position;
-    if control.turn != expected_turn || control.active_position != expected_active {
+    if control.phase != GamePhase::EndTurn {
+        let expected_turn = state
+            .turn
+            .checked_add(1)
+            .ok_or(GameEventError::VersionOverflow)?;
+        let player_index = state
+            .players
+            .iter()
+            .position(|player| player.position == actor_position)
+            .ok_or(GameEventError::ActorNotActive)?;
+        let expected_active = state.players[(player_index + 1) % state.players.len()].position;
+        if control.turn != expected_turn || control.active_position != expected_active {
+            return Err(GameEventError::EffectTransitionInvalid);
+        }
+    } else if control.turn != state.turn || control.active_position != actor_position {
         return Err(GameEventError::EffectTransitionInvalid);
     }
     Ok(())
@@ -2838,7 +3072,11 @@ fn random_samples_consumed(
             EndTurnOutcome::PileShuffled { bottom_to_top, .. } => {
                 bottom_to_top.len().saturating_sub(1)
             }
-            EndTurnOutcome::CardMoved { .. } | EndTurnOutcome::ResourceReset { .. } => 0,
+            EndTurnOutcome::LocationAdvanced { .. }
+            | EndTurnOutcome::VillainRevealed { .. }
+            | EndTurnOutcome::CardMoved { .. }
+            | EndTurnOutcome::ResourceReset { .. }
+            | EndTurnOutcome::HeroRecovered { .. } => 0,
         })
         .chain(
             steps
@@ -2873,12 +3111,24 @@ fn validate_turn_steps(
     participant_positions: &[u8],
 ) -> Result<(), GameEventError> {
     let phases = steps.iter().map(TurnStep::phase).collect::<Vec<_>>();
-    if !matches!(
+    let phase_sequence_is_valid = matches!(
         phases.as_slice(),
         [GamePhase::EndTurn, GamePhase::DarkArts]
             | [GamePhase::EndTurn, GamePhase::DarkArts, GamePhase::Villains]
-    ) || !steps.first().is_some_and(|step| step.effects.is_empty())
-    {
+    ) || (control.status != GameStatus::InProgress
+        && phases.as_slice() == [GamePhase::EndTurn]);
+    let end_turn_effects_valid = steps.first().is_some_and(|step| {
+        if steps.len() == 1 {
+            step.effects
+                == [EffectOutcome::Terminal {
+                    rule_id: STRUCTURAL_OUTCOME_RULE_ID.to_owned(),
+                    outcome: EffectGameOutcome::Lost,
+                }]
+        } else {
+            step.effects.is_empty()
+        }
+    });
+    if !phase_sequence_is_valid || !end_turn_effects_valid {
         return Err(GameEventError::EffectTransitionInvalid);
     }
     for (index, step) in steps.iter().enumerate().skip(1) {
@@ -2925,7 +3175,10 @@ fn event_control_matches_steps(
         }
         (GameStatus::Lost | GameStatus::Won, None) => {
             last_phase == Some(control.phase)
-                && matches!(control.phase, GamePhase::DarkArts | GamePhase::Villains)
+                && matches!(
+                    control.phase,
+                    GamePhase::DarkArts | GamePhase::Villains | GamePhase::EndTurn
+                )
                 && control.queued_phases.is_empty()
                 && control.queued_effects.is_empty()
         }
@@ -2936,9 +3189,15 @@ fn event_control_matches_steps(
 fn apply_end_turn_outcomes(
     world: &mut EffectWorld,
     actor_position: u8,
+    active_villain_limit: u8,
     outcomes: &[EndTurnOutcome],
 ) -> Result<(), GameEventError> {
     let mut supplied = outcomes.iter();
+    for outcome in advance_shared_table(world, active_villain_limit)
+        .map_err(|_| GameEventError::EffectTransitionInvalid)?
+    {
+        expect_end_turn_outcome(&mut supplied, &outcome)?;
+    }
     for from in [EffectZone::HeroPlayArea, EffectZone::HeroHand] {
         for card_id in world.card_ids_in_zone(actor_position, from) {
             expect_end_turn_outcome(
@@ -2967,6 +3226,8 @@ fn apply_end_turn_outcomes(
             .reset_hero_resource(actor_position, resource, before)
             .map_err(|_| GameEventError::EffectTransitionInvalid)?;
     }
+
+    replay_hero_recovery(world, &mut supplied)?;
 
     while world
         .card_ids_in_zone(actor_position, EffectZone::HeroHand)
@@ -3038,6 +3299,26 @@ fn expect_end_turn_outcome(
     } else {
         Err(GameEventError::EffectTransitionInvalid)
     }
+}
+
+fn replay_hero_recovery(
+    world: &mut EffectWorld,
+    supplied: &mut std::slice::Iter<'_, EndTurnOutcome>,
+) -> Result<(), GameEventError> {
+    for (position, after) in world
+        .recover_stunned_heroes()
+        .map_err(|_| GameEventError::EffectTransitionInvalid)?
+    {
+        expect_end_turn_outcome(
+            supplied,
+            &EndTurnOutcome::HeroRecovered {
+                position,
+                before: 0,
+                after,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn apply_effect_stop(state: &mut InitialGameState, stop: &EffectStop) {
@@ -3115,9 +3396,7 @@ fn apply_card_played_event(
             from: EffectZone::HeroHand,
             to: EffectZone::HeroPlayArea,
         })
-        || resolved_effects
-            .iter()
-            .any(|outcome| effect_outcome_rule_id(outcome) != card_rule_id)
+        || !outcomes_belong_to_window(&state.effect_world, resolved_effects, &card_rule_id)
         || !target_bindings_are_well_formed(targets)
         || !effects::effect_transition_is_valid(event_effects, stop, &participant_positions)
     {
@@ -3128,6 +3407,11 @@ fn apply_card_played_event(
     let mut next = state.clone();
     effects::apply_effect_outcomes(&mut next.effect_world, event_effects)
         .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    validate_structural_outcome(
+        &next.effect_world,
+        split_structural_outcome(event_effects).1,
+        stop,
+    )?;
     let positions = next
         .players
         .iter()
@@ -3152,12 +3436,45 @@ fn apply_card_played_event(
     Ok(next)
 }
 
+fn validate_structural_outcome(
+    world: &EffectWorld,
+    structural_terminal: Option<EffectGameOutcome>,
+    stop: &EffectStop,
+) -> Result<(), GameEventError> {
+    let expected_structural = world.structural_game_outcome();
+    if structural_terminal.is_some_and(|outcome| {
+        expected_structural != Some(outcome) || stop != &EffectStop::Terminal(outcome)
+    }) || (structural_terminal.is_none()
+        && matches!(stop, EffectStop::Stable)
+        && expected_structural.is_some())
+    {
+        return Err(GameEventError::EffectTransitionInvalid);
+    }
+
+    Ok(())
+}
+
+fn split_structural_outcome(
+    outcomes: &[EffectOutcome],
+) -> (&[EffectOutcome], Option<EffectGameOutcome>) {
+    match outcomes.split_last() {
+        Some((EffectOutcome::Terminal { rule_id, outcome }, preceding))
+            if rule_id == STRUCTURAL_OUTCOME_RULE_ID =>
+        {
+            (preceding, Some(*outcome))
+        }
+        _ => (outcomes, None),
+    }
+}
+
 fn apply_attack_assigned_event(
     state: &InitialGameState,
     metadata: GameEventMetadata,
     villain_id: &str,
     amount: u16,
     event_effects: &[EffectOutcome],
+    stop: &EffectStop,
+    prng_counter: u64,
 ) -> Result<InitialGameState, GameEventError> {
     if state.status != GameStatus::InProgress
         || state.phase != GamePhase::HeroActions
@@ -3191,17 +3508,49 @@ fn apply_attack_assigned_event(
     if amount > available_attack || amount > villain_health {
         return Err(GameEventError::EffectTransitionInvalid);
     }
-    let expected_effects =
+    let reward_rule_id = villain.reward_rule_id().map(str::to_owned);
+    let defeated = amount == villain_health;
+    let mut expected_effects =
         attack_assignment_effects(hero, metadata.actor_position, villain, amount);
-    if event_effects != expected_effects {
+    if defeated {
+        expected_effects.push(EffectOutcome::Moved {
+            rule_id: "system:defeat-villain".to_owned(),
+            target_id: villain_id.to_owned(),
+            target_position: None,
+            from: EffectZone::ActiveVillains,
+            to: EffectZone::VillainDiscard,
+        });
+    }
+    let Some((committed_effects, remaining_effects)) =
+        event_effects.split_at_checked(expected_effects.len())
+    else {
+        return Err(GameEventError::EffectTransitionInvalid);
+    };
+    let (reward_effects, structural_terminal) = split_structural_outcome(remaining_effects);
+    let participant_positions = state
+        .players
+        .iter()
+        .map(InitialPlayer::position)
+        .collect::<Vec<_>>();
+    if committed_effects != expected_effects
+        || (!reward_effects.is_empty()
+            && reward_rule_id.as_deref().is_none_or(|rule_id| {
+                !outcomes_belong_to_window(&state.effect_world, reward_effects, rule_id)
+            }))
+        || (!defeated && !reward_effects.is_empty())
+        || !effects::effect_transition_is_valid(event_effects, stop, &participant_positions)
+    {
         return Err(GameEventError::EffectTransitionInvalid);
     }
+    validate_event_prng_counter(state, event_effects, prng_counter)?;
     let mut next = state.clone();
     effects::apply_effect_outcomes(&mut next.effect_world, event_effects)
         .map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    validate_structural_outcome(&next.effect_world, structural_terminal, stop)?;
     validate_effect_world(&next)?;
     next.sequence = metadata.sequence;
     next.state_version = metadata.state_version;
+    next.prng_counter = prng_counter;
     next.last_effects.extend_from_slice(event_effects);
     if next.last_effects.len() > 4_096 {
         return Err(GameEventError::EffectTransitionInvalid);
@@ -3211,6 +3560,7 @@ fn apply_attack_assigned_event(
         GamePhase::HeroActions,
         event_effects,
     );
+    apply_effect_stop(&mut next, stop);
     Ok(next)
 }
 
@@ -3348,6 +3698,63 @@ fn target_bindings_are_well_formed(bindings: &[EffectTargetBinding]) -> bool {
         })
 }
 
+fn outcomes_belong_to_window(
+    world: &EffectWorld,
+    outcomes: &[EffectOutcome],
+    primary_rule: &str,
+) -> bool {
+    let rewards = outcomes
+        .iter()
+        .filter_map(|outcome| match outcome {
+            EffectOutcome::Moved {
+                rule_id,
+                target_id,
+                from: EffectZone::ActiveVillains,
+                to: EffectZone::VillainDiscard,
+                target_position: None,
+            } if rule_id == "system:defeat-villain" => world
+                .entity(target_id)
+                .and_then(|(_, entity)| entity.reward_rule_id()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    outcomes.iter().all(|outcome| outcome_belongs_to_rule(outcome, primary_rule)
+        || rewards.contains(effect_outcome_rule_id(outcome))
+        || matches!(outcome,
+            EffectOutcome::Moved { rule_id, from: EffectZone::ActiveVillains, to: EffectZone::VillainDiscard, target_position: None, .. }
+                if rule_id == "system:defeat-villain")
+        || matches!(outcome, EffectOutcome::Terminal { rule_id, .. } if rule_id == STRUCTURAL_OUTCOME_RULE_ID))
+}
+
+fn outcome_belongs_to_rule(outcome: &EffectOutcome, rule_id: &str) -> bool {
+    if effect_outcome_rule_id(outcome) == rule_id {
+        return true;
+    }
+    if effect_outcome_rule_id(outcome) != "system:stunned" {
+        return false;
+    }
+    matches!(
+        outcome,
+        EffectOutcome::Moved {
+            from: EffectZone::HeroHand,
+            to: EffectZone::HeroDiscardPile,
+            target_position: Some(_),
+            ..
+        } | EffectOutcome::ResourceChanged {
+            resource: EffectResource::Attack | EffectResource::Influence,
+            after: 0,
+            cause: EffectChangeCause::Effect,
+            target_position: Some(_),
+            ..
+        } | EffectOutcome::ResourceChanged {
+            resource: EffectResource::Control,
+            cause: EffectChangeCause::Effect,
+            target_position: None,
+            ..
+        }
+    )
+}
+
 fn effect_outcome_rule_id(outcome: &EffectOutcome) -> &str {
     match outcome {
         EffectOutcome::DieRolled { rule_id, .. }
@@ -3463,6 +3870,7 @@ mod tests {
             turn: state.turn(),
             phase: state.phase(),
             active_position: state.active_position(),
+            active_villain_limit: state.active_villain_limit(),
             adventure_id: state.adventure_id(),
             content_version: state.content_version(),
             ruleset_version: state.ruleset_version(),
@@ -3666,6 +4074,7 @@ mod tests {
             turn: state.turn(),
             phase: state.phase(),
             active_position: state.active_position(),
+            active_villain_limit: state.active_villain_limit(),
             adventure_id: state.adventure_id(),
             content_version: state.content_version(),
             ruleset_version: state.ruleset_version(),
@@ -3727,6 +4136,7 @@ mod tests {
             turn: started.turn(),
             phase: started.phase(),
             active_position: started.active_position(),
+            active_villain_limit: started.active_villain_limit(),
             adventure_id: started.adventure_id(),
             content_version: started.content_version(),
             ruleset_version: started.ruleset_version(),
@@ -4071,6 +4481,7 @@ mod tests {
             turn: started.turn(),
             phase: started.phase(),
             active_position: 4,
+            active_villain_limit: started.active_villain_limit(),
             adventure_id: started.adventure_id(),
             content_version: started.content_version(),
             ruleset_version: started.ruleset_version(),
@@ -4137,6 +4548,7 @@ mod tests {
             turn: started.turn(),
             phase: started.phase(),
             active_position: 1,
+            active_villain_limit: started.active_villain_limit(),
             adventure_id: started.adventure_id(),
             content_version: started.content_version(),
             ruleset_version: started.ruleset_version(),
@@ -4648,7 +5060,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_choice_requires_an_in_progress_dark_arts_stop() {
+    fn persisted_choice_requires_an_in_progress_coherent_phase_stop() {
         let participants = valid_participants();
         let initial = initialize_game(StartGameInput {
             actor_role: ParticipantRole::Host,
@@ -4671,7 +5083,7 @@ mod tests {
         wrong_phase.phase = GamePhase::HeroActions;
         assert_eq!(
             restore_game_state(restore_input(&wrong_phase, SNAPSHOT_VERSION)),
-            Err(GameStateRestoreError::InvalidPlayers)
+            Err(GameStateRestoreError::InvalidControlState)
         );
     }
 
@@ -4716,6 +5128,7 @@ mod tests {
                 turn: 1,
                 phase: GamePhase::DarkArts,
                 active_position: 1,
+                active_villain_limit: 0,
                 adventure_id: CONTENT.adventure_id,
                 content_version: CONTENT.content_version,
                 ruleset_version: CONTENT.ruleset_version,

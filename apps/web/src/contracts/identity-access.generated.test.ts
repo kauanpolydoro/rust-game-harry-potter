@@ -51,6 +51,7 @@ function projection() {
       resources: { attack: 0, health: 10, influence: 0 },
       role: 'host',
       hand_count: 0,
+      stunned: false,
     },
     participants: [
       {
@@ -60,6 +61,7 @@ function projection() {
         resources: { attack: 0, health: 10, influence: 0 },
         role: 'host',
         hand_count: 0,
+        stunned: false,
       },
     ],
     snapshot: {
@@ -87,6 +89,10 @@ function projection() {
       market: [],
       play_area: [],
       villain_deck_count: 0,
+      villain_discard_count: 0,
+      location_deck_count: 0,
+      location_discard_count: 0,
+      current_location: null,
     },
     turn: { active_position: 1, number: 1, phase: 'hero_actions' },
   }
