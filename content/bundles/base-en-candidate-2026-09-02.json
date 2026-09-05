@@ -1167,7 +1167,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Cedric Diggory"
+        "en": "Cedric Diggory",
+        "pt-BR": "Cedrico Diggory"
       },
       "provenance": {
         "id": [
@@ -1187,6 +1188,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -1201,7 +1205,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Filius Flitwick"
+        "en": "Filius Flitwick",
+        "pt-BR": "Fílio Flitwick"
       },
       "provenance": {
         "id": [
@@ -1221,6 +1226,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -1269,7 +1277,8 @@
       "copies": 6,
       "introduced_in": 4,
       "names": {
-        "en": "Hogwarts: A History"
+        "en": "Hogwarts: A History",
+        "pt-BR": "Hogwarts: Uma História"
       },
       "provenance": {
         "id": [
@@ -1289,6 +1298,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -1507,7 +1519,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Triwizard Cup"
+        "en": "Triwizard Cup",
+        "pt-BR": "Taça Tribruxa"
       },
       "provenance": {
         "id": [
@@ -1527,6 +1540,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2568,7 +2584,8 @@
       "copies": 2,
       "introduced_in": 4,
       "names": {
-        "en": "Heir of Slytherin"
+        "en": "Heir of Slytherin",
+        "pt-BR": "Herdeiro de Sonserina"
       },
       "provenance": {
         "id": [
@@ -2588,6 +2605,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2667,7 +2687,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Regeneration"
+        "en": "Regeneration",
+        "pt-BR": "Regeneração"
       },
       "provenance": {
         "id": [
@@ -2687,6 +2708,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3159,7 +3183,8 @@
       "copies": 2,
       "introduced_in": 4,
       "names": {
-        "en": "Death Eater"
+        "en": "Death Eater",
+        "pt-BR": "Mortífago"
       },
       "provenance": {
         "id": [
@@ -3179,6 +3204,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3716,7 +3744,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Quidditch World Cup"
+        "en": "Quidditch World Cup",
+        "pt-BR": "Copa do Mundo de Quadribol"
       },
       "provenance": {
         "id": [
@@ -3736,6 +3765,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3751,7 +3783,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Triwizard Tournament"
+        "en": "Triwizard Tournament",
+        "pt-BR": "Torneio Tribruxo"
       },
       "provenance": {
         "id": [
@@ -3771,6 +3804,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3786,7 +3822,8 @@
       "copies": 1,
       "introduced_in": 4,
       "names": {
-        "en": "Graveyard"
+        "en": "Graveyard",
+        "pt-BR": "Cemitério"
       },
       "provenance": {
         "id": [
@@ -3806,6 +3843,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5881,7 +5921,8 @@
       "copies": 0,
       "introduced_in": 4,
       "names": {
-        "en": "Game 4"
+        "en": "Game 4",
+        "pt-BR": "Jogo 4"
       },
       "provenance": {
         "id": [
@@ -5900,6 +5941,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
