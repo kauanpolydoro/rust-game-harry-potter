@@ -845,7 +845,8 @@
       "copies": 3,
       "introduced_in": 3,
       "names": {
-        "en": "Butterbeer"
+        "en": "Butterbeer",
+        "pt-BR": "Cerveja de Manteiga"
       },
       "provenance": {
         "id": [
@@ -865,6 +866,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -879,7 +883,8 @@
       "copies": 3,
       "introduced_in": 3,
       "names": {
-        "en": "Chocolate Frog"
+        "en": "Chocolate Frog",
+        "pt-BR": "Sapo de Chocolate"
       },
       "provenance": {
         "id": [
@@ -899,6 +904,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -913,7 +921,8 @@
       "copies": 2,
       "introduced_in": 3,
       "names": {
-        "en": "Crystal Ball"
+        "en": "Crystal Ball",
+        "pt-BR": "Bola de Cristal"
       },
       "provenance": {
         "id": [
@@ -933,6 +942,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -981,7 +993,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Marauder's Map"
+        "en": "Marauder's Map",
+        "pt-BR": "Mapa do Maroto"
       },
       "provenance": {
         "id": [
@@ -1001,6 +1014,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2383,7 +2399,8 @@
       "copies": 2,
       "introduced_in": 3,
       "names": {
-        "en": "Dementor's Kiss"
+        "en": "Dementor's Kiss",
+        "pt-BR": "Beijo do Dementador"
       },
       "provenance": {
         "id": [
@@ -2403,6 +2420,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3030,7 +3050,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Dementor"
+        "en": "Dementor",
+        "pt-BR": "Dementador"
       },
       "provenance": {
         "id": [
@@ -3050,6 +3071,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3575,7 +3599,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Hogwarts Express"
+        "en": "Hogwarts Express",
+        "pt-BR": "Expresso de Hogwarts"
       },
       "provenance": {
         "id": [
@@ -3595,6 +3620,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3610,7 +3638,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Hogsmeade Village"
+        "en": "Hogsmeade Village",
+        "pt-BR": "Vila de Hogsmeade"
       },
       "provenance": {
         "id": [
@@ -3630,6 +3659,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3645,7 +3677,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Shrieking Shack"
+        "en": "Shrieking Shack",
+        "pt-BR": "Cabana dos Gritos"
       },
       "provenance": {
         "id": [
@@ -3665,6 +3698,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4621,7 +4657,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Harry - Game 3"
+        "en": "Harry - Game 3",
+        "pt-BR": "Harry - Jogo 3"
       },
       "provenance": {
         "id": [
@@ -4641,6 +4678,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4724,7 +4764,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Hermione - Game 3"
+        "en": "Hermione - Game 3",
+        "pt-BR": "Hermione - Jogo 3"
       },
       "provenance": {
         "id": [
@@ -4744,6 +4785,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4827,7 +4871,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Neville - Game 3"
+        "en": "Neville - Game 3",
+        "pt-BR": "Neville - Jogo 3"
       },
       "provenance": {
         "id": [
@@ -4847,6 +4892,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4930,7 +4978,8 @@
       "copies": 1,
       "introduced_in": 3,
       "names": {
-        "en": "Ron - Game 3"
+        "en": "Ron - Game 3",
+        "pt-BR": "Rony - Jogo 3"
       },
       "provenance": {
         "id": [
@@ -4950,6 +4999,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5791,7 +5843,8 @@
       "copies": 0,
       "introduced_in": 3,
       "names": {
-        "en": "Game 3"
+        "en": "Game 3",
+        "pt-BR": "Jogo 3"
       },
       "provenance": {
         "id": [
@@ -5810,6 +5863,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
