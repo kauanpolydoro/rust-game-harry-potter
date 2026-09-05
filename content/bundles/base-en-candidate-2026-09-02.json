@@ -1761,7 +1761,8 @@
       "copies": 1,
       "introduced_in": 5,
       "names": {
-        "en": "Nymphadora Tonks"
+        "en": "Nymphadora Tonks",
+        "pt-BR": "Ninfadora Tonks"
       },
       "provenance": {
         "id": [
@@ -1781,6 +1782,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2724,7 +2728,8 @@
       "copies": 2,
       "introduced_in": 5,
       "names": {
-        "en": "Educational Decree"
+        "en": "Educational Decree",
+        "pt-BR": "Decreto Educacional"
       },
       "provenance": {
         "id": [
@@ -2744,6 +2749,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2757,7 +2765,8 @@
       "copies": 1,
       "introduced_in": 5,
       "names": {
-        "en": "Legilimency"
+        "en": "Legilimency",
+        "pt-BR": "Legilimência"
       },
       "provenance": {
         "id": [
@@ -2777,6 +2786,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3257,7 +3269,8 @@
       "copies": 1,
       "introduced_in": 5,
       "names": {
-        "en": "Voldemort - Game 5"
+        "en": "Voldemort - Game 5",
+        "pt-BR": "Voldemort - Jogo 5"
       },
       "provenance": {
         "id": [
@@ -3277,6 +3290,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3896,7 +3912,8 @@
       "copies": 1,
       "introduced_in": 5,
       "names": {
-        "en": "Hall of Prophecy"
+        "en": "Hall of Prophecy",
+        "pt-BR": "Salão das Profecias"
       },
       "provenance": {
         "id": [
@@ -3916,6 +3933,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3931,7 +3951,8 @@
       "copies": 1,
       "introduced_in": 5,
       "names": {
-        "en": "Ministry of Magic"
+        "en": "Ministry of Magic",
+        "pt-BR": "Ministério da Magia"
       },
       "provenance": {
         "id": [
@@ -3951,6 +3972,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5959,7 +5983,8 @@
       "copies": 0,
       "introduced_in": 5,
       "names": {
-        "en": "Game 5"
+        "en": "Game 5",
+        "pt-BR": "Jogo 5"
       },
       "provenance": {
         "id": [
@@ -5978,6 +6003,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
