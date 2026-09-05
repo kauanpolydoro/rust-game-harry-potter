@@ -39,7 +39,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Albus Dumbledore"
+        "en": "Albus Dumbledore",
+        "pt-BR": "Alvo Dumbledore"
       },
       "provenance": {
         "id": [
@@ -59,6 +60,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -107,7 +111,8 @@
       "copies": 4,
       "introduced_in": 1,
       "names": {
-        "en": "Essence of Dittany"
+        "en": "Essence of Dittany",
+        "pt-BR": "Essência de Dittany"
       },
       "provenance": {
         "id": [
@@ -127,6 +132,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -141,7 +149,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Golden Snitch"
+        "en": "Golden Snitch",
+        "pt-BR": "Pomo Dourado"
       },
       "provenance": {
         "id": [
@@ -161,6 +170,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -277,7 +289,8 @@
       "copies": 4,
       "introduced_in": 1,
       "names": {
-        "en": "Quidditch Gear"
+        "en": "Quidditch Gear",
+        "pt-BR": "Equipamento de Quadribol"
       },
       "provenance": {
         "id": [
@@ -297,6 +310,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -379,7 +395,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Sorting Hat"
+        "en": "Sorting Hat",
+        "pt-BR": "Chapéu Seletor"
       },
       "provenance": {
         "id": [
@@ -399,6 +416,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2145,7 +2165,8 @@
       "copies": 3,
       "introduced_in": 1,
       "names": {
-        "en": "He Who Must Not Be Named"
+        "en": "He Who Must Not Be Named",
+        "pt-BR": "Ele que Não Deve Ser Nomeado"
       },
       "provenance": {
         "id": [
@@ -2165,6 +2186,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2178,7 +2202,8 @@
       "copies": 2,
       "introduced_in": 1,
       "names": {
-        "en": "Petrification"
+        "en": "Petrification",
+        "pt-BR": "Petrificação"
       },
       "provenance": {
         "id": [
@@ -2198,6 +2223,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2772,7 +2800,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Crabbe & Goyle"
+        "en": "Crabbe & Goyle",
+        "pt-BR": "Crabbe e Goyle"
       },
       "provenance": {
         "id": [
@@ -2792,6 +2821,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3332,7 +3364,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Diagon Alley"
+        "en": "Diagon Alley",
+        "pt-BR": "Beco Diagonal"
       },
       "provenance": {
         "id": [
@@ -3352,6 +3385,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3367,7 +3403,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Mirror of Erised"
+        "en": "Mirror of Erised",
+        "pt-BR": "Espelho de Erised"
       },
       "provenance": {
         "id": [
@@ -3387,6 +3424,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4100,7 +4140,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Invisibility Cloak"
+        "en": "Invisibility Cloak",
+        "pt-BR": "Manto de Invisibilidade"
       },
       "provenance": {
         "id": [
@@ -4120,6 +4161,9 @@
         ],
         "introduced_in": [
           "eccabay-cards"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4199,7 +4243,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Every Flavour Beans"
+        "en": "Every Flavour Beans",
+        "pt-BR": "Feijões de Todos os Sabores"
       },
       "provenance": {
         "id": [
@@ -4219,6 +4264,9 @@
         ],
         "introduced_in": [
           "eccabay-cards"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4298,7 +4346,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Time-Turner"
+        "en": "Time-Turner",
+        "pt-BR": "Reversor de Tempo"
       },
       "provenance": {
         "id": [
@@ -4318,6 +4367,9 @@
         ],
         "introduced_in": [
           "eccabay-cards"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4331,7 +4383,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "The Tales of Beedle the Bard"
+        "en": "The Tales of Beedle the Bard",
+        "pt-BR": "Contos de Beedle, o Bardo"
       },
       "provenance": {
         "id": [
@@ -4351,6 +4404,9 @@
         ],
         "introduced_in": [
           "eccabay-cards"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4430,7 +4486,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Mandrake"
+        "en": "Mandrake",
+        "pt-BR": "Mandrágora"
       },
       "provenance": {
         "id": [
@@ -4450,6 +4507,9 @@
         ],
         "introduced_in": [
           "eccabay-cards"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4496,7 +4556,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Harry - Game 1"
+        "en": "Harry - Game 1",
+        "pt-BR": "Harry - Jogo 1"
       },
       "provenance": {
         "id": [
@@ -4516,6 +4577,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4595,7 +4659,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Hermione - Game 1"
+        "en": "Hermione - Game 1",
+        "pt-BR": "Hermione - Jogo 1"
       },
       "provenance": {
         "id": [
@@ -4615,6 +4680,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4694,7 +4762,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Neville - Game 1"
+        "en": "Neville - Game 1",
+        "pt-BR": "Neville - Jogo 1"
       },
       "provenance": {
         "id": [
@@ -4714,6 +4783,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4793,7 +4865,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Ron - Game 1"
+        "en": "Ron - Game 1",
+        "pt-BR": "Rony - Jogo 1"
       },
       "provenance": {
         "id": [
@@ -4813,6 +4886,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5399,7 +5475,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Turn Order 1"
+        "en": "Turn Order 1",
+        "pt-BR": "Ordem de Turno 1"
       },
       "provenance": {
         "id": [
@@ -5418,6 +5495,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
@@ -5430,7 +5510,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Turn Order 2"
+        "en": "Turn Order 2",
+        "pt-BR": "Ordem de Turno 2"
       },
       "provenance": {
         "id": [
@@ -5449,6 +5530,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
@@ -5461,7 +5545,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Turn Order 3"
+        "en": "Turn Order 3",
+        "pt-BR": "Ordem de Turno 3"
       },
       "provenance": {
         "id": [
@@ -5480,6 +5565,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
@@ -5492,7 +5580,8 @@
       "copies": 1,
       "introduced_in": 1,
       "names": {
-        "en": "Turn Order 4"
+        "en": "Turn Order 4",
+        "pt-BR": "Ordem de Turno 4"
       },
       "provenance": {
         "id": [
@@ -5511,6 +5600,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
@@ -5523,7 +5615,8 @@
       "copies": 0,
       "introduced_in": 1,
       "names": {
-        "en": "Base English Candidate Catalog"
+        "en": "Base English Candidate Catalog",
+        "pt-BR": "Catálogo Candidato Base em Inglês"
       },
       "provenance": {
         "id": [
@@ -5542,6 +5635,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
@@ -5554,7 +5650,8 @@
       "copies": 0,
       "introduced_in": 1,
       "names": {
-        "en": "Base Candidate Ruleset"
+        "en": "Base Candidate Ruleset",
+        "pt-BR": "Conjunto de Regras Candidato Base"
       },
       "provenance": {
         "id": [
@@ -5573,6 +5670,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
@@ -5587,7 +5687,8 @@
       "copies": 0,
       "introduced_in": 1,
       "names": {
-        "en": "Game 1"
+        "en": "Game 1",
+        "pt-BR": "Jogo 1"
       },
       "provenance": {
         "id": [
@@ -5606,6 +5707,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
