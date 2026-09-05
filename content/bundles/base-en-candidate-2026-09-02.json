@@ -807,7 +807,8 @@
       "copies": 2,
       "introduced_in": 2,
       "names": {
-        "en": "Polyjuice Potion"
+        "en": "Polyjuice Potion",
+        "pt-BR": "Poção de Metamorfose"
       },
       "provenance": {
         "id": [
@@ -827,6 +828,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2239,7 +2243,8 @@
       "copies": 2,
       "introduced_in": 2,
       "names": {
-        "en": "Hand of Glory"
+        "en": "Hand of Glory",
+        "pt-BR": "Mão da Glória"
       },
       "provenance": {
         "id": [
@@ -2259,6 +2264,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2305,7 +2313,8 @@
       "copies": 1,
       "introduced_in": 2,
       "names": {
-        "en": "Poison"
+        "en": "Poison",
+        "pt-BR": "Veneno"
       },
       "provenance": {
         "id": [
@@ -2325,6 +2334,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2909,7 +2921,8 @@
       "copies": 1,
       "introduced_in": 2,
       "names": {
-        "en": "Basilisk"
+        "en": "Basilisk",
+        "pt-BR": "Basilisco"
       },
       "provenance": {
         "id": [
@@ -2929,6 +2942,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3442,7 +3458,8 @@
       "copies": 1,
       "introduced_in": 2,
       "names": {
-        "en": "Forbidden Forest"
+        "en": "Forbidden Forest",
+        "pt-BR": "Floresta Proibida"
       },
       "provenance": {
         "id": [
@@ -3462,6 +3479,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3477,7 +3497,8 @@
       "copies": 1,
       "introduced_in": 2,
       "names": {
-        "en": "Quidditch Pitch"
+        "en": "Quidditch Pitch",
+        "pt-BR": "Campo de Quadribol"
       },
       "provenance": {
         "id": [
@@ -3497,6 +3518,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3512,7 +3536,8 @@
       "copies": 1,
       "introduced_in": 2,
       "names": {
-        "en": "Chamber of Secrets"
+        "en": "Chamber of Secrets",
+        "pt-BR": "Câmara Secreta"
       },
       "provenance": {
         "id": [
@@ -3532,6 +3557,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5725,7 +5753,8 @@
       "copies": 0,
       "introduced_in": 2,
       "names": {
-        "en": "Game 2"
+        "en": "Game 2",
+        "pt-BR": "Jogo 2"
       },
       "provenance": {
         "id": [
@@ -5744,6 +5773,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
