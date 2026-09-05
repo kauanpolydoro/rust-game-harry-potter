@@ -1867,7 +1867,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Advanced Potion-Making"
+        "en": "Advanced Potion-Making",
+        "pt-BR": "Poções Avançadas"
       },
       "provenance": {
         "id": [
@@ -1887,6 +1888,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -1901,7 +1905,8 @@
       "copies": 2,
       "introduced_in": 6,
       "names": {
-        "en": "Bezoar"
+        "en": "Bezoar",
+        "pt-BR": "Bézoar"
       },
       "provenance": {
         "id": [
@@ -1921,6 +1926,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -1969,7 +1977,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Deluminator"
+        "en": "Deluminator",
+        "pt-BR": "Deluminador"
       },
       "provenance": {
         "id": [
@@ -1989,6 +1998,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -2003,7 +2015,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Elder Wand"
+        "en": "Elder Wand",
+        "pt-BR": "Varinha das Varinhas"
       },
       "provenance": {
         "id": [
@@ -2023,6 +2036,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3378,7 +3394,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Voldemort - Game 6"
+        "en": "Voldemort - Game 6",
+        "pt-BR": "Voldemort - Jogo 6"
       },
       "provenance": {
         "id": [
@@ -3398,6 +3415,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3990,7 +4010,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Knockturn Alley"
+        "en": "Knockturn Alley",
+        "pt-BR": "Beco das Trevas"
       },
       "provenance": {
         "id": [
@@ -4010,6 +4031,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4025,7 +4049,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "The Burrow"
+        "en": "The Burrow",
+        "pt-BR": "O Ninho"
       },
       "provenance": {
         "id": [
@@ -4045,6 +4070,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4060,7 +4088,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Astronomy Tower"
+        "en": "Astronomy Tower",
+        "pt-BR": "Torre de Astronomia"
       },
       "provenance": {
         "id": [
@@ -4080,6 +4109,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5112,7 +5144,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Flying Lessons"
+        "en": "Flying Lessons",
+        "pt-BR": "Aulas de Voo"
       },
       "provenance": {
         "id": [
@@ -5132,6 +5165,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5145,7 +5181,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Charms"
+        "en": "Charms",
+        "pt-BR": "Feitiços"
       },
       "provenance": {
         "id": [
@@ -5165,6 +5202,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5178,7 +5218,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Transfiguration"
+        "en": "Transfiguration",
+        "pt-BR": "Transfiguração"
       },
       "provenance": {
         "id": [
@@ -5198,6 +5239,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5211,7 +5255,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Herbology"
+        "en": "Herbology",
+        "pt-BR": "Herbologia"
       },
       "provenance": {
         "id": [
@@ -5231,6 +5276,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5244,7 +5292,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Defense Against the Dark Arts"
+        "en": "Defense Against the Dark Arts",
+        "pt-BR": "Defesa Contra as Artes das Trevas"
       },
       "provenance": {
         "id": [
@@ -5264,6 +5313,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5277,7 +5329,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Arithmancy"
+        "en": "Arithmancy",
+        "pt-BR": "Aritmância"
       },
       "provenance": {
         "id": [
@@ -5297,6 +5350,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5310,7 +5366,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Potions"
+        "en": "Potions",
+        "pt-BR": "Poções"
       },
       "provenance": {
         "id": [
@@ -5330,6 +5387,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5343,7 +5403,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "History of Magic"
+        "en": "History of Magic",
+        "pt-BR": "História da Magia"
       },
       "provenance": {
         "id": [
@@ -5363,6 +5424,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5376,7 +5440,8 @@
       "copies": 1,
       "introduced_in": 6,
       "names": {
-        "en": "Divination"
+        "en": "Divination",
+        "pt-BR": "Adivinhação"
       },
       "provenance": {
         "id": [
@@ -5396,6 +5461,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -6021,7 +6089,8 @@
       "copies": 0,
       "introduced_in": 6,
       "names": {
-        "en": "Game 6"
+        "en": "Game 6",
+        "pt-BR": "Jogo 6"
       },
       "provenance": {
         "id": [
@@ -6040,6 +6109,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
