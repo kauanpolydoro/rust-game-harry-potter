@@ -2121,7 +2121,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Sword of Gryffindor"
+        "en": "Sword of Gryffindor",
+        "pt-BR": "Espada de Grifinória"
       },
       "provenance": {
         "id": [
@@ -2141,6 +2142,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -3433,7 +3437,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Voldemort - Game 7"
+        "en": "Voldemort - Game 7",
+        "pt-BR": "Voldemort - Jogo 7"
       },
       "provenance": {
         "id": [
@@ -3453,6 +3458,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4127,7 +4135,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Godric's Hollow"
+        "en": "Godric's Hollow",
+        "pt-BR": "Clareira de Godric"
       },
       "provenance": {
         "id": [
@@ -4147,6 +4156,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4162,7 +4174,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Gringotts"
+        "en": "Gringotts",
+        "pt-BR": "Gringotes"
       },
       "provenance": {
         "id": [
@@ -4182,6 +4195,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4197,7 +4213,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Room of Requirement"
+        "en": "Room of Requirement",
+        "pt-BR": "Sala Precisa"
       },
       "provenance": {
         "id": [
@@ -4217,6 +4234,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4232,7 +4252,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Hogwarts Castle"
+        "en": "Hogwarts Castle",
+        "pt-BR": "Castelo de Hogwarts"
       },
       "provenance": {
         "id": [
@@ -4252,6 +4273,9 @@
         ],
         "introduced_in": [
           "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4790,7 +4814,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Harry - Game 7"
+        "en": "Harry - Game 7",
+        "pt-BR": "Harry - Jogo 7"
       },
       "provenance": {
         "id": [
@@ -4810,6 +4835,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -4897,7 +4925,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Hermione - Game 7"
+        "en": "Hermione - Game 7",
+        "pt-BR": "Hermione - Jogo 7"
       },
       "provenance": {
         "id": [
@@ -4917,6 +4946,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5004,7 +5036,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Neville - Game 7"
+        "en": "Neville - Game 7",
+        "pt-BR": "Neville - Jogo 7"
       },
       "provenance": {
         "id": [
@@ -5024,6 +5057,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5111,7 +5147,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Ron - Game 7"
+        "en": "Ron - Game 7",
+        "pt-BR": "Rony - Jogo 7"
       },
       "provenance": {
         "id": [
@@ -5131,6 +5168,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5477,7 +5517,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Diary"
+        "en": "Diary",
+        "pt-BR": "Diário"
       },
       "provenance": {
         "id": [
@@ -5497,6 +5538,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5512,7 +5556,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Ring"
+        "en": "Ring",
+        "pt-BR": "Anel"
       },
       "provenance": {
         "id": [
@@ -5532,6 +5577,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5547,7 +5595,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Locket"
+        "en": "Locket",
+        "pt-BR": "Medalhão"
       },
       "provenance": {
         "id": [
@@ -5567,6 +5616,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5582,7 +5634,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Cup"
+        "en": "Cup",
+        "pt-BR": "Taça"
       },
       "provenance": {
         "id": [
@@ -5602,6 +5655,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -5617,7 +5673,8 @@
       "copies": 1,
       "introduced_in": 7,
       "names": {
-        "en": "Diadem"
+        "en": "Diadem",
+        "pt-BR": "Diadema"
       },
       "provenance": {
         "id": [
@@ -5637,6 +5694,9 @@
         ],
         "introduced_in": [
           "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
         ]
       },
       "required_functional_fields": [
@@ -6127,7 +6187,8 @@
       "copies": 0,
       "introduced_in": 7,
       "names": {
-        "en": "Game 7"
+        "en": "Game 7",
+        "pt-BR": "Jogo 7"
       },
       "provenance": {
         "id": [
@@ -6146,6 +6207,9 @@
           "project-spec"
         ],
         "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
           "project-spec"
         ]
       },
