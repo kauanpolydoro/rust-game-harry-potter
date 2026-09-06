@@ -7,6 +7,9 @@ Promoções e expansões ficam fora deste escopo.
 Cada registro usa um ID de catálogo opaco e independente do idioma.
 IDs de instâncias em uma partida são representados por um tipo separado e não substituem esses IDs de catálogo.
 
+A localização em português brasileiro segue o [glossário editorial](localization-pt-BR.md), com os termos revisados e suas referências.
+Os campos revisados de `names.pt-BR` apontam para essa decisão editorial em sua proveniência.
+
 O bundle registra proveniência por campo com links para a especificação do projeto, a página oficial do produto e implementações comunitárias fixadas por commit.
 As fontes comunitárias sustentam apenas dados candidatos, como nomes e quantidades, e não promovem automaticamente regras funcionais a fatos validados.
 
