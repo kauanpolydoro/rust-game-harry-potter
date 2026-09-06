@@ -789,12 +789,12 @@ describe('application shell', () => {
           JSON.stringify({
             sessions: [
               {
-                created_at: '2026-09-01T14:20:00Z',
+                created_at: new Date(2026, 8, 1, 11, 20).toISOString(),
                 id: firstSessionId,
                 label: 'Sessão 1',
               },
               {
-                created_at: '2026-09-03T10:05:00Z',
+                created_at: new Date(2026, 8, 3, 7, 5).toISOString(),
                 id: secondSessionId,
                 label: 'Sessão 2',
               },
