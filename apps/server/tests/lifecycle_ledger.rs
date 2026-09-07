@@ -26,6 +26,22 @@ fn proof(completed: Option<i64>) -> PurgeProof {
 }
 
 #[tokio::test]
+async fn restore_reads_durable_tombstones_and_rejects_missing_or_corrupt_ledgers() {
+    let directory =
+        std::env::temp_dir().join(format!("restore_ledger_{}", Uuid::new_v4().simple()));
+    let ledger = FileLedger::new(directory.clone());
+    let key = "c".repeat(64);
+    assert_eq!(ledger.lookup(&key).await, Err(PurgeError::Ledger));
+    ledger.record(&key, &proof(None)).await.unwrap();
+    assert_eq!(ledger.lookup(&key).await.unwrap(), Some(proof(None)));
+    assert_eq!(ledger.lookup(&"d".repeat(64)).await.unwrap(), None);
+    std::fs::write(directory.join(format!("{key}.tombstone.json")), b"{}").unwrap();
+    assert_eq!(ledger.lookup(&key).await, Err(PurgeError::Ledger));
+    assert_eq!(ledger.lookup("../escape").await, Err(PurgeError::Ledger));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn local_proofs_survive_reopen_reject_conflicts_and_expire_only_after_fourteen_days() {
     let directory = std::env::temp_dir().join(format!("ledger_{}", Uuid::new_v4().simple()));
     let ledger = FileLedger::new(directory.clone());
@@ -99,8 +115,6 @@ async fn s3_request(State(store): State<ObjectStore>, request: Request) -> (Stat
     if request.uri().query() == Some("lifecycle") {
         return (StatusCode::OK, "<LifecycleConfiguration><Rule><ID>retention</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Expiration><Days>14</Days></Expiration></Rule></LifecycleConfiguration>".into());
     }
-    assert_eq!(request.method(), "PUT");
-    assert_eq!(request.headers()["x-amz-server-side-encryption"], "AES256");
     assert!(
         request.headers()["authorization"]
             .to_str()
@@ -108,6 +122,19 @@ async fn s3_request(State(store): State<ObjectStore>, request: Request) -> (Stat
             .starts_with("AWS4-HMAC-SHA256 ")
     );
     let path = request.uri().path().to_owned();
+    if request.method() == "GET" {
+        return store.objects.lock().unwrap().get(&path).map_or_else(
+            || {
+                (
+                    StatusCode::NOT_FOUND,
+                    "<Error><Code>NoSuchKey</Code></Error>".into(),
+                )
+            },
+            |bytes| (StatusCode::OK, String::from_utf8(bytes.clone()).unwrap()),
+        );
+    }
+    assert_eq!(request.method(), "PUT");
+    assert_eq!(request.headers()["x-amz-server-side-encryption"], "AES256");
     let bytes = to_bytes(request.into_body(), 4096).await.unwrap().to_vec();
     store.objects.lock().unwrap().insert(path, bytes);
     (StatusCode::OK, String::new())
@@ -143,6 +170,8 @@ async fn s3_adapter_uses_signed_encrypted_durable_puts_and_propagates_storage_fa
     ledger.record(&key, &proof(None)).await.unwrap();
     ledger.record(&key, &proof(None)).await.unwrap();
     ledger.record(&key, &proof(Some(4000))).await.unwrap();
+    assert_eq!(ledger.lookup(&key).await.unwrap(), Some(proof(None)));
+    assert_eq!(ledger.lookup(&"e".repeat(64)).await.unwrap(), None);
     {
         let objects = store.objects.lock().unwrap();
         assert_eq!(objects.len(), 2);
@@ -160,5 +189,24 @@ async fn s3_adapter_uses_signed_encrypted_durable_puts_and_propagates_storage_fa
         Err(PurgeError::Ledger)
     );
     assert_eq!(ledger.validate_retention().await, Err(PurgeError::Ledger));
+    assert_eq!(ledger.lookup(&key).await, Err(PurgeError::Ledger));
     server.abort();
+}
+
+#[tokio::test]
+async fn a_restored_purge_can_publish_a_new_verification_without_conflicting_with_old_completion() {
+    let directory =
+        std::env::temp_dir().join(format!("restored_completion_{}", Uuid::new_v4().simple()));
+    let ledger = FileLedger::new(directory.clone());
+    let key = "f".repeat(64);
+    ledger.record(&key, &proof(None)).await.unwrap();
+    ledger.record(&key, &proof(Some(4000))).await.unwrap();
+    ledger.record(&key, &proof(Some(5000))).await.unwrap();
+    ledger.record(&key, &proof(Some(4000))).await.unwrap();
+    let completed: PurgeProof = serde_json::from_slice(
+        &std::fs::read(directory.join(format!("{key}.complete.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(completed, proof(Some(5000)));
+    std::fs::remove_dir_all(directory).unwrap();
 }

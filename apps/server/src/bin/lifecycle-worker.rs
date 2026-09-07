@@ -41,7 +41,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .max_connections(2)
         .connect(&env::var("DATABASE_URL")?)
         .await?;
-    let state = AppState::new(database.clone()).with_migration_database(migrations);
+    let session_value = env::var("SESSION_TOKEN_KEY")?;
+    let session_key = session_value
+        .as_bytes()
+        .try_into()
+        .map_err(|_| io::Error::other("SESSION_TOKEN_KEY must contain exactly 32 bytes"))?;
+    let state = AppState::new(database.clone())
+        .with_migration_database(migrations)
+        .with_session_token_key(session_key)
+        .with_deployment_epoch(env::var("DEPLOYMENT_EPOCH")?.parse()?);
     initialize(&state)
         .await
         .map_err(|_| io::Error::other("worker initialization failed"))?;
@@ -60,14 +68,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await;
             let ledger = S3Ledger::new(aws_sdk_s3::Client::new(&config), bucket);
             ledger.validate_retention().await?;
-            run(LifecycleWorker::new(database, ledger, key)).await;
+            run(LifecycleWorker::new(database, ledger, key), &state).await;
         }
         (Err(_), Ok(directory)) => {
-            run(LifecycleWorker::new(
-                database,
-                FileLedger::new(directory.into()),
-                key,
-            ))
+            run(
+                LifecycleWorker::new(database, FileLedger::new(directory.into()), key),
+                &state,
+            )
             .await;
         }
         _ => {
@@ -81,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>) {
+async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>, state: &AppState) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let shutdown = shutdown_signal();
@@ -90,6 +97,10 @@ async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>) {
         tokio::select! {
             () = &mut shutdown => return,
             _ = interval.tick() => {
+                if !state.accepts_traffic().await {
+                    tracing::warn!("worker deployment gate closed");
+                    continue;
+                }
                 if let Err(error) = worker.tick().await { tracing::warn!(%error, "purge batch failed; retry scheduled"); }
                 match worker.metrics().await {
                     Ok(metrics) => {

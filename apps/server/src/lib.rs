@@ -52,6 +52,7 @@ pub struct AppState {
     database: PgPool,
     migration_database: PgPool,
     started: Arc<AtomicBool>,
+    deployment_epoch: Option<Uuid>,
     content: content_catalog::ContentCatalog,
     game_seed_source: fn() -> Result<[u8; 32], getrandom::Error>,
     application_origin: Arc<str>,
@@ -148,6 +149,7 @@ impl AppState {
             migration_database: database.clone(),
             database,
             started: Arc::new(AtomicBool::new(false)),
+            deployment_epoch: None,
             content: content_catalog::ContentCatalog::new(manifests),
             game_seed_source: || {
                 let mut seed = [0_u8; 32];
@@ -209,8 +211,21 @@ impl AppState {
         self.started.store(true, Ordering::Release);
     }
 
+    /// Binds this process to an externally managed deployment epoch.
+    /// Restore targets must use a fresh epoch and session key.
+    #[must_use]
+    pub fn with_deployment_epoch(mut self, epoch: Uuid) -> Self {
+        self.deployment_epoch = Some(epoch);
+        self
+    }
+
     fn is_started(&self) -> bool {
         self.started.load(Ordering::Acquire)
+    }
+
+    /// Checks startup and the current durable deployment binding.
+    pub async fn accepts_traffic(&self) -> bool {
+        self.is_started() && lifecycle::recovery::deployment_ready(self).await == Ok(true)
     }
 
     fn application_origin(&self) -> &str {
@@ -516,11 +531,13 @@ pub enum InitializationError {
     Migration(sqlx::migrate::MigrateError),
     Content(sqlx::Error),
     SessionRevocationListener(sqlx::Error),
+    Deployment(lifecycle::PurgeError),
 }
 
 impl fmt::Display for InitializationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Deployment(error) => write!(formatter, "deployment gate closed: {error}"),
             Self::Migration(error) => write!(formatter, "database migration failed: {error}"),
             Self::Content(error) => write!(formatter, "content publication failed: {error}"),
             Self::SessionRevocationListener(error) => {
@@ -533,6 +550,7 @@ impl fmt::Display for InitializationError {
 impl Error for InitializationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Deployment(error) => Some(error),
             Self::Migration(error) => Some(error),
             Self::Content(error) | Self::SessionRevocationListener(error) => Some(error),
         }
@@ -550,6 +568,9 @@ pub async fn initialize(state: &AppState) -> Result<(), InitializationError> {
         .run(&state.migration_database)
         .await
         .map_err(InitializationError::Migration)?;
+    lifecycle::recovery::register_deployment(state)
+        .await
+        .map_err(InitializationError::Deployment)?;
     state
         .content
         .publish(&state.database)
@@ -580,16 +601,9 @@ async fn startup(State(state): State<AppState>) -> (StatusCode, Json<HealthRespo
 }
 
 async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
-    let database_is_ready = if state.is_started() {
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&state.database),
-        )
+    let database_is_ready = tokio::time::timeout(Duration::from_secs(1), state.accepts_traffic())
         .await
-        .is_ok_and(|result| result.is_ok_and(|value| value == 1))
-    } else {
-        false
-    };
+        .is_ok_and(|ready| ready);
 
     if database_is_ready {
         (StatusCode::OK, Json(HealthResponse { status: "ready" }))

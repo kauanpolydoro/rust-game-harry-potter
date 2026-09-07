@@ -8,7 +8,7 @@ async fn real_game_one_starts_through_http_and_persists_preparation_evidence() {
             .fetch_one(&room.database)
             .await
             .expect("published schema version");
-    assert_eq!(schema, "22");
+    assert_eq!(schema, "23");
     let projection = start_ready_game(&room, "game-one").await;
     assert_eq!(projection["snapshot"]["snapshot_version"], 5);
     assert_eq!(projection["choice"]["source_name"], "Flipendo");
