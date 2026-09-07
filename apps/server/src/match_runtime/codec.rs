@@ -1,3 +1,5 @@
+mod versions;
+
 use game_domain::{
     DecisionPoint, EffectChangeCause, EffectContinuation, EffectCursor, EffectDie, EffectEntity,
     EffectEntityKind, EffectEntityPlacement, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
@@ -16,7 +18,7 @@ use super::{
     PersistedEffects, PersistedEndTurnOutcome, PersistedEngineControl, PersistedEventChoice,
     PersistedGameEvent, PersistedLegacyEffectChoice, PersistedPlayer, PersistedPrng,
     PersistedQueuedEffect, PersistedSnapshot, PersistedTurn, PersistedTurnStep, PersistedVersions,
-    StoredCommandGame, StoredGame, StoredRoomParticipant, hero_id,
+    StoredCommandGame, StoredGame, StoredRoomParticipant, TERMINAL_EVENT_VERSION, hero_id,
 };
 use crate::http_support::ApiError;
 
@@ -182,6 +184,18 @@ pub(super) fn command_domain_state(
         shuffle_algorithm: &persisted.versions.shuffle,
         sampling_algorithm: &persisted.versions.sampling,
         prng_counter: persisted.prng.counter,
+        preparation_samples: persisted
+            .preparation_samples
+            .iter()
+            .map(|sample| {
+                Ok(game_domain::PreparationSample {
+                    zone: domain_effect_zone(&sample.zone)?,
+                    owner_position: sample.owner_position,
+                    upper_exclusive: sample.upper_exclusive,
+                    result: sample.result,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?,
         players,
         effect_world,
         last_effects,
@@ -198,10 +212,13 @@ pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSna
     validate_persisted_json_size(serialized)?;
     let snapshot: PersistedSnapshot = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    if !matches!(snapshot.snapshot_version, 1 | 2 | 3 | SNAPSHOT_VERSION)
+    if !matches!(snapshot.snapshot_version, 1 | 2 | 3 | 4 | SNAPSHOT_VERSION)
         || (snapshot.snapshot_version == 1 && snapshot.effects.choice.is_some())
     {
         return Err(ApiError::internal());
+    }
+    if snapshot.snapshot_version < SNAPSHOT_VERSION {
+        versions::reject_game_one_fields(serialized)?;
     }
     validate_persisted_snapshot(&snapshot)?;
     Ok(snapshot)
@@ -216,21 +233,31 @@ pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEv
         (CLOSED_EFFECT_EVENT_VERSION, "dark_arts_completed") => decode_v2_event(serialized)?,
         (CHOICE_EVENT_VERSION, "dark_arts_completed") => decode_v3_dark_arts_event(serialized)?,
         (CHOICE_EVENT_VERSION, "choice_resolved") => decode_v3_choice_event(serialized)?,
-        (HERO_ACTION_EVENT_VERSION | GAME_EVENT_VERSION, "turn_completed") => {
-            decode_v4_turn_event(serialized)?
-        }
-        (HERO_ACTION_EVENT_VERSION | GAME_EVENT_VERSION, "choice_resolved") => {
-            decode_v4_choice_event(serialized)?
-        }
-        (GAME_EVENT_VERSION, "dark_arts_completed") => serde_json::from_str(serialized)
-            .map_err(|error| ApiError::internal_with("match application operation", error))?,
         (
-            CHOICE_EVENT_VERSION | HERO_ACTION_EVENT_VERSION | GAME_EVENT_VERSION,
+            HERO_ACTION_EVENT_VERSION | TERMINAL_EVENT_VERSION | GAME_EVENT_VERSION,
+            "turn_completed",
+        ) => decode_v4_turn_event(serialized)?,
+        (
+            HERO_ACTION_EVENT_VERSION | TERMINAL_EVENT_VERSION | GAME_EVENT_VERSION,
+            "choice_resolved",
+        ) => decode_v4_choice_event(serialized)?,
+        (TERMINAL_EVENT_VERSION | GAME_EVENT_VERSION, "dark_arts_completed") => {
+            serde_json::from_str(serialized)
+                .map_err(|error| ApiError::internal_with("match application operation", error))?
+        }
+        (
+            CHOICE_EVENT_VERSION
+            | HERO_ACTION_EVENT_VERSION
+            | TERMINAL_EVENT_VERSION
+            | GAME_EVENT_VERSION,
             "card_played" | "attack_assigned" | "card_acquired",
         ) => serde_json::from_str(serialized)
             .map_err(|error| ApiError::internal_with("match application operation", error))?,
         _ => return Err(ApiError::internal()),
     };
+    if header.event_version < GAME_EVENT_VERSION {
+        versions::reject_game_one_fields(serialized)?;
+    }
     validate_persisted_event(&event)?;
     Ok(event)
 }
@@ -575,6 +602,9 @@ fn decode_v4_choice_event(serialized: &str) -> Result<PersistedGameEvent, ApiErr
 }
 
 fn validate_persisted_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiError> {
+    if snapshot.versions.manifest == 4 && snapshot.preparation_samples.is_empty() {
+        return Err(ApiError::internal());
+    }
     let control_field_count = [
         snapshot.queued_phases.is_some(),
         snapshot.queued_effects.is_some(),
@@ -597,7 +627,7 @@ fn validate_persisted_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiEr
         }
         2 => !has_structured_control && snapshot.active_villain_limit.is_none(),
         3 => has_structured_control && snapshot.active_villain_limit.is_none(),
-        SNAPSHOT_VERSION => has_structured_control && snapshot.active_villain_limit.is_some(),
+        4 | SNAPSHOT_VERSION => has_structured_control && snapshot.active_villain_limit.is_some(),
         _ => false,
     };
     if !version_shape_is_valid {
@@ -705,7 +735,12 @@ fn validate_structured_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiE
         || !queue_belongs_to_game
         || !choice_state_is_coherent
         || flattened_effects != snapshot.effects.outcomes
-        || last_turn_steps.len() > MAX_TURN_STEPS
+        || last_turn_steps.len()
+            > if snapshot.snapshot_version < SNAPSHOT_VERSION {
+                MAX_TURN_STEPS
+            } else {
+                game_domain::MAX_TURN_HISTORY_STEPS
+            }
         || last_turn_steps.iter().any(|step| {
             !canonical_game_phase(&step.phase)
                 || step.effects.len() > MAX_EFFECT_OUTCOMES
@@ -746,6 +781,9 @@ fn validate_persisted_effects(effects: &PersistedEffects, require_address: bool)
 
 fn valid_effect_entity(entity: &PersistedEffectEntity, bounded_identifiers: bool) -> bool {
     valid_identifier_for_version(&entity.id, bounded_identifiers)
+        && entity
+            .drawing_blocked
+            .is_none_or(|blocked| blocked && entity.kind.as_deref() == Some("hero"))
         && entity.owner_position.is_none_or(valid_position)
         && domain_effect_zone(&entity.zone).is_ok()
         && entity
@@ -877,6 +915,7 @@ fn valid_effect_cursor(
                 }
                 PersistedEffectPathSegment::ConditionThen
                 | PersistedEffectPathSegment::ConditionOtherwise
+                | PersistedEffectPathSegment::ReactionEffect
                 | PersistedEffectPathSegment::RepeatEffect => true,
             }))
 }
@@ -895,6 +934,24 @@ fn valid_decision_point(decision: &PersistedDecisionPoint, require_address: bool
 
 fn valid_effect_outcome(outcome: &PersistedEffectOutcome, bounded_identifiers: bool) -> bool {
     match outcome {
+        PersistedEffectOutcome::DrawingBlocked {
+            rule_id,
+            target_id,
+            target_position,
+        } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && valid_identifier_for_version(target_id, bounded_identifiers)
+                && valid_position(*target_position)
+        }
+        PersistedEffectOutcome::RandomSampled {
+            rule_id,
+            upper_exclusive,
+            result,
+        } => {
+            valid_identifier_for_version(rule_id, bounded_identifiers)
+                && *upper_exclusive > 0
+                && result < upper_exclusive
+        }
         PersistedEffectOutcome::DieRolled {
             rule_id,
             die,
@@ -922,7 +979,7 @@ fn valid_effect_outcome(outcome: &PersistedEffectOutcome, bounded_identifiers: b
             valid_identifier_for_version(rule_id, bounded_identifiers)
                 && matches!(
                     reason.as_str(),
-                    "explicit" | "no_eligible_target" | "zero_cardinality"
+                    "explicit" | "no_eligible_target" | "zero_cardinality" | "drawing_blocked"
                 )
         }
         PersistedEffectOutcome::ResourceChanged {
@@ -947,6 +1004,17 @@ fn valid_effect_outcome(outcome: &PersistedEffectOutcome, bounded_identifiers: b
 }
 
 fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> {
+    if event.event_version == GAME_EVENT_VERSION
+        && event.end_turn.as_ref().is_some_and(|outcomes| {
+            outcomes.iter().any(|outcome| {
+                matches!(outcome,
+            PersistedEndTurnOutcome::PileShuffled { bottom_to_top, samples, .. }
+                if samples.len() != bottom_to_top.len().saturating_sub(1))
+            })
+        })
+    {
+        return Err(ApiError::internal());
+    }
     if event.sequence == 0
         || event.state_version == 0
         || event.turn == 0
@@ -998,7 +1066,7 @@ fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> 
                 valid_v4_event(event)
             }
         }
-        GAME_EVENT_VERSION => match event.event_type.as_str() {
+        TERMINAL_EVENT_VERSION | GAME_EVENT_VERSION => match event.event_type.as_str() {
             "dark_arts_completed" => valid_closed_effect_event(event, true),
             "card_played" | "attack_assigned" | "card_acquired" => {
                 valid_hero_action_event(event, true)
@@ -1114,7 +1182,7 @@ fn valid_hero_action_event(event: &PersistedGameEvent, bounded_identifiers: bool
                 && event.amount.is_some_and(|amount| amount > 0)
                 && event.cost.is_none()
                 && event.refill_card_id.is_none()
-                && if event.event_version == GAME_EVENT_VERSION {
+                && if event.event_version >= TERMINAL_EVENT_VERSION {
                     valid_effect_progress(event, bounded_identifiers)
                 } else {
                     event.effect_stop.is_none()
@@ -1308,6 +1376,13 @@ fn valid_end_turn_sequence(outcomes: &[PersistedEndTurnOutcome], actor_position:
         }
         refill = &refill[1..];
     }
+    let mut restored_positions = std::collections::BTreeSet::new();
+    while let Some(PersistedEndTurnOutcome::DrawingRestored { position }) = refill.first() {
+        if !restored_positions.insert(*position) {
+            return false;
+        }
+        refill = &refill[1..];
+    }
     let mut shuffled = false;
     refill.iter().all(|outcome| match outcome {
         PersistedEndTurnOutcome::CardMoved { from, to, .. } => {
@@ -1318,6 +1393,7 @@ fn valid_end_turn_sequence(outcomes: &[PersistedEndTurnOutcome], actor_position:
             true
         }
         PersistedEndTurnOutcome::PileShuffled { .. }
+        | PersistedEndTurnOutcome::DrawingRestored { .. }
         | PersistedEndTurnOutcome::ResourceReset { .. }
         | PersistedEndTurnOutcome::LocationAdvanced { .. }
         | PersistedEndTurnOutcome::VillainRevealed { .. }
@@ -1486,6 +1562,7 @@ fn valid_automatic_control(control: &PersistedEngineControl) -> bool {
 
 fn valid_end_turn_outcome(outcome: &PersistedEndTurnOutcome, actor_position: u8) -> bool {
     match outcome {
+        PersistedEndTurnOutcome::DrawingRestored { position } => valid_position(*position),
         PersistedEndTurnOutcome::LocationAdvanced {
             location_id,
             next_location_id,
@@ -1506,6 +1583,7 @@ fn valid_end_turn_outcome(outcome: &PersistedEndTurnOutcome, actor_position: u8)
             owner_position,
             zone,
             bottom_to_top,
+            samples,
         } => {
             let unique_cards = bottom_to_top
                 .iter()
@@ -1514,6 +1592,14 @@ fn valid_end_turn_outcome(outcome: &PersistedEndTurnOutcome, actor_position: u8)
                 && zone == "hero_draw_pile"
                 && (1..=MAX_PILE_CARDS).contains(&bottom_to_top.len())
                 && unique_cards.len() == bottom_to_top.len()
+                && (samples.is_empty()
+                    || (samples.len() == bottom_to_top.len().saturating_sub(1)
+                        && samples.iter().zip((2..=bottom_to_top.len()).rev()).all(
+                            |(sample, upper)| {
+                                usize::try_from(sample.upper_exclusive).ok() == Some(upper)
+                                    && sample.result < sample.upper_exclusive
+                            },
+                        )))
                 && bottom_to_top
                     .iter()
                     .all(|card_id| valid_identifier(card_id))
@@ -1651,15 +1737,7 @@ fn persisted_turn_event(event: GameEvent) -> Result<(u16, &'static str, String),
             stop,
             prng_counter,
         } => {
-            let event_version = match &stop {
-                EffectStop::Choice(choice)
-                    if choice.kind == PendingEffectChoiceKind::StunDiscard =>
-                {
-                    GAME_EVENT_VERSION
-                }
-                EffectStop::Choice(_) => CHOICE_EVENT_VERSION,
-                EffectStop::Stable | EffectStop::Terminal(_) => CLOSED_EFFECT_EVENT_VERSION,
-            };
+            let event_version = GAME_EVENT_VERSION;
             serde_json::to_string(&serde_json::json!({
                 "event_version": event_version,
                 "type": "dark_arts_completed",
@@ -1893,6 +1971,16 @@ pub(super) fn persisted_snapshot(
             algorithm: state.prng_algorithm().to_owned(),
             counter: state.prng_counter(),
         },
+        preparation_samples: state
+            .preparation_samples()
+            .iter()
+            .map(|sample| super::PersistedPreparationSample {
+                zone: effect_zone_name(sample.zone).to_owned(),
+                owner_position: sample.owner_position,
+                upper_exclusive: sample.upper_exclusive,
+                result: sample.result,
+            })
+            .collect(),
         effects: persisted_effects(state),
     }
 }
@@ -2085,6 +2173,9 @@ fn persisted_turn_step(step: &TurnStep) -> PersistedTurnStep {
 
 fn persisted_end_turn_outcome(outcome: &EndTurnOutcome) -> PersistedEndTurnOutcome {
     match outcome {
+        EndTurnOutcome::DrawingRestored { position } => PersistedEndTurnOutcome::DrawingRestored {
+            position: *position,
+        },
         EndTurnOutcome::LocationAdvanced {
             location_id,
             next_location_id,
@@ -2106,10 +2197,18 @@ fn persisted_end_turn_outcome(outcome: &EndTurnOutcome) -> PersistedEndTurnOutco
             owner_position,
             zone,
             bottom_to_top,
+            samples,
         } => PersistedEndTurnOutcome::PileShuffled {
             owner_position: *owner_position,
             zone: effect_zone_name(*zone).to_owned(),
             bottom_to_top: bottom_to_top.clone(),
+            samples: samples
+                .iter()
+                .map(|sample| super::PersistedShuffleSample {
+                    upper_exclusive: sample.upper_exclusive,
+                    result: sample.result,
+                })
+                .collect(),
         },
         EndTurnOutcome::ResourceReset { resource, before } => {
             PersistedEndTurnOutcome::ResourceReset {
@@ -2199,12 +2298,8 @@ fn domain_effect_world(
             let catalog_id = || entity.catalog_id.clone().ok_or_else(ApiError::internal);
             let effect_rule_id = || entity.effect_rule_id.clone().ok_or_else(ApiError::internal);
             let mut domain = match kind {
-                EffectEntityKind::Generic => {
-                    EffectEntity::new(entity.id.clone(), entity.owner_position)
-                }
-                EffectEntityKind::Hero => {
-                    EffectEntity::new(entity.id.clone(), entity.owner_position)
-                        .with_kind(EffectEntityKind::Hero)
+                EffectEntityKind::Generic | EffectEntityKind::Hero | EffectEntityKind::DarkArts => {
+                    EffectEntity::new(entity.id.clone(), entity.owner_position).with_kind(kind)
                 }
                 EffectEntityKind::HogwartsCard | EffectEntityKind::StarterCard => {
                     EffectEntity::card(
@@ -2237,6 +2332,7 @@ fn domain_effect_world(
                         .ok_or_else(ApiError::internal)?,
                 ),
             };
+            domain = domain.with_drawing_blocked(entity.drawing_blocked.unwrap_or(false));
             if domain.resource_limits() != &resource_limits {
                 return Err(ApiError::internal());
             }
@@ -2263,6 +2359,24 @@ fn domain_effect_world(
 
 fn domain_effect_outcome(outcome: &PersistedEffectOutcome) -> Result<EffectOutcome, ApiError> {
     Ok(match outcome {
+        PersistedEffectOutcome::DrawingBlocked {
+            rule_id,
+            target_id,
+            target_position,
+        } => EffectOutcome::DrawingBlocked {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+        },
+        PersistedEffectOutcome::RandomSampled {
+            rule_id,
+            upper_exclusive,
+            result,
+        } => EffectOutcome::RandomSampled {
+            rule_id: rule_id.clone(),
+            upper_exclusive: *upper_exclusive,
+            result: *result,
+        },
         PersistedEffectOutcome::DieRolled {
             rule_id,
             die,
@@ -2289,6 +2403,7 @@ fn domain_effect_outcome(outcome: &PersistedEffectOutcome) -> Result<EffectOutco
             rule_id: rule_id.clone(),
             reason: match reason.as_str() {
                 "explicit" => EffectNoOpReason::Explicit,
+                "drawing_blocked" => EffectNoOpReason::DrawingBlocked,
                 "no_eligible_target" => EffectNoOpReason::NoEligibleTarget,
                 "zero_cardinality" => EffectNoOpReason::ZeroCardinality,
                 _ => return Err(ApiError::internal()),
@@ -2371,6 +2486,7 @@ fn domain_effect_cursor(cursor: &PersistedEffectCursor) -> EffectCursor {
                     EffectPathSegment::ConditionOtherwise
                 }
                 PersistedEffectPathSegment::RepeatEffect => EffectPathSegment::RepeatEffect,
+                PersistedEffectPathSegment::ReactionEffect => EffectPathSegment::ReactionEffect,
                 PersistedEffectPathSegment::RollOutcome { index } => {
                     EffectPathSegment::RollOutcome(*index)
                 }
@@ -2428,6 +2544,7 @@ fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
             let zone_index = *next_index;
             *next_index = next_index.saturating_add(1);
             PersistedEffectEntity {
+                drawing_blocked: entity.drawing_blocked().then_some(true),
                 id: entity.id().to_owned(),
                 kind: Some(effect_entity_kind_name(entity.kind()).to_owned()),
                 catalog_id: entity.catalog_id().map(str::to_owned),
@@ -2465,6 +2582,24 @@ fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
 
 pub(super) fn persisted_effect_outcome(outcome: &EffectOutcome) -> PersistedEffectOutcome {
     match outcome {
+        EffectOutcome::DrawingBlocked {
+            rule_id,
+            target_id,
+            target_position,
+        } => PersistedEffectOutcome::DrawingBlocked {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+        },
+        EffectOutcome::RandomSampled {
+            rule_id,
+            upper_exclusive,
+            result,
+        } => PersistedEffectOutcome::RandomSampled {
+            rule_id: rule_id.clone(),
+            upper_exclusive: *upper_exclusive,
+            result: *result,
+        },
         EffectOutcome::DieRolled {
             rule_id,
             die,
@@ -2491,6 +2626,7 @@ pub(super) fn persisted_effect_outcome(outcome: &EffectOutcome) -> PersistedEffe
             rule_id: rule_id.clone(),
             reason: match reason {
                 EffectNoOpReason::Explicit => "explicit",
+                EffectNoOpReason::DrawingBlocked => "drawing_blocked",
                 EffectNoOpReason::NoEligibleTarget => "no_eligible_target",
                 EffectNoOpReason::ZeroCardinality => "zero_cardinality",
             }
@@ -2573,6 +2709,7 @@ fn persisted_effect_cursor(cursor: &EffectCursor) -> PersistedEffectCursor {
                     PersistedEffectPathSegment::ConditionOtherwise
                 }
                 EffectPathSegment::RepeatEffect => PersistedEffectPathSegment::RepeatEffect,
+                EffectPathSegment::ReactionEffect => PersistedEffectPathSegment::ReactionEffect,
                 EffectPathSegment::RollOutcome(index) => {
                     PersistedEffectPathSegment::RollOutcome { index: *index }
                 }
@@ -2682,6 +2819,7 @@ fn domain_effect_entity_kind(
         Some("hogwarts_card") => Ok(EffectEntityKind::HogwartsCard),
         Some("location") => Ok(EffectEntityKind::Location),
         Some("starter_card") => Ok(EffectEntityKind::StarterCard),
+        Some("dark_arts") => Ok(EffectEntityKind::DarkArts),
         Some("villain") => Ok(EffectEntityKind::Villain),
         Some(_) => Err(ApiError::internal()),
     }
@@ -2694,6 +2832,7 @@ fn effect_entity_kind_name(kind: EffectEntityKind) -> &'static str {
         EffectEntityKind::HogwartsCard => "hogwarts_card",
         EffectEntityKind::Location => "location",
         EffectEntityKind::StarterCard => "starter_card",
+        EffectEntityKind::DarkArts => "dark_arts",
         EffectEntityKind::Villain => "villain",
     }
 }
@@ -2758,6 +2897,22 @@ fn effect_die_name(die: EffectDie) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn game_one_facts_require_the_new_event_codec() {
+        let mut event = serde_json::json!({
+            "event_version": 6, "type":"card_played", "sequence":1, "state_version":2,
+            "turn":1,"actor_position":1,"card_id":"instance:1","targets":[],
+            "effects":[{"type":"random_sampled","rule_id":"rule:draw","upper_exclusive":2,"result":1}],
+            "effect_stop":"stable","prng_counter":1
+        });
+        assert!(super::decode_persisted_event(&event.to_string()).is_ok());
+        event["event_version"] = serde_json::json!(5);
+        assert!(super::decode_persisted_event(&event.to_string()).is_err());
+        event["effects"] = serde_json::json!([]);
+        event["prng_counter"] = serde_json::json!(0);
+        assert!(super::decode_persisted_event(&event.to_string()).is_ok());
+    }
+
     use game_domain::{
         EffectOutcome, EffectStop, EffectTargetBinding, EffectZone, GameEvent, GamePhase,
     };
@@ -3116,7 +3271,7 @@ mod tests {
     }
 
     #[test]
-    fn a_played_card_event_persists_every_explicit_fact_in_v5() {
+    fn a_played_card_event_persists_every_explicit_fact_in_v6() {
         let result = persisted_event(GameEvent::CardPlayed {
             sequence: 7,
             state_version: 8,
@@ -3140,13 +3295,13 @@ mod tests {
         let (event_version, event_type, serialized) =
             result.ok().expect("the event must serialize");
 
-        assert_eq!(event_version, 5);
+        assert_eq!(event_version, 6);
         assert_eq!(event_type, "card_played");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&serialized)
                 .expect("the persisted event must be JSON"),
             json!({
-                "event_version": 5,
+                "event_version": 6,
                 "type": "card_played",
                 "sequence": 7,
                 "state_version": 8,
@@ -3188,7 +3343,7 @@ mod tests {
         assert_eq!(
             attack,
             json!({
-                "event_version": 5,
+                "event_version": 6,
                 "type": "attack_assigned",
                 "sequence": 8,
                 "state_version": 9,
@@ -3216,7 +3371,7 @@ mod tests {
         assert_eq!(
             acquisition,
             json!({
-                "event_version": 5,
+                "event_version": 6,
                 "type": "card_acquired",
                 "sequence": 9,
                 "state_version": 10,
@@ -3233,7 +3388,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_event_decoder_accepts_v1_through_v5_but_rejects_future_versions() {
+    fn persisted_event_decoder_accepts_legacy_codecs_but_rejects_future_versions() {
         for serialized in [
             json!({
                 "event_version": 1,
@@ -3271,7 +3426,7 @@ mod tests {
         }
 
         let future = json!({
-            "event_version": 6,
+            "event_version": 7,
             "type": "attack_assigned",
             "sequence": 4,
             "state_version": 5,
@@ -3382,6 +3537,7 @@ mod tests {
                 algorithm: "chacha20-v1".to_owned(),
                 counter: 0,
             },
+            preparation_samples: vec![],
             effects: PersistedEffects {
                 entities: vec![
                     legacy_entity("hero:1", Some(1), "heroes"),
@@ -3429,6 +3585,7 @@ mod tests {
             reward_rule_id: None,
             influence_cost: None,
             dark_arts_count: None,
+            drawing_blocked: None,
             zone: zone.to_owned(),
             zone_index: None,
             resources: BTreeMap::new(),
@@ -3450,6 +3607,7 @@ mod tests {
             reward_rule_id: None,
             influence_cost: Some(influence_cost),
             dark_arts_count: None,
+            drawing_blocked: None,
             zone: "hogwarts_deck".to_owned(),
             zone_index: None,
             resources: BTreeMap::new(),

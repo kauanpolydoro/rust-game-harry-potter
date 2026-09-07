@@ -270,6 +270,9 @@ function validationExpression(schema, value) {
 const generatedDefinitions = Object.entries(identitySchema.$defs)
   .filter(([name]) => name !== 'HeroId')
   .map(([name, schema]) => {
+    if (schema.type === 'string' && Array.isArray(schema.enum)) {
+      return `export type ${name} = ${typeScriptType(schema, 1)}`
+    }
     if (Array.isArray(schema.oneOf)) {
       const variants = schema.oneOf
         .map((variant) => `  | ${typeScriptType(variant, 2)}`)
@@ -283,7 +286,7 @@ const generatedDefinitions = Object.entries(identitySchema.$defs)
       return `export interface ${name} ${typeScriptType(schema, 1)}`
     }
     throw new TypeError(
-      `identity-access.schema.json definition ${name} must be an object or oneOf union`,
+      `identity-access.schema.json definition ${name} must be an object, string enum or oneOf union`,
     )
   })
 const generatedGuards = Object.entries(identitySchema.$defs).map(

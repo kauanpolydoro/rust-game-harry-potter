@@ -6,10 +6,9 @@ use axum::{
     routing::{get, post},
 };
 use game_domain::{
-    ContentSelection, EffectDie, EffectRoller, GameCommand, GameCommandError, GameCommandInput,
-    GameEngine, GameIntentError, GameIntentInput, HeroId, InitialGameState, LobbyParticipant,
-    ParticipantRole, PlayerIntent, StartGameError, StartGameInput, ValidatedGameRules,
-    decide_game_command,
+    EffectDie, EffectRoller, GameCommand, GameCommandError, GameCommandInput, GameEngine,
+    GameIntentError, GameIntentInput, HeroId, InitialGameState, LobbyParticipant, ParticipantRole,
+    PlayerIntent, StartGameError, ValidatedGameRules, decide_game_command,
 };
 use rand_chacha::{
     ChaCha20Rng,
@@ -32,6 +31,9 @@ mod postgres;
 mod projection;
 mod realtime;
 
+#[cfg(test)]
+mod game_one_tests;
+
 use codec::{
     command_domain_state, decode_persisted_snapshot, persisted_after_decision, persisted_event,
     persisted_snapshot, validate_persisted_json_size, verify_persisted_snapshot,
@@ -40,7 +42,8 @@ pub(crate) use projection::{GameProjectionResponse, projection_for_participant};
 
 const SEED_BYTES: usize = 32;
 const HERO_ACTION_EVENT_VERSION: u16 = 4;
-const GAME_EVENT_VERSION: u16 = 5;
+const TERMINAL_EVENT_VERSION: u16 = 5;
+const GAME_EVENT_VERSION: u16 = 6;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -97,6 +100,8 @@ enum ExecuteGameCommandRequest {
         #[serde(deserialize_with = "positive_state_version")]
         expected_state_version: u64,
         card_id: String,
+        #[serde(default)]
+        destination: AcquisitionDestination,
     },
 }
 
@@ -181,8 +186,13 @@ impl ExecuteGameCommandRequest {
                 villain_id: villain_id.clone(),
                 amount: *amount,
             }),
-            Self::AcquireCard { card_id, .. } => Some(GameCommand::AcquireCard {
+            Self::AcquireCard {
+                card_id,
+                destination,
+                ..
+            } => Some(GameCommand::AcquireCard {
                 card_id: card_id.clone(),
+                destination: destination.domain(),
             }),
             Self::EndHeroActions { .. } | Self::ResolveChoice { .. } => None,
         }
@@ -238,11 +248,14 @@ impl ExecuteGameCommandRequest {
                 command_id,
                 expected_state_version,
                 card_id,
+                destination,
             } => serde_json::to_vec(&CanonicalAcquireCardCommandRequest {
                 command_id,
                 expected_state_version: *expected_state_version,
                 command_type: "acquire_card",
                 card_id,
+                destination: (*destination != AcquisitionDestination::DiscardPile)
+                    .then_some(*destination),
             }),
         }
     }
@@ -293,6 +306,32 @@ struct CanonicalAcquireCardCommandRequest<'a> {
     #[serde(rename = "type")]
     command_type: &'static str,
     card_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination: Option<AcquisitionDestination>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AcquisitionDestination {
+    #[default]
+    DiscardPile,
+    DrawPile,
+}
+
+impl AcquisitionDestination {
+    const fn domain(self) -> game_domain::CardAcquisitionDestination {
+        match self {
+            Self::DiscardPile => game_domain::CardAcquisitionDestination::DiscardPile,
+            Self::DrawPile => game_domain::CardAcquisitionDestination::DrawPile,
+        }
+    }
+
+    const fn from_domain(destination: game_domain::CardAcquisitionDestination) -> Self {
+        match destination {
+            game_domain::CardAcquisitionDestination::DiscardPile => Self::DiscardPile,
+            game_domain::CardAcquisitionDestination::DrawPile => Self::DrawPile,
+        }
+    }
 }
 
 fn positive_state_version<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -494,6 +533,8 @@ struct PersistedSnapshot {
     last_turn_steps: Option<Vec<PersistedTurnStep>>,
     participants: Vec<PersistedPlayer>,
     prng: PersistedPrng,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    preparation_samples: Vec<PersistedPreparationSample>,
     #[serde(default, skip_serializing_if = "PersistedEffects::is_empty")]
     effects: PersistedEffects,
 }
@@ -533,6 +574,15 @@ struct PersistedPrng {
     counter: u64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedPreparationSample {
+    zone: String,
+    owner_position: Option<u8>,
+    upper_exclusive: u32,
+    result: u32,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedEffects {
@@ -553,6 +603,8 @@ impl PersistedEffects {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedEffectEntity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    drawing_blocked: Option<bool>,
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     kind: Option<String>,
@@ -580,6 +632,16 @@ struct PersistedEffectEntity {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectOutcome {
+    DrawingBlocked {
+        rule_id: String,
+        target_id: String,
+        target_position: u8,
+    },
+    RandomSampled {
+        rule_id: String,
+        upper_exclusive: u32,
+        result: u32,
+    },
     DieRolled {
         rule_id: String,
         die: String,
@@ -644,6 +706,7 @@ struct PersistedEffectCursor {
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectPathSegment {
+    ReactionEffect,
     ChoiceOption { index: u16 },
     ConditionThen,
     ConditionOtherwise,
@@ -710,6 +773,9 @@ struct PersistedTurnStep {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEndTurnOutcome {
+    DrawingRestored {
+        position: u8,
+    },
     LocationAdvanced {
         location_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -727,6 +793,8 @@ enum PersistedEndTurnOutcome {
         owner_position: u8,
         zone: String,
         bottom_to_top: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        samples: Vec<PersistedShuffleSample>,
     },
     ResourceReset {
         resource: String,
@@ -737,6 +805,13 @@ enum PersistedEndTurnOutcome {
         before: u16,
         after: u16,
     },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedShuffleSample {
+    upper_exclusive: u32,
+    result: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -888,8 +963,7 @@ async fn start_game(
         .effect_rules(&content.manifest_digest)
         .ok_or_else(ApiError::internal)?;
     let rules = ValidatedGameRules::new(effect_rules).map_err(|_| ApiError::internal())?;
-    let mut seed = [0_u8; SEED_BYTES];
-    getrandom::fill(&mut seed)
+    let seed = (state.game_seed_source)()
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     let mut random = ChaChaEffectRoller::new(&seed, 0)?;
     let (initial_state, stored_participants) =
@@ -963,28 +1037,8 @@ async fn initialize_persisted_game(
         .iter()
         .map(domain_participant)
         .collect::<Result<Vec<_>, _>>()?;
-    let participant_positions = participants
-        .iter()
-        .map(|participant| participant.position)
-        .collect::<Vec<_>>();
-    let initial_entities = content.initial_entities(&participant_positions);
-    let state = GameEngine::new(rules)
-        .start(
-            StartGameInput {
-                actor_role: participant_role(&actor.role)?,
-                participants: &participants,
-                content: ContentSelection {
-                    adventure_id: &content.adventure_id,
-                    content_version: &content.content_version,
-                    ruleset_version: &content.ruleset_version,
-                    manifest_digest: &content.manifest_digest,
-                    manifest_version: content.manifest_version,
-                    playable: content.playable,
-                    initial_entities: &initial_entities,
-                },
-            },
-            random,
-        )
+    let state = content
+        .start_game(participant_role(&actor.role)?, &participants, rules, random)
         .map_err(start_error)?;
     Ok((state, stored_participants))
 }
@@ -1420,6 +1474,7 @@ mod tests {
             command_id: "00000000-0000-0000-0000-000000000005".to_owned(),
             expected_state_version: 11,
             card_id: "market:1".to_owned(),
+            destination: super::AcquisitionDestination::DiscardPile,
         };
         assert_eq!(
             acquire_card

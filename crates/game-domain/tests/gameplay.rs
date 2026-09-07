@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+mod reactions;
+
 use game_domain::{
     ContentSelection, EffectChoiceAudience, EffectCondition, EffectDefinition, EffectEntity,
     EffectEntityKind, EffectEntityPlacement, EffectOperation, EffectResource, EffectRoller,
@@ -61,6 +63,132 @@ fn content(entities: &[EffectEntityPlacement]) -> ContentSelection<'_> {
     }
 }
 
+#[test]
+fn playing_a_draw_card_adds_the_top_card_to_the_hand_and_replays() {
+    let entities = vec![
+        starter_card(
+            "instance:draw",
+            "starter:draw",
+            1,
+            "rule:draw",
+            EffectZone::HeroHand,
+        ),
+        starter_card(
+            "instance:bottom",
+            "starter:coin",
+            1,
+            "rule:coin",
+            EffectZone::HeroDrawPile,
+        ),
+        starter_card(
+            "instance:top",
+            "starter:coin",
+            1,
+            "rule:coin",
+            EffectZone::HeroDrawPile,
+        ),
+    ];
+    let rules = vec![EffectRule {
+        id: "rule:draw".to_owned(),
+        trigger: EffectTrigger::Manual,
+        order: 0,
+        cost: vec![],
+        effect: EffectDefinition::Apply {
+            target: single_target_selector(None, EffectZone::Heroes, EffectTargetOwner::Actor),
+            operation: EffectOperation::Draw { amount: 1 },
+        },
+    }];
+    let state = advance_to_hero_action(&entities, &rules);
+    let decision = decide(
+        &state,
+        2,
+        GameCommand::PlayCard {
+            card_id: "instance:draw".to_owned(),
+            targets: vec![],
+        },
+        &rules,
+    )
+    .expect("drawing should resolve");
+    assert_eq!(
+        entity_ids_in(&decision.state, EffectZone::HeroHand),
+        vec!["instance:top"]
+    );
+    assert_eq!(
+        entity_ids_in(&decision.state, EffectZone::HeroDrawPile),
+        vec!["instance:bottom"]
+    );
+    assert_eq!(
+        apply_game_event(&state, &decision.event).expect("draw replay"),
+        decision.state
+    );
+}
+
+#[test]
+fn drawing_reshuffles_only_when_needed_and_preserves_the_random_counter_on_replay() {
+    let entities = vec![
+        starter_card(
+            "instance:draw",
+            "starter:draw",
+            1,
+            "rule:draw",
+            EffectZone::HeroHand,
+        ),
+        starter_card(
+            "instance:last",
+            "starter:coin",
+            1,
+            "rule:coin",
+            EffectZone::HeroDrawPile,
+        ),
+        starter_card(
+            "instance:discard-a",
+            "starter:coin",
+            1,
+            "rule:coin",
+            EffectZone::HeroDiscardPile,
+        ),
+        starter_card(
+            "instance:discard-b",
+            "starter:coin",
+            1,
+            "rule:coin",
+            EffectZone::HeroDiscardPile,
+        ),
+    ];
+    let rules = vec![EffectRule {
+        id: "rule:draw".to_owned(),
+        trigger: EffectTrigger::Manual,
+        order: 0,
+        cost: vec![],
+        effect: EffectDefinition::Apply {
+            target: single_target_selector(None, EffectZone::Heroes, EffectTargetOwner::Actor),
+            operation: EffectOperation::Draw { amount: 4 },
+        },
+    }];
+    let state = advance_to_hero_action(&entities, &rules);
+    let decision = decide(
+        &state,
+        2,
+        GameCommand::PlayCard {
+            card_id: "instance:draw".to_owned(),
+            targets: vec![],
+        },
+        &rules,
+    )
+    .expect("drawing across an exhausted pile should resolve");
+    assert_eq!(
+        entity_ids_in(&decision.state, EffectZone::HeroHand),
+        vec!["instance:last", "instance:discard-a", "instance:discard-b"]
+    );
+    assert!(entity_ids_in(&decision.state, EffectZone::HeroDrawPile).is_empty());
+    assert!(entity_ids_in(&decision.state, EffectZone::HeroDiscardPile).is_empty());
+    assert_eq!(decision.state.prng_counter(), 1);
+    assert_eq!(
+        apply_game_event(&state, &decision.event).expect("reshuffle replay"),
+        decision.state
+    );
+}
+
 fn starter_card(
     id: &str,
     catalog_id: &str,
@@ -79,6 +207,175 @@ fn starter_card(
         ),
         zone,
     )
+}
+
+#[test]
+fn game_one_prepares_every_hero_and_the_shared_decks_before_the_first_turn() {
+    let entities = game_one_setup_entities();
+    let rules = ValidatedGameRules::new(vec![]).expect("valid rules");
+    let participants = participants();
+    let state = GameEngine::new(&rules)
+        .start_game_one(
+            StartGameInput {
+                actor_role: ParticipantRole::Host,
+                participants: &participants,
+                content: content(&entities),
+            },
+            &mut ScriptedRoller::empty(),
+        )
+        .expect("complete setup");
+    for owner in [1, 2] {
+        assert_eq!(
+            state
+                .effect_world()
+                .cards_in_zone(owner, EffectZone::HeroHand),
+            [0, 9, 8, 7, 6].map(|index| format!("instance:hero-{owner}-{index}"))
+        );
+        assert_eq!(
+            state
+                .effect_world()
+                .cards_in_zone(owner, EffectZone::HeroDrawPile)
+                .len(),
+            5
+        );
+    }
+    assert_eq!(entity_ids_in(&state, EffectZone::Market).len(), 6);
+    assert_eq!(entity_ids_in(&state, EffectZone::HogwartsDeck).len(), 24);
+    assert_eq!(entity_ids_in(&state, EffectZone::ActiveVillains).len(), 1);
+    assert_eq!(entity_ids_in(&state, EffectZone::VillainDeck).len(), 2);
+    assert_eq!(state.preparation_samples().len(), 58);
+    assert_eq!(
+        state.preparation_samples()[0].zone,
+        EffectZone::HogwartsDeck
+    );
+    assert_eq!(state.preparation_samples()[0].upper_exclusive, 30);
+    assert_eq!(
+        state.preparation_samples()[29].zone,
+        EffectZone::DarkArtsDeck
+    );
+    assert_eq!(
+        state.preparation_samples()[38].zone,
+        EffectZone::VillainDeck
+    );
+    assert_eq!(state.preparation_samples()[40].owner_position, Some(1));
+    assert_eq!(state.preparation_samples()[49].owner_position, Some(2));
+    assert!(
+        state
+            .preparation_samples()
+            .iter()
+            .all(|sample| sample.result == 0)
+    );
+    assert_eq!(state.prng_counter(), 58);
+    assert_eq!(state.phase(), GamePhase::HeroActions);
+}
+
+fn game_one_setup_entities() -> Vec<EffectEntityPlacement> {
+    let mut entities = Vec::new();
+    for owner in [1, 2] {
+        for index in 0..10 {
+            entities.push(starter_card(
+                &format!("instance:hero-{owner}-{index}"),
+                "starter:coin",
+                owner,
+                "rule:coin",
+                EffectZone::HeroDrawPile,
+            ));
+        }
+    }
+    for index in 0..30 {
+        entities.push(hogwarts_card(
+            &format!("instance:market-{index}"),
+            "hogwarts:card",
+            2,
+            EffectZone::HogwartsDeck,
+        ));
+    }
+    for index in 0..3 {
+        entities.push(EffectEntityPlacement::new(
+            EffectEntity::villain(
+                format!("instance:villain-{index}"),
+                "villain:test",
+                "rule:villain",
+                6,
+            ),
+            EffectZone::VillainDeck,
+        ));
+    }
+    for index in 0..10 {
+        entities.push(EffectEntityPlacement::new(
+            EffectEntity::new(format!("instance:dark-{index}"), None)
+                .with_kind(EffectEntityKind::DarkArts)
+                .with_catalog_id("dark:test")
+                .with_effect_rule("rule:dark"),
+            EffectZone::DarkArtsDeck,
+        ));
+    }
+    for (id, zone) in [
+        ("first", EffectZone::ActiveLocation),
+        ("second", EffectZone::LocationDeck),
+    ] {
+        entities.push(EffectEntityPlacement::new(
+            EffectEntity::location(
+                format!("location:{id}"),
+                format!("location:{id}"),
+                "rule:location",
+                4,
+                1,
+            ),
+            zone,
+        ));
+    }
+    entities
+}
+
+#[test]
+fn invalid_game_one_preparation_consumes_no_entropy() {
+    struct UnexpectedEntropy;
+    impl EffectRoller for UnexpectedEntropy {
+        fn roll(&mut self, _: game_domain::EffectDie) -> Option<u8> {
+            panic!("invalid preparation must be rejected before consuming entropy");
+        }
+        fn sample_below(&mut self, _: u32) -> Option<u32> {
+            panic!("invalid preparation must be rejected before shuffling any pile");
+        }
+    }
+    let rules = ValidatedGameRules::new(vec![]).expect("valid rules");
+    let participants = participants();
+    let mut missing_starter = game_one_setup_entities();
+    missing_starter.remove(19);
+    let mut extra_hand = game_one_setup_entities();
+    extra_hand.push(starter_card(
+        "extra",
+        "starter:extra",
+        1,
+        "rule:extra",
+        EffectZone::HeroHand,
+    ));
+    let mut missing_location = game_one_setup_entities();
+    missing_location.pop();
+    let mut generic_dark_arts = game_one_setup_entities();
+    generic_dark_arts[53] = EffectEntityPlacement::new(
+        EffectEntity::new("generic:dark", None),
+        EffectZone::DarkArtsDeck,
+    );
+    for entities in [
+        missing_starter,
+        extra_hand,
+        missing_location,
+        generic_dark_arts,
+    ] {
+        assert_eq!(
+            GameEngine::new(&rules).start_game_one(
+                StartGameInput {
+                    actor_role: ParticipantRole::Host,
+                    participants: &participants,
+                    content: content(&entities),
+                },
+                &mut UnexpectedEntropy
+            ),
+            Err(game_domain::StartGameError::InvalidInitialEntities)
+        );
+    }
 }
 
 fn hogwarts_card(
@@ -122,6 +419,158 @@ fn single_target_selector(
     }
 }
 
+#[test]
+fn dark_arts_reveals_one_card_and_executes_only_its_effect() {
+    let entities = vec![
+        EffectEntityPlacement::new(
+            EffectEntity::new("instance:dark-first", None).with_effect_rule("rule:lose-two"),
+            EffectZone::DarkArtsDeck,
+        ),
+        EffectEntityPlacement::new(
+            EffectEntity::new("instance:dark-second", None).with_effect_rule("rule:lose-five"),
+            EffectZone::DarkArtsDeck,
+        ),
+    ];
+    let rules = ValidatedGameRules::new(vec![
+        EffectRule {
+            id: "rule:dark-phase".to_owned(),
+            trigger: EffectTrigger::DarkArts,
+            order: 0,
+            cost: vec![],
+            effect: EffectDefinition::RevealDarkArts,
+        },
+        resource_rule(
+            "rule:lose-two",
+            None,
+            EffectTargetOwner::Actor,
+            EffectResource::Health,
+            -2,
+        ),
+        resource_rule(
+            "rule:lose-five",
+            None,
+            EffectTargetOwner::Actor,
+            EffectResource::Health,
+            -5,
+        ),
+    ])
+    .expect("valid rules");
+    let participants = participants();
+    let state = GameEngine::new(&rules)
+        .start(
+            StartGameInput {
+                actor_role: ParticipantRole::Host,
+                participants: &participants,
+                content: content(&entities),
+            },
+            &mut ScriptedRoller::empty(),
+        )
+        .expect("opening turn");
+    assert_eq!(
+        state
+            .effect_world()
+            .hero_resource(1, EffectResource::Health),
+        Some(8)
+    );
+    assert_eq!(
+        entity_ids_in(&state, EffectZone::DarkArtsDiscard),
+        vec!["instance:dark-first"]
+    );
+    assert_eq!(
+        entity_ids_in(&state, EffectZone::DarkArtsDeck),
+        vec!["instance:dark-second"]
+    );
+}
+
+#[test]
+fn dark_arts_reshuffles_resolved_cards_after_exhaustion_and_replays_the_next_turn() {
+    let entities = vec![
+        EffectEntityPlacement::new(
+            EffectEntity::new("instance:dark-first", None).with_effect_rule("rule:lose-two"),
+            EffectZone::DarkArtsDeck,
+        ),
+        EffectEntityPlacement::new(
+            EffectEntity::new("instance:dark-second", None).with_effect_rule("rule:lose-five"),
+            EffectZone::DarkArtsDeck,
+        ),
+    ];
+    let rules = ValidatedGameRules::new(vec![
+        EffectRule {
+            id: "rule:dark-phase".to_owned(),
+            trigger: EffectTrigger::DarkArts,
+            order: 0,
+            cost: vec![],
+            effect: EffectDefinition::RevealDarkArts,
+        },
+        resource_rule(
+            "rule:lose-two",
+            None,
+            EffectTargetOwner::Actor,
+            EffectResource::Health,
+            -2,
+        ),
+        resource_rule(
+            "rule:lose-five",
+            None,
+            EffectTargetOwner::Actor,
+            EffectResource::Health,
+            -5,
+        ),
+    ])
+    .expect("valid rules");
+    let participants = participants();
+    let engine = GameEngine::new(&rules);
+    let mut state = engine
+        .start(
+            StartGameInput {
+                actor_role: ParticipantRole::Host,
+                participants: &participants,
+                content: content(&entities),
+            },
+            &mut ScriptedRoller::empty(),
+        )
+        .expect("opening turn");
+    for _ in 0..2 {
+        let decision = engine
+            .decide(
+                GameIntentInput {
+                    state: &state,
+                    expected_state_version: state.state_version(),
+                    actor_position: state.active_position(),
+                    intent: PlayerIntent::EndHeroActions,
+                },
+                &mut ScriptedRoller::empty(),
+            )
+            .expect("next Dark Arts phase");
+        assert_eq!(
+            apply_game_event(&state, &decision.event).expect("phase replay"),
+            decision.state
+        );
+        state = decision.state;
+    }
+    assert_eq!(
+        state
+            .effect_world()
+            .hero_resource(1, EffectResource::Health),
+        Some(3)
+    );
+    assert_eq!(
+        state
+            .effect_world()
+            .hero_resource(2, EffectResource::Health),
+        Some(5)
+    );
+    assert_eq!(state.prng_counter(), 1);
+    assert_eq!(
+        entity_ids_in(&state, EffectZone::DarkArtsDiscard),
+        vec!["instance:dark-second"]
+    );
+    assert_eq!(
+        entity_ids_in(&state, EffectZone::DarkArtsDeck),
+        vec!["instance:dark-first"]
+    );
+}
+
 fn resource_rule(
     id: &str,
     selector_id: Option<&str>,
@@ -139,6 +588,141 @@ fn resource_rule(
             operation: EffectOperation::ModifyResource { resource, amount },
         },
     }
+}
+
+#[test]
+fn only_the_active_villain_executes_its_turn_ability() {
+    let entities = vec![
+        EffectEntityPlacement::new(
+            EffectEntity::villain("instance:active", "villain:active", "rule:active", 6),
+            EffectZone::ActiveVillains,
+        ),
+        EffectEntityPlacement::new(
+            EffectEntity::villain("instance:waiting", "villain:waiting", "rule:waiting", 6),
+            EffectZone::VillainDeck,
+        ),
+    ];
+    let mut active = resource_rule(
+        "rule:active",
+        None,
+        EffectTargetOwner::Actor,
+        EffectResource::Health,
+        -1,
+    );
+    active.trigger = EffectTrigger::Villains;
+    let mut waiting = resource_rule(
+        "rule:waiting",
+        None,
+        EffectTargetOwner::Actor,
+        EffectResource::Health,
+        -5,
+    );
+    waiting.trigger = EffectTrigger::Villains;
+    waiting.order = 1;
+    let rules = ValidatedGameRules::new(vec![active, waiting]).expect("valid rules");
+    let participants = participants();
+    let state = GameEngine::new(&rules)
+        .start(
+            StartGameInput {
+                actor_role: ParticipantRole::Host,
+                participants: &participants,
+                content: content(&entities),
+            },
+            &mut ScriptedRoller::empty(),
+        )
+        .expect("initial turn");
+    assert_eq!(
+        state
+            .effect_world()
+            .hero_resource(1, EffectResource::Health),
+        Some(9)
+    );
+}
+
+#[test]
+fn drawing_restrictions_block_bonus_draws_but_end_before_the_next_hand() {
+    let mut entities = vec![starter_card(
+        "instance:restriction",
+        "starter:restriction",
+        1,
+        "rule:restriction",
+        EffectZone::HeroHand,
+    )];
+    for index in 0..6 {
+        entities.push(starter_card(
+            &format!("instance:pile-{index}"),
+            "starter:coin",
+            1,
+            "rule:coin",
+            EffectZone::HeroDrawPile,
+        ));
+    }
+    let rules = vec![EffectRule {
+        id: "rule:restriction".to_owned(),
+        trigger: EffectTrigger::Manual,
+        order: 0,
+        cost: vec![],
+        effect: EffectDefinition::Sequence {
+            effects: vec![
+                EffectDefinition::Apply {
+                    target: single_target_selector(
+                        None,
+                        EffectZone::Heroes,
+                        EffectTargetOwner::Actor,
+                    ),
+                    operation: EffectOperation::PreventDrawing,
+                },
+                EffectDefinition::Apply {
+                    target: single_target_selector(
+                        None,
+                        EffectZone::Heroes,
+                        EffectTargetOwner::Actor,
+                    ),
+                    operation: EffectOperation::Draw { amount: 1 },
+                },
+            ],
+        },
+    }];
+    let state = advance_to_hero_action(&entities, &rules);
+    let played = decide(
+        &state,
+        2,
+        GameCommand::PlayCard {
+            card_id: "instance:restriction".to_owned(),
+            targets: vec![],
+        },
+        &rules,
+    )
+    .expect("restriction resolves");
+    assert!(entity_ids_in(&played.state, EffectZone::HeroHand).is_empty());
+    assert_eq!(
+        apply_game_event(&state, &played.event).expect("restriction replay"),
+        played.state
+    );
+    let validated = ValidatedGameRules::new(rules).expect("rules");
+    let ended = GameEngine::new(&validated)
+        .decide(
+            GameIntentInput {
+                state: &played.state,
+                expected_state_version: played.state.state_version(),
+                actor_position: 1,
+                intent: PlayerIntent::EndHeroActions,
+            },
+            &mut ScriptedRoller::empty(),
+        )
+        .expect("normal hand refill");
+    assert_eq!(
+        ended
+            .state
+            .effect_world()
+            .cards_in_zone(1, EffectZone::HeroHand)
+            .len(),
+        5
+    );
+    assert_eq!(
+        apply_game_event(&played.state, &ended.event).expect("refill replay"),
+        ended.state
+    );
 }
 
 fn health_change(amount: i16) -> EffectDefinition {
@@ -2241,6 +2825,7 @@ fn acquiring_a_payable_card_charges_influence_moves_ownership_and_refills_in_ord
         3,
         GameCommand::AcquireCard {
             card_id: "instance:market-first".to_owned(),
+            destination: game_domain::CardAcquisitionDestination::DiscardPile,
         },
         &rules,
     )
@@ -2351,6 +2936,7 @@ fn legal_intentions_and_execution_reject_the_same_wrong_owner_target_and_resourc
         },
         GameCommand::AcquireCard {
             card_id: "instance:too-expensive".to_owned(),
+            destination: game_domain::CardAcquisitionDestination::DiscardPile,
         },
     ] {
         assert!(decide(&state, 2, command, &rules).is_err());

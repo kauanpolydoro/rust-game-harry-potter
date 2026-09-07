@@ -215,8 +215,15 @@ async fn main() {
         .connect(&database_url)
         .await
         .expect("the E2E database must be reachable");
-    let state = AppState::with_content_manifests(database, vec![executable_fixture_manifest()])
-        .with_application_origin(application_origin);
+    let state = AppState::with_content_manifests(
+        database,
+        vec![
+            executable_fixture_manifest(),
+            harry_potter_server::game_one_manifest(),
+        ],
+    )
+    .with_game_seed_source(|| Ok([7; 32]))
+    .with_application_origin(application_origin);
     initialize(&state)
         .await
         .expect("the E2E database must initialize");

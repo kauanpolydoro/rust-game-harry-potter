@@ -39,6 +39,11 @@ typography:
     fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "1rem"
     fontWeight: 760
+  table-description:
+    fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 400
+    lineHeight: 1.5
 rounded:
   control: "0.75rem"
   signal: "50%"
@@ -161,6 +166,7 @@ A diferença de família separa comando de explicação sem recorrer a ornamenta
 - **Body** (400, `1.05rem`, `1.55`): explica disponibilidade e recuperação em linhas de até `34rem`, crescendo para `1.2rem` em telas amplas.
 - **Label** (650 a 700, `0.7rem` a `0.78rem`, tracking positivo): rotula edição, eixo e continuidade em caixa alta quando atua como metadado.
 - **Control** (760, `1rem`): mantém a ação de recuperação direta, estável e fácil de localizar.
+- **Table Description** (`table-description`): explica efeitos de cartas, Artes das Trevas e recompensas de Vilões em linhas de até `64ch`, preservando o mesmo corpo no celular e no computador.
 
 **The Regra da Voz de Comando Rule.** Archivo Narrow pertence aos títulos que orientam a mesa; explicações, metadados e controles permanecem em Inter.
 
@@ -175,6 +181,12 @@ A faixa principal mantém pelo menos `22rem`, o que protege a separação entre 
 
 A partir de `48rem`, o recuo horizontal cresce para `3rem`, o trilho ganha largura e o intervalo entre trilho e conteúdo aumenta para `2.5rem`.
 O masthead passa a acomodar a edição na terceira coluna, sem abandonar o mesmo eixo de leitura.
+
+Na partida, a escolha pendente ocupa o fluxo antes da mesa, com sua confirmação imediatamente depois das opções em todas as larguras.
+A mesa continua consultável durante as fases automáticas e enquanto uma escolha aguarda resolução.
+
+Abaixo de `48rem`, cada linha da mesa usa uma única coluna, com descrição junto ao nome e notas ou ações abaixo.
+A partir desse breakpoint, notas e ações podem ocupar a coluna lateral, e o registro do Herói e seus recursos se alinha à direita do título da mesa.
 
 **The Regra do Eixo de Deixa Rule.** Numeração, linha vertical, estado dominante e ação final devem compartilhar uma progressão visual contínua, nunca uma grade de módulos independentes.
 
@@ -248,6 +260,25 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 
 **The Regra do Próximo Passo Rule.** A região inferior mostra uma única ação de recuperação ou uma única nota de continuidade, nunca as duas ao mesmo tempo.
 
+### Pending Choice
+
+- **Character:** pausa explícita na sequência oficial, integrada ao painel por divisor de latão quieto e título condensado.
+- **Instruction:** a operação vem antes das opções, acompanhada de participante responsável, quantidade permitida e causa oficial legível.
+- **Selection:** radios representam uma opção obrigatória; checkboxes representam escolhas opcionais ou múltiplas, respeitando os limites oficiais.
+- **Confirmation:** o único botão “Confirmar escolha” aparece imediatamente depois das opções no próprio fluxo, com largura total e o tratamento da ação principal.
+- **Availability:** somente o responsável recebe controles de seleção, e a confirmação segue a validade da seleção, a permissão oficial e os bloqueios de envio ou sincronização.
+
+**The Regra da Escolha Completa Rule.** Operação, opções e confirmação permanecem juntas antes da mesa, em qualquer largura.
+
+### Game Table
+
+- **Character:** zonas e linhas planas com divisores discretos mantêm a mesa como um registro consultável em todas as fases.
+- **Identity:** o nome do Herói e o turno pertencem ao registro de recursos, sem rótulo adicional acima de “Sua mesa”.
+- **Descriptions:** efeitos e recompensas aparecem em texto junto à entidade correspondente, usando as descrições derivadas do AST oficial recebidas do servidor.
+- **State:** a última Arte das Trevas revelada conserva nome e descrição, enquanto atordoamento e bloqueio de compra de cartas extras são nomeados no registro do participante.
+- **Actions:** a intenção legal determina quais controles aparecem, e uma escolha pendente ou fase automática bloqueia as ações da mesa sem esconder seu conteúdo.
+- **Acquisition:** quando a intenção oficial oferece mais de um destino, um seletor rotulado apresenta “Descarte” e “Topo do baralho” junto da ação de adquirir.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -257,6 +288,8 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 - **Do** respeitar safe areas, zoom, foco visível e alvos interativos com pelo menos `44px` por `44px`.
 - **Do** usar textura, latão e tipografia condensada como sinais discretos de direção de cena.
 - **Do** associar validação ao campo correspondente e comunicar o resultado de ações assíncronas com texto explícito.
+- **Do** manter a operação e a confirmação junto às opções da escolha pendente, antes da mesa consultável.
+- **Do** preservar a descrição junto ao nome e colocar notas e ações abaixo nas linhas da mesa em telas estreitas.
 
 ### Don't:
 
@@ -265,3 +298,4 @@ Os sinais usam círculos perfeitos e o marcador do masthead usa um triângulo co
 - **Don't** arredondar trilhos, marcadores numéricos ou divisores estruturais.
 - **Don't** introduzir componentes, ornamentos ou conteúdo de franquia sem presença comprovada no produto.
 - **Don't** deixar uma falha de ação silenciosa ou depender somente de cor para comunicar sucesso e erro.
+- **Don't** substituir descrições oficiais de efeitos, recompensas ou bloqueios por nomes de cartas ou indicadores visuais isolados.

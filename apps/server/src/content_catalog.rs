@@ -8,6 +8,10 @@ use game_content::{
 use serde::Serialize;
 use sqlx::PgPool;
 
+mod descriptions;
+mod game_one;
+pub use game_one::game_one_manifest;
+
 #[derive(Clone)]
 pub(crate) struct ContentCatalog {
     manifests: Arc<[ContentManifest]>,
@@ -110,6 +114,19 @@ impl ContentCatalog {
             manifest_digest: manifest.digest.clone(),
             manifest_version: manifest.manifest_version,
             playable: manifest.playable && adventure.playable,
+            prepares_game_one: adventure
+                .functional_provenance
+                .get(&FunctionalField::Setup)
+                .and_then(|definition| definition.rule_id.as_ref())
+                .and_then(|id| manifest.rules.iter().find(|rule| rule.id == *id))
+                .is_some_and(|rule| {
+                    matches!(
+                        rule.effect,
+                        Effect::Structural {
+                            rule: game_content::StructuralRule::GameOneSetup,
+                        }
+                    )
+                }),
             initial_entities,
         })
     }
@@ -168,6 +185,98 @@ impl ContentCatalog {
             .map(entry_name)
     }
 
+    pub(crate) fn entity_description(
+        &self,
+        digest: &str,
+        catalog_id: &str,
+        field: FunctionalField,
+    ) -> Option<String> {
+        let manifest = self
+            .manifests
+            .iter()
+            .find(|manifest| manifest.digest == digest)?;
+        if manifest.manifest_version < 4 {
+            return None;
+        }
+        let entry = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.catalog_id.as_str() == catalog_id)?;
+        let id = entry.functional_provenance.get(&field)?.rule_id.as_ref()?;
+        let rules = manifest
+            .rules
+            .iter()
+            .map(|rule| (&rule.id, rule))
+            .collect::<BTreeMap<_, _>>();
+        let rule = compile_rule(rules.get(id).copied()?, &rules)?;
+        let actor = if field == FunctionalField::Effect
+            && matches!(entry.kind, EntryKind::DarkArts | EntryKind::Villain)
+        {
+            "O Herói ativo"
+        } else {
+            "Você"
+        };
+        descriptions::describe(&rule.effect, actor).filter(|text| !text.is_empty())
+    }
+
+    pub(crate) fn rule_name(&self, digest: &str, rule_id: &str) -> Option<String> {
+        let manifest = self
+            .manifests
+            .iter()
+            .find(|manifest| manifest.digest == digest && manifest.manifest_version >= 4)?;
+        manifest
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.functional_provenance.values().any(|field| {
+                    field
+                        .rule_id
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == rule_id)
+                })
+            })
+            .map(entry_name)
+    }
+
+    pub(crate) fn choice_option_labels(
+        &self,
+        digest: &str,
+        cursor: &game_domain::EffectCursor,
+    ) -> Vec<(String, String)> {
+        let Some(rules) = self.effect_rules(digest) else {
+            return Vec::new();
+        };
+        let Some(rule) = rules.iter().find(|rule| rule.id == cursor.rule_id) else {
+            return Vec::new();
+        };
+        let Some(game_domain::EffectDefinition::Choice { options, .. }) =
+            descriptions::at_path(&rule.effect, &cursor.path)
+        else {
+            return Vec::new();
+        };
+        options
+            .iter()
+            .enumerate()
+            .filter_map(|(index, effect)| {
+                descriptions::describe(effect, "Você")
+                    .filter(|text| !text.is_empty())
+                    .map(|label| (format!("option:{}", index + 1), label))
+            })
+            .collect()
+    }
+
+    pub(crate) fn choice_instruction(
+        &self,
+        digest: &str,
+        cursor: &game_domain::EffectCursor,
+    ) -> Option<String> {
+        self.rule_name(digest, &cursor.rule_id)?;
+        let rules = self.effect_rules(digest)?;
+        let rule = rules.iter().find(|rule| rule.id == cursor.rule_id)?;
+        descriptions::describe(descriptions::at_path(&rule.effect, &cursor.path)?, "Você")
+            .filter(|text| !text.is_empty())
+    }
+
     pub(crate) async fn publish(&self, database: &PgPool) -> Result<(), sqlx::Error> {
         for manifest in self.manifests.iter() {
             let document = serde_json::to_string(manifest)
@@ -204,6 +313,7 @@ pub(crate) struct SelectedContent {
     pub(crate) manifest_digest: String,
     pub(crate) manifest_version: u16,
     pub(crate) playable: bool,
+    pub(crate) prepares_game_one: bool,
     initial_entities: Vec<SelectedInitialEntity>,
 }
 
@@ -223,24 +333,74 @@ struct SelectedInitialEntity {
 }
 
 impl SelectedContent {
+    pub(crate) fn start_game(
+        &self,
+        actor_role: game_domain::ParticipantRole,
+        participants: &[game_domain::LobbyParticipant],
+        rules: &game_domain::ValidatedGameRules,
+        random: &mut dyn game_domain::EffectRoller,
+    ) -> Result<game_domain::InitialGameState, game_domain::StartGameError> {
+        let entities = self.initial_entities(participants);
+        let input = game_domain::StartGameInput {
+            actor_role,
+            participants,
+            content: game_domain::ContentSelection {
+                adventure_id: &self.adventure_id,
+                content_version: &self.content_version,
+                ruleset_version: &self.ruleset_version,
+                manifest_digest: &self.manifest_digest,
+                manifest_version: self.manifest_version,
+                playable: self.playable,
+                initial_entities: &entities,
+            },
+        };
+        let engine = game_domain::GameEngine::new(rules);
+        if self.prepares_game_one {
+            engine.start_game_one(input, random)
+        } else {
+            engine.start(input, random)
+        }
+    }
+
     pub(crate) fn initial_entities(
         &self,
-        participant_positions: &[u8],
+        participants: &[game_domain::LobbyParticipant],
     ) -> Vec<game_domain::EffectEntityPlacement> {
         let mut next_instance = 1_u32;
         let mut placements = Vec::new();
         for template in &self.initial_entities {
             let owners = match template.owner {
                 GameSetupOwner::None => vec![None],
-                GameSetupOwner::EachParticipant => {
-                    participant_positions.iter().copied().map(Some).collect()
-                }
+                GameSetupOwner::EachParticipant => participants
+                    .iter()
+                    .map(|participant| Some(participant.position))
+                    .collect(),
+                owner => participants
+                    .iter()
+                    .filter(|participant| {
+                        matches!(
+                            (owner, participant.hero),
+                            (GameSetupOwner::Harry, Some(game_domain::HeroId::Harry))
+                                | (
+                                    GameSetupOwner::Hermione,
+                                    Some(game_domain::HeroId::Hermione)
+                                )
+                                | (GameSetupOwner::Neville, Some(game_domain::HeroId::Neville))
+                                | (GameSetupOwner::Ron, Some(game_domain::HeroId::Ron))
+                        )
+                    })
+                    .map(|participant| Some(participant.position))
+                    .collect(),
             };
             for owner_position in owners {
                 for _ in 0..template.copies {
                     let instance_id = format!("instance:{next_instance:08}");
                     next_instance += 1;
                     let entity = match template.kind {
+                        EntryKind::DarkArts => game_domain::EffectEntity::new(instance_id, None)
+                            .with_kind(game_domain::EffectEntityKind::DarkArts)
+                            .with_catalog_id(&template.catalog_id)
+                            .with_effect_rule(&template.effect_rule_id),
                         EntryKind::StarterCard => game_domain::EffectEntity::card(
                             instance_id,
                             &template.catalog_id,
@@ -284,7 +444,6 @@ impl SelectedContent {
                         ),
                         EntryKind::Adventure
                         | EntryKind::Catalog
-                        | EntryKind::DarkArts
                         | EntryKind::Hero
                         | EntryKind::Horcrux
                         | EntryKind::Proficiency
@@ -416,6 +575,38 @@ fn compile_effect(
     rules: &BTreeMap<&game_content::RuleId, &EffectRule>,
 ) -> Option<game_domain::EffectDefinition> {
     Some(match effect {
+        Effect::TopDeckAcquisition { card_type } => {
+            game_domain::EffectDefinition::TopDeckAcquisition {
+                card_type: effect_card_type(*card_type),
+            }
+        }
+        Effect::CardType { card_type } => game_domain::EffectDefinition::CardType {
+            card_type: effect_card_type(*card_type),
+        },
+        Effect::HandDamageLimit { maximum } => {
+            game_domain::EffectDefinition::HandDamageLimit { maximum: *maximum }
+        }
+        Effect::Reaction { trigger, effect } => game_domain::EffectDefinition::Reaction {
+            trigger: match trigger {
+                game_content::ReactionTrigger::OwnerPlaysAlly => {
+                    game_domain::EffectReactionTrigger::OwnerPlaysAlly
+                }
+                game_content::ReactionTrigger::ControlAdded => {
+                    game_domain::EffectReactionTrigger::ControlAdded
+                }
+                game_content::ReactionTrigger::HeroForcedDiscard => {
+                    game_domain::EffectReactionTrigger::HeroForcedDiscard
+                }
+                game_content::ReactionTrigger::SelfForcedDiscard => {
+                    game_domain::EffectReactionTrigger::SelfForcedDiscard
+                }
+                game_content::ReactionTrigger::OwnerDefeatsVillain => {
+                    game_domain::EffectReactionTrigger::OwnerDefeatsVillain
+                }
+            },
+            effect: Box::new(compile_effect(effect, rules)?),
+        },
+        Effect::RevealDarkArts => game_domain::EffectDefinition::RevealDarkArts,
         Effect::Apply { target, operation } => game_domain::EffectDefinition::Apply {
             target: effect_selector(target),
             operation: effect_operation(operation),
@@ -444,7 +635,7 @@ fn compile_effect(
                 None => None,
             },
         },
-        Effect::NoOp => game_domain::EffectDefinition::NoOp,
+        Effect::NoOp | Effect::Structural { .. } => game_domain::EffectDefinition::NoOp,
         Effect::Reference { rule } => compile_effect(&rules.get(rule)?.effect, rules)?,
         Effect::Repeat { times, effect } => game_domain::EffectDefinition::Repeat {
             times: *times,
@@ -513,9 +704,22 @@ fn effect_selector(selector: &Selector) -> game_domain::EffectSelector {
     }
 }
 
+fn effect_card_type(card_type: game_content::CardType) -> game_domain::EffectCardType {
+    match card_type {
+        game_content::CardType::Ally => game_domain::EffectCardType::Ally,
+        game_content::CardType::Item => game_domain::EffectCardType::Item,
+        game_content::CardType::Spell => game_domain::EffectCardType::Spell,
+    }
+}
+
 fn effect_operation(operation: &Operation) -> game_domain::EffectOperation {
     match operation {
+        Operation::GainAttackPerAllyPlayed { amount } => {
+            game_domain::EffectOperation::GainAttackPerAllyPlayed { amount: *amount }
+        }
         Operation::Discard => game_domain::EffectOperation::Discard,
+        Operation::PreventDrawing => game_domain::EffectOperation::PreventDrawing,
+        Operation::Draw { amount } => game_domain::EffectOperation::Draw { amount: *amount },
         Operation::ModifyResource { resource, amount } => {
             game_domain::EffectOperation::ModifyResource {
                 resource: effect_resource(*resource),
@@ -583,6 +787,94 @@ const fn effect_game_outcome(outcome: GameOutcome) -> game_domain::EffectGameOut
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn real_reparo_choice_explains_each_option_at_its_continuation_cursor() {
+        let manifest = super::game_one_manifest();
+        let digest = manifest.digest.clone();
+        let catalog = super::ContentCatalog::new(vec![manifest]);
+        let cursor = game_domain::EffectCursor {
+            rule_id: "rule:g1-hogwarts-009".to_owned(),
+            path: vec![game_domain::EffectPathSegment::SequenceEffect(1)],
+        };
+        assert_eq!(
+            catalog.rule_name(&digest, &cursor.rule_id).as_deref(),
+            Some("Reparo")
+        );
+        assert_eq!(
+            catalog.choice_option_labels(&digest, &cursor),
+            vec![
+                (
+                    "option:1".to_owned(),
+                    "Você recebe 2 de Influência.".to_owned()
+                ),
+                ("option:2".to_owned(), "Você compra 1 carta.".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn game_one_cards_explain_their_executable_effects_in_portuguese() {
+        let manifest = super::game_one_manifest();
+        let digest = manifest.digest.clone();
+        let ids = manifest
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.kind,
+                    game_content::EntryKind::StarterCard
+                        | game_content::EntryKind::HogwartsCard
+                        | game_content::EntryKind::DarkArts
+                        | game_content::EntryKind::Villain
+                )
+            })
+            .map(|entry| entry.catalog_id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let catalog = super::ContentCatalog::new(vec![manifest]);
+        for id in ids {
+            assert!(
+                catalog
+                    .entity_description(&digest, &id, game_content::FunctionalField::Effect)
+                    .is_some_and(|text| !text.is_empty()),
+                "missing description for {id}"
+            );
+        }
+        assert_eq!(
+            catalog
+                .entity_description(
+                    &digest,
+                    "hogwarts-card:005",
+                    game_content::FunctionalField::Effect
+                )
+                .as_deref(),
+            Some("Você recebe 1 de Ataque. Você compra 1 carta.")
+        );
+        assert_eq!(
+            catalog
+                .entity_description(
+                    &digest,
+                    "villain:001",
+                    game_content::FunctionalField::Reward
+                )
+                .as_deref(),
+            Some("Cada Herói compra 1 carta.")
+        );
+    }
+
+    #[test]
+    fn shipped_game_one_is_playable_only_after_every_rule_compiles() {
+        let manifest = super::game_one_manifest();
+        assert!(manifest.playable);
+        assert_eq!(manifest.manifest_version, 4);
+        assert_eq!((manifest.record_count, manifest.card_count), (45, 93));
+        let digest = manifest.digest.clone();
+        let expected = manifest.executable_rules.len();
+        let catalog = super::ContentCatalog::new(vec![manifest]);
+        let compiled = catalog.effect_rules(&digest).expect("compiled rules");
+        assert_eq!(compiled.len(), expected);
+        game_domain::ValidatedGameRules::new(compiled).expect("domain capabilities");
+    }
+
     use std::collections::BTreeMap;
 
     use super::*;
@@ -601,6 +893,7 @@ mod tests {
             order,
             cost: Vec::new(),
             effect: Effect::NoOp,
+            provenance: None,
         })
         .collect::<Vec<_>>();
         let executable_rules = rules.iter().map(|rule| rule.id.clone()).collect();

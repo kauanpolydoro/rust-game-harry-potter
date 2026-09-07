@@ -7,6 +7,12 @@ use crate::{
 
 use super::CandidateBundle;
 
+mod game_one;
+mod reactions;
+mod revelation;
+mod versions;
+use reactions::validate_reactive_definitions;
+
 const MAX_EFFECT_DEPTH: usize = 32;
 const MAX_EFFECT_NODES: usize = 1_024;
 const MAX_BRANCHES: usize = 64;
@@ -19,13 +25,87 @@ const MAX_PARTICIPANT_HEROES: usize = 4;
 const MAX_VERSION_BYTES: usize = 256;
 const MAX_PARTICIPANTS: u32 = 4;
 
-pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+pub(super) fn validate(
+    bundle: &CandidateBundle,
+    inventory: super::Inventory,
+) -> Result<(), ImportFailure> {
     validate_metadata(bundle)?;
-    validate_inventory(bundle)?;
+    versions::validate(bundle)?;
+    validate_inventory(bundle, inventory)?;
     validate_provenance(bundle)?;
     validate_game_setups(bundle)?;
+    if matches!(inventory, super::Inventory::GameOne) {
+        game_one::validate_setup(bundle)?;
+    }
     validate_effects(bundle)?;
+    validate_reactive_definitions(bundle)?;
+    revelation::validate(bundle)?;
+    validate_structural_definitions(bundle)?;
     validate_references(bundle)
+}
+
+fn validate_structural_definitions(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    use crate::StructuralRule;
+    let structural = bundle
+        .rules
+        .iter()
+        .filter_map(|rule| match rule.effect {
+            Effect::Structural { rule: assertion } => Some((&rule.id, assertion)),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    for entry in &bundle.entries {
+        for (field, definition) in &entry.functional {
+            let Some(assertion) = definition.rule.as_ref().and_then(|id| structural.get(id)) else {
+                continue;
+            };
+            if !matches!(
+                (entry.kind, field, assertion),
+                (
+                    EntryKind::Hero,
+                    FunctionalField::Ability,
+                    StructuralRule::NoHeroAbility
+                ) | (
+                    EntryKind::Location,
+                    FunctionalField::Effect,
+                    StructuralRule::NoLocationEffect
+                ) | (
+                    EntryKind::Adventure,
+                    FunctionalField::Setup,
+                    StructuralRule::GameOneSetup
+                ) | (
+                    EntryKind::Adventure | EntryKind::Ruleset,
+                    FunctionalField::Precedence,
+                    StructuralRule::GameOnePrecedence
+                )
+            ) {
+                return Err(ImportFailure {
+                    message: format!(
+                        "entry {} has an incompatible structural definition for {field:?}",
+                        entry.id
+                    ),
+                });
+            }
+        }
+    }
+    for rule in &bundle.rules {
+        if (structural.contains_key(&rule.id)
+            && (rule.trigger != crate::EffectTrigger::Manual || !rule.cost.is_empty()))
+            || rule
+                .effect
+                .references()
+                .iter()
+                .any(|id| structural.contains_key(id))
+        {
+            return Err(ImportFailure {
+                message: format!(
+                    "structural definition cannot execute inside rule {}",
+                    rule.id
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_metadata(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
@@ -103,7 +183,10 @@ fn valid_https_uri(value: &str) -> bool {
         })
 }
 
-fn validate_inventory(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+fn validate_inventory(
+    bundle: &CandidateBundle,
+    inventory: super::Inventory,
+) -> Result<(), ImportFailure> {
     if let Some(duplicate) = bundle
         .entries
         .windows(2)
@@ -164,17 +247,69 @@ fn validate_inventory(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
         .map(|entry| u32::from(entry.copies))
         .sum::<u32>();
 
-    if bundle.entries.len() != super::BASE_RECORD_COUNT || card_count != super::BASE_CARD_COUNT {
+    let (record_count, expected_cards) = inventory.counts();
+    if bundle.entries.len() != record_count || card_count != expected_cards {
         return Err(ImportFailure {
             message: format!(
-                "base catalog must contain {} records and {} cards; found {} records and {card_count} cards",
-                super::BASE_RECORD_COUNT,
-                super::BASE_CARD_COUNT,
+                "catalog must contain {record_count} records and {expected_cards} cards; found {} records and {card_count} cards",
                 bundle.entries.len()
             ),
         });
     }
 
+    if matches!(inventory, super::Inventory::GameOne) {
+        validate_game_one_inventory(bundle)?;
+    }
+
+    Ok(())
+}
+
+fn validate_game_one_inventory(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    let mut expected = BTreeMap::new();
+    for (prefix, kind, copies) in [
+        (
+            "hogwarts-card",
+            EntryKind::HogwartsCard,
+            &[1, 2, 4, 1, 4, 2, 1, 4, 6, 1, 1, 0, 3][..],
+        ),
+        (
+            "starter",
+            EntryKind::StarterCard,
+            &[28, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1][..],
+        ),
+        ("dark-arts", EntryKind::DarkArts, &[3, 2, 3, 2][..]),
+        ("villain", EntryKind::Villain, &[1, 1, 1][..]),
+        ("location", EntryKind::Location, &[1, 1][..]),
+        ("turn-order", EntryKind::TurnOrder, &[1, 1, 1, 1][..]),
+    ] {
+        for (index, copies) in copies.iter().enumerate().filter(|(_, count)| **count > 0) {
+            expected.insert(format!("{prefix}:{:03}", index + 1), (kind, *copies));
+        }
+    }
+    for index in [1, 4, 7, 10] {
+        expected.insert(format!("hero:{index:03}"), (EntryKind::Hero, 1));
+    }
+    for (id, kind) in [
+        ("adventure:001", EntryKind::Adventure),
+        ("catalog:game-one-v1", EntryKind::Catalog),
+        ("ruleset:game-one-v1", EntryKind::Ruleset),
+    ] {
+        expected.insert(id.to_owned(), (kind, 0));
+    }
+    for entry in &bundle.entries {
+        if entry.introduced_in != 1
+            || expected.remove(entry.id.as_str()) != Some((entry.kind, entry.copies))
+        {
+            return Err(ImportFailure {
+                message: format!("entry {} does not match the Game 1 inventory", entry.id),
+            });
+        }
+    }
+    if !expected.is_empty() {
+        return Err(ImportFailure {
+            message: "Game 1 inventory is incomplete".to_owned(),
+        });
+    }
     Ok(())
 }
 
@@ -216,6 +351,27 @@ fn validate_functional_definition_shapes(
     Ok(())
 }
 
+fn validate_rule_provenance(
+    bundle: &CandidateBundle,
+    sources: &BTreeSet<&str>,
+) -> Result<(), ImportFailure> {
+    for rule in &bundle.rules {
+        if let Some(provenance) = &rule.provenance
+            && (provenance.sources.is_empty()
+                || provenance
+                    .sources
+                    .iter()
+                    .any(|id| !sources.contains(id.as_str())))
+        {
+            return Err(ImportFailure {
+                message: format!("rule {} has empty or unknown provenance sources", rule.id),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_provenance(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
     if let Some(duplicate) = bundle
         .sources
@@ -233,6 +389,8 @@ fn validate_provenance(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
         .iter()
         .map(|source| source.id.as_str())
         .collect::<BTreeSet<_>>();
+
+    validate_rule_provenance(bundle, &sources)?;
 
     for entry in &bundle.entries {
         for (field, field_sources) in &entry.provenance {
@@ -436,8 +594,12 @@ fn validate_setup_entity(
     }
     let required_copies = u32::from(entity.copies)
         * match entity.owner {
-            GameSetupOwner::None => 1,
             GameSetupOwner::EachParticipant => MAX_PARTICIPANTS,
+            GameSetupOwner::None
+            | GameSetupOwner::Harry
+            | GameSetupOwner::Hermione
+            | GameSetupOwner::Neville
+            | GameSetupOwner::Ron => 1,
         };
     if required_copies > u32::from(entry.copies) {
         return Err(ImportFailure {
@@ -530,7 +692,7 @@ fn validate_setup_entity_data(
 
             Ok(())
         }
-        EntryKind::StarterCard => Ok(()),
+        EntryKind::StarterCard | EntryKind::DarkArts => Ok(()),
         _ => Err(ImportFailure {
             message: format!(
                 "game setup {adventure_id} entity {entity_id} has unsupported kind {:?}",
@@ -546,7 +708,11 @@ fn setup_entity_is_compatible(kind: EntryKind, zone: Zone, owner: GameSetupOwner
         (
             EntryKind::StarterCard | EntryKind::HogwartsCard,
             Zone::HeroDiscardPile | Zone::HeroDrawPile | Zone::HeroHand | Zone::HeroPlayArea,
-            GameSetupOwner::EachParticipant,
+            GameSetupOwner::EachParticipant
+                | GameSetupOwner::Harry
+                | GameSetupOwner::Hermione
+                | GameSetupOwner::Neville
+                | GameSetupOwner::Ron,
         ) | (
             EntryKind::HogwartsCard,
             Zone::HogwartsDeck | Zone::Market,
@@ -554,6 +720,10 @@ fn setup_entity_is_compatible(kind: EntryKind, zone: Zone, owner: GameSetupOwner
         ) | (
             EntryKind::Villain,
             Zone::VillainDeck | Zone::ActiveVillains | Zone::VillainDiscard,
+            GameSetupOwner::None,
+        ) | (
+            EntryKind::DarkArts,
+            Zone::DarkArtsDeck | Zone::DarkArtsDiscard,
             GameSetupOwner::None,
         ) | (
             EntryKind::Location,
@@ -636,11 +806,7 @@ pub(super) fn validate_runtime_rules(
         previous_automatic_root = Some(rule);
     }
 
-    let rules = bundle
-        .rules
-        .iter()
-        .map(|rule| (&rule.id, &rule.effect))
-        .collect::<BTreeMap<_, _>>();
+    let rules = EffectRuleStats::new(bundle);
     let mut memo = BTreeMap::new();
     let mut compiled_nodes = 0;
     let mut runtime_nodes = 0;
@@ -693,31 +859,131 @@ pub(super) fn validate_runtime_rules(
     Ok(())
 }
 
+struct EffectRuleStats<'a> {
+    definitions: BTreeMap<&'a RuleId, &'a Effect>,
+    hero_card_count: usize,
+    dark_arts_card_count: usize,
+    dark_arts_rules: Vec<&'a RuleId>,
+}
+
+impl<'a> EffectRuleStats<'a> {
+    fn new(bundle: &'a CandidateBundle) -> Self {
+        Self {
+            definitions: bundle
+                .rules
+                .iter()
+                .map(|rule| (&rule.id, &rule.effect))
+                .collect(),
+            hero_card_count: bundle
+                .entries
+                .iter()
+                .filter(|entry| {
+                    matches!(entry.kind, EntryKind::StarterCard | EntryKind::HogwartsCard)
+                })
+                .map(|entry| usize::from(entry.copies))
+                .sum(),
+            dark_arts_card_count: bundle
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == EntryKind::DarkArts)
+                .map(|entry| usize::from(entry.copies))
+                .sum(),
+            dark_arts_rules: bundle
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == EntryKind::DarkArts)
+                .filter_map(|entry| {
+                    entry
+                        .functional
+                        .get(&FunctionalField::Effect)?
+                        .rule
+                        .as_ref()
+                })
+                .collect(),
+        }
+    }
+}
+
+fn revelation_stats(
+    rules: &EffectRuleStats<'_>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    let mut stats = EffectStats {
+        compiled_nodes: 1,
+        reference_depth: 0,
+        runtime_nodes: 1,
+        runtime_outcomes: rules.dark_arts_card_count.saturating_mul(2).max(1),
+    };
+    let mut card_nodes = 0;
+    let mut card_outcomes = 0;
+    for rule in &rules.dark_arts_rules {
+        let card = rule_stats(rule, rules, memo)?;
+        card_nodes = card_nodes.max(card.runtime_nodes);
+        card_outcomes = card_outcomes.max(card.runtime_outcomes);
+    }
+    stats.runtime_nodes = checked_total(stats.runtime_nodes, card_nodes)?;
+    stats.runtime_outcomes = outcome_total(stats.runtime_outcomes, card_outcomes);
+    Some(stats)
+}
+
 fn rule_stats(
     rule_id: &RuleId,
-    rules: &BTreeMap<&RuleId, &Effect>,
+    rules: &EffectRuleStats<'_>,
     memo: &mut BTreeMap<RuleId, EffectStats>,
 ) -> Option<EffectStats> {
     if let Some(stats) = memo.get(rule_id) {
         return Some(*stats);
     }
-    let stats = effect_stats(rules.get(rule_id)?, rules, memo)?;
+    let stats = effect_stats(rules.definitions.get(rule_id)?, rules, memo)?;
     memo.insert(rule_id.clone(), stats);
     Some(stats)
 }
 
+fn application_stats(
+    target: &Selector,
+    operation: &Operation,
+    rules: &EffectRuleStats<'_>,
+) -> EffectStats {
+    let runtime_outcomes = if let Operation::Draw { amount } = operation {
+        repeated_outcomes(
+            outcome_total(
+                rules.hero_card_count.saturating_mul(2),
+                usize::from(*amount),
+            ),
+            usize::from(target.cardinality.max).clamp(1, MAX_PARTICIPANT_HEROES),
+        )
+    } else {
+        usize::from(target.cardinality.max).max(1)
+    };
+    EffectStats {
+        compiled_nodes: 1,
+        reference_depth: 0,
+        runtime_nodes: 1,
+        runtime_outcomes,
+    }
+}
+
 fn effect_stats(
     effect: &Effect,
-    rules: &BTreeMap<&RuleId, &Effect>,
+    rules: &EffectRuleStats<'_>,
     memo: &mut BTreeMap<RuleId, EffectStats>,
 ) -> Option<EffectStats> {
     match effect {
-        Effect::Apply { target, .. } => Some(EffectStats {
+        Effect::CardType { .. } | Effect::TopDeckAcquisition { .. } => Some(EffectStats {
             compiled_nodes: 1,
             reference_depth: 0,
             runtime_nodes: 1,
-            runtime_outcomes: usize::from(target.cardinality.max).max(1),
+            runtime_outcomes: 0,
         }),
+        Effect::Reaction { effect, .. } => {
+            let mut stats = effect_stats(effect, rules, memo)?;
+            stats.compiled_nodes = checked_total(stats.compiled_nodes, 1)?;
+            stats.reference_depth += 1;
+            stats.runtime_nodes = checked_total(stats.runtime_nodes, 1)?;
+            Some(stats)
+        }
+        Effect::RevealDarkArts => revelation_stats(rules, memo),
+        Effect::Apply { target, operation } => Some(application_stats(target, operation, rules)),
         Effect::Choice { audience, options } => {
             let mut stats = branch_stats(options, 1, 0, true, rules, memo)?;
             if *audience == EffectChoiceAudience::EachHero {
@@ -730,7 +996,10 @@ fn effect_stats(
             }
             Some(stats)
         }
-        Effect::NoOp | Effect::Terminal { .. } => Some(EffectStats {
+        Effect::NoOp
+        | Effect::Structural { .. }
+        | Effect::Terminal { .. }
+        | Effect::HandDamageLimit { .. } => Some(EffectStats {
             compiled_nodes: 1,
             reference_depth: 0,
             runtime_nodes: 1,
@@ -793,7 +1062,7 @@ fn branch_stats(
     base_runtime_nodes: usize,
     base_runtime_outcomes: usize,
     runtime_uses_largest_branch: bool,
-    rules: &BTreeMap<&RuleId, &Effect>,
+    rules: &EffectRuleStats<'_>,
     memo: &mut BTreeMap<RuleId, EffectStats>,
 ) -> Option<EffectStats> {
     let mut combined = EffectStats {
@@ -950,6 +1219,9 @@ impl Effect {
         }
 
         match self {
+            Self::Reaction { effect, .. } => {
+                effect.validate(rule_id, depth + 1, nodes, selectors)?;
+            }
             Self::Apply { target, operation } => {
                 target.validate(rule_id, selectors)?;
                 operation.validate_zone(target.zone, rule_id)?;
@@ -1013,7 +1285,21 @@ impl Effect {
                     effect.validate(rule_id, depth + 1, nodes, selectors)?;
                 }
             }
-            Self::NoOp | Self::Reference { .. } | Self::Terminal { .. } => {}
+            Self::Structural { .. } if depth != 0 => {
+                return Err(ImportFailure {
+                    message: format!(
+                        "structural definition in {rule_id} must be a standalone declaration"
+                    ),
+                });
+            }
+            Self::NoOp
+            | Self::TopDeckAcquisition { .. }
+            | Self::CardType { .. }
+            | Self::HandDamageLimit { .. }
+            | Self::Structural { .. }
+            | Self::RevealDarkArts
+            | Self::Reference { .. }
+            | Self::Terminal { .. } => {}
         }
         Ok(())
     }
@@ -1106,6 +1392,10 @@ impl Operation {
     fn validate_zone(&self, zone: Zone, rule_id: &RuleId) -> Result<(), ImportFailure> {
         let compatible = match self {
             Self::Discard => zone == Zone::HeroHand,
+            Self::PreventDrawing => zone == Zone::Heroes,
+            Self::Draw { amount } | Self::GainAttackPerAllyPlayed { amount } => {
+                (1..=16).contains(amount) && zone == Zone::Heroes
+            }
             Self::ModifyResource { resource, amount } => {
                 *amount != 0 && zone_supports_resource(zone, *resource)
             }
@@ -1126,6 +1416,9 @@ impl Operation {
     fn as_str(&self) -> &'static str {
         match self {
             Self::Discard => "discard",
+            Self::PreventDrawing => "prevent_drawing",
+            Self::GainAttackPerAllyPlayed { .. } => "gain_attack_per_ally_played",
+            Self::Draw { .. } => "draw",
             Self::ModifyResource { .. } => "modify_resource",
             Self::Move { .. } => "move",
         }

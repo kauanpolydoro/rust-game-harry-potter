@@ -12,8 +12,70 @@ use crate::{
 
 const BASE_RECORD_COUNT: usize = 171;
 const BASE_CARD_COUNT: u32 = 252;
-const BUNDLE_SCHEMA_VERSION: u16 = 2;
-const MANIFEST_VERSION: u16 = 3;
+
+/// Returns the validated Game 1 AST for the host to check runtime capabilities.
+/// This inspection does not grant functional trust or publish a playable manifest.
+///
+/// # Errors
+///
+/// Returns a closed validation failure for invalid inventory, provenance, or rules.
+pub fn inspect_game_one_rules(bytes: &[u8]) -> Result<Vec<EffectRule>, ImportFailure> {
+    let mut bundle = parse_bundle(bytes, Inventory::GameOne)?;
+    bundle.canonicalize();
+    validation::validate(&bundle, Inventory::GameOne)?;
+    Ok(bundle.rules)
+}
+
+/// Imports the Game 1 inventory without granting trust to functional sources.
+///
+/// # Errors
+///
+/// Returns a closed validation failure for an invalid Game 1 bundle.
+pub fn import_game_one_bundle(bytes: &[u8]) -> Result<ContentManifest, ImportFailure> {
+    import_bundle(bytes, &[], &BTreeSet::new(), Inventory::GameOne)
+}
+
+/// Imports Game 1 with explicit source trust and runtime capabilities.
+///
+/// # Errors
+///
+/// Returns a closed validation failure for invalid inventory, provenance, or rules.
+pub fn import_game_one_bundle_with_runtime_rules(
+    bytes: &[u8],
+    trusted_sources: &[ProvenanceSource],
+    executable_rules: &BTreeSet<RuleId>,
+) -> Result<ContentManifest, ImportFailure> {
+    import_bundle(bytes, trusted_sources, executable_rules, Inventory::GameOne)
+}
+
+#[derive(Clone, Copy)]
+enum Inventory {
+    Base,
+    GameOne,
+}
+
+impl Inventory {
+    const fn schema_version(self) -> u16 {
+        match self {
+            Self::Base => 2,
+            Self::GameOne => 3,
+        }
+    }
+
+    const fn manifest_version(self) -> u16 {
+        match self {
+            Self::Base => 3,
+            Self::GameOne => 4,
+        }
+    }
+
+    const fn counts(self) -> (usize, u32) {
+        match self {
+            Self::Base => (BASE_RECORD_COUNT, BASE_CARD_COUNT),
+            Self::GameOne => (45, 93),
+        }
+    }
+}
 const REQUIRED_BASE_ENTRY_KINDS: [EntryKind; 12] = [
     EntryKind::Adventure,
     EntryKind::Catalog,
@@ -69,27 +131,19 @@ pub fn import_base_bundle_with_runtime_rules(
     trusted_sources: &[ProvenanceSource],
     executable_rules: &BTreeSet<RuleId>,
 ) -> Result<ContentManifest, ImportFailure> {
-    let header: CandidateBundleHeader =
-        serde_json::from_slice(bytes).map_err(|error| ImportFailure {
-            message: format!("bundle is not valid JSON: {error}"),
-        })?;
+    import_bundle(bytes, trusted_sources, executable_rules, Inventory::Base)
+}
 
-    if header.schema_version != BUNDLE_SCHEMA_VERSION {
-        return Err(ImportFailure {
-            message: format!(
-                "unsupported bundle schema version: {}",
-                header.schema_version
-            ),
-        });
-    }
-
-    let mut bundle: CandidateBundle =
-        serde_json::from_slice(bytes).map_err(|error| ImportFailure {
-            message: format!("bundle is not valid schema v{BUNDLE_SCHEMA_VERSION} JSON: {error}"),
-        })?;
+fn import_bundle(
+    bytes: &[u8],
+    trusted_sources: &[ProvenanceSource],
+    executable_rules: &BTreeSet<RuleId>,
+    inventory: Inventory,
+) -> Result<ContentManifest, ImportFailure> {
+    let mut bundle = parse_bundle(bytes, inventory)?;
 
     bundle.canonicalize();
-    validation::validate(&bundle)?;
+    validation::validate(&bundle, inventory)?;
 
     let source_kinds = bundle
         .sources
@@ -101,11 +155,7 @@ pub fn import_base_bundle_with_runtime_rules(
         })
         .map(|source| (source.id.clone(), source.kind))
         .collect::<BTreeMap<_, _>>();
-    let substantive_rules = bundle
-        .substantive_rules()
-        .intersection(executable_rules)
-        .cloned()
-        .collect::<BTreeSet<_>>();
+    let substantive_rules = bundle.supported_roots(inventory, executable_rules, &source_kinds);
     validation::validate_runtime_rules(&bundle, &substantive_rules)?;
     let runtime_rules = bundle.rule_closure(&substantive_rules);
     let entries = bundle
@@ -124,6 +174,10 @@ pub fn import_base_bundle_with_runtime_rules(
         .collect::<Vec<_>>();
     let has_required_catalog_shape = REQUIRED_BASE_ENTRY_KINDS
         .iter()
+        .filter(|kind| {
+            !matches!(inventory, Inventory::GameOne)
+                || !matches!(kind, EntryKind::Horcrux | EntryKind::Proficiency)
+        })
         .all(|kind| entries.iter().any(|entry| entry.kind == *kind));
     let has_executable_rules = !substantive_rules.is_empty();
     let sources = bundle
@@ -135,14 +189,20 @@ pub fn import_base_bundle_with_runtime_rules(
             kind: source.kind,
         })
         .collect();
-    let game_setups = bundle
+    let game_setups: Vec<_> = bundle
         .game_setups
         .iter()
         .filter(|setup| setup.is_proven(&source_kinds))
         .map(CandidateGameSetup::to_manifest_setup)
         .collect();
+    let has_required_setup = matches!(inventory, Inventory::Base)
+        || (game_setups.len() == 1
+            && bundle
+                .rules
+                .iter()
+                .all(|rule| substantive_rules.contains(&rule.id)));
     let digest_input = ManifestDigestInput {
-        manifest_version: MANIFEST_VERSION,
+        manifest_version: inventory.manifest_version(),
         bundle: &bundle,
         trusted_source_kinds: &source_kinds,
         executable_rules: &substantive_rules,
@@ -152,13 +212,16 @@ pub fn import_base_bundle_with_runtime_rules(
     })?;
 
     Ok(ContentManifest {
-        manifest_version: MANIFEST_VERSION,
+        manifest_version: inventory.manifest_version(),
         content_version: bundle.content_version,
         ruleset_version: bundle.ruleset_version,
         digest: format!("blake3:{}", blake3::hash(&canonical).to_hex()),
-        record_count: BASE_RECORD_COUNT,
-        card_count: BASE_CARD_COUNT,
-        playable: gaps.is_empty() && has_required_catalog_shape && has_executable_rules,
+        record_count: inventory.counts().0,
+        card_count: inventory.counts().1,
+        playable: gaps.is_empty()
+            && has_required_catalog_shape
+            && has_executable_rules
+            && has_required_setup,
         gaps,
         entries,
         executable_rules: substantive_rules,
@@ -171,6 +234,31 @@ pub fn import_base_bundle_with_runtime_rules(
         game_setups,
         sources,
     })
+}
+
+fn parse_bundle(bytes: &[u8], inventory: Inventory) -> Result<CandidateBundle, ImportFailure> {
+    let header: CandidateBundleHeader =
+        serde_json::from_slice(bytes).map_err(|error| ImportFailure {
+            message: format!("bundle is not valid JSON: {error}"),
+        })?;
+
+    if header.schema_version != inventory.schema_version() {
+        return Err(ImportFailure {
+            message: format!(
+                "unsupported bundle schema version: {}",
+                header.schema_version
+            ),
+        });
+    }
+
+    let bundle: CandidateBundle = serde_json::from_slice(bytes).map_err(|error| ImportFailure {
+        message: format!(
+            "bundle is not valid schema v{} JSON: {error}",
+            inventory.schema_version()
+        ),
+    })?;
+
+    Ok(bundle)
 }
 
 #[derive(Serialize)]
@@ -201,6 +289,31 @@ struct CandidateBundle {
 }
 
 impl CandidateBundle {
+    fn supported_roots(
+        &self,
+        inventory: Inventory,
+        executable_rules: &BTreeSet<RuleId>,
+        source_kinds: &BTreeMap<String, SourceKind>,
+    ) -> BTreeSet<RuleId> {
+        self.substantive_rules()
+            .intersection(executable_rules)
+            .filter(|id| {
+                matches!(inventory, Inventory::Base)
+                    || self.rules.iter().any(|rule| {
+                        &rule.id == *id
+                            && rule.provenance.as_ref().is_some_and(|provenance| {
+                                has_trusted_provenance(
+                                    provenance.confidence,
+                                    &provenance.sources,
+                                    source_kinds,
+                                )
+                            })
+                    })
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    }
+
     fn canonicalize(&mut self) {
         self.sources.sort_by(|left, right| left.id.cmp(&right.id));
         self.entries.sort_by(|left, right| left.id.cmp(&right.id));
@@ -211,6 +324,12 @@ impl CandidateBundle {
                 .then(left.order.cmp(&right.order))
                 .then(left.id.cmp(&right.id))
         });
+        for rule in &mut self.rules {
+            if let Some(provenance) = &mut rule.provenance {
+                provenance.sources.sort();
+                provenance.sources.dedup();
+            }
+        }
         self.game_setups
             .sort_by(|left, right| left.adventure_id.cmp(&right.adventure_id));
         for setup in &mut self.game_setups {
@@ -458,9 +577,16 @@ impl Effect {
                 }
                 references
             }
-            Self::Repeat { effect, .. } => effect.references(),
+            Self::Repeat { effect, .. } | Self::Reaction { effect, .. } => effect.references(),
             Self::Reference { rule } => vec![rule],
-            Self::Apply { .. } | Self::NoOp | Self::Terminal { .. } => Vec::new(),
+            Self::Apply { .. }
+            | Self::TopDeckAcquisition { .. }
+            | Self::CardType { .. }
+            | Self::HandDamageLimit { .. }
+            | Self::NoOp
+            | Self::Structural { .. }
+            | Self::RevealDarkArts
+            | Self::Terminal { .. } => Vec::new(),
         }
     }
 
@@ -470,7 +596,12 @@ impl Effect {
         visited: &mut BTreeSet<RuleId>,
     ) -> bool {
         match self {
-            Self::Apply { .. } | Self::Terminal { .. } => true,
+            Self::Apply { .. }
+            | Self::TopDeckAcquisition { .. }
+            | Self::HandDamageLimit { .. }
+            | Self::Structural { .. }
+            | Self::RevealDarkArts
+            | Self::Terminal { .. } => true,
             Self::Choice { options, .. } => options
                 .iter()
                 .any(|option| option.has_operation(rules, visited)),
@@ -482,14 +613,16 @@ impl Effect {
                         .as_deref()
                         .is_some_and(|effect| effect.has_operation(rules, visited))
             }
-            Self::NoOp => false,
+            Self::NoOp | Self::CardType { .. } => false,
             Self::Reference { rule } => {
                 visited.insert(rule.clone())
                     && rules
                         .get(rule)
                         .is_some_and(|effect| effect.has_operation(rules, visited))
             }
-            Self::Repeat { effect, .. } => effect.has_operation(rules, visited),
+            Self::Repeat { effect, .. } | Self::Reaction { effect, .. } => {
+                effect.has_operation(rules, visited)
+            }
             Self::Roll { outcomes, .. } => outcomes
                 .iter()
                 .any(|outcome| outcome.has_operation(rules, visited)),

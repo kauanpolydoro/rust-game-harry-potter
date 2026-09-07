@@ -32,6 +32,8 @@ mod match_runtime;
 mod session;
 mod session_events;
 
+pub use content_catalog::game_one_manifest;
+
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
 const MAX_CONCURRENT_RECOVERY_PASSWORD_CHECKS: usize = 4;
@@ -47,6 +49,7 @@ pub struct AppState {
     migration_database: PgPool,
     started: Arc<AtomicBool>,
     content: content_catalog::ContentCatalog,
+    game_seed_source: fn() -> Result<[u8; 32], getrandom::Error>,
     application_origin: Arc<str>,
     game_synchronization_fanout: GameSignalFanout,
     game_presence_fanout: GameSignalFanout,
@@ -103,7 +106,7 @@ impl GameSignalFanout {
 }
 
 impl AppState {
-    /// Builds application state with the checked-in candidate content bundle.
+    /// Builds application state with playable Game 1 and the preserved base candidate.
     ///
     /// # Panics
     ///
@@ -115,7 +118,7 @@ impl AppState {
             "../../../content/bundles/base-en-candidate-2026-09-02.json"
         ))
         .expect("the checked-in candidate content bundle must remain structurally valid");
-        Self::with_content_manifests(database, vec![manifest])
+        Self::with_content_manifests(database, vec![game_one_manifest(), manifest])
     }
 
     #[must_use]
@@ -140,6 +143,11 @@ impl AppState {
             database,
             started: Arc::new(AtomicBool::new(false)),
             content: content_catalog::ContentCatalog::new(manifests),
+            game_seed_source: || {
+                let mut seed = [0_u8; 32];
+                getrandom::fill(&mut seed)?;
+                Ok(seed)
+            },
             application_origin: Arc::from(DEFAULT_APPLICATION_ORIGIN),
             game_synchronization_fanout: GameSignalFanout::default(),
             game_presence_fanout: GameSignalFanout::default(),
@@ -153,6 +161,17 @@ impl AppState {
             )),
             shutdown,
         }
+    }
+
+    /// Supplies the entropy boundary for reproducible integration applications.
+    /// Production uses operating-system entropy and never accepts a seed over HTTP.
+    #[must_use]
+    pub fn with_game_seed_source(
+        mut self,
+        source: fn() -> Result<[u8; 32], getrandom::Error>,
+    ) -> Self {
+        self.game_seed_source = source;
+        self
     }
 
     /// Sets the one browser origin accepted by authenticated WebSocket handshakes.

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import type {
+  CardAcquisitionDestination,
   EffectTargetBinding,
   GameProjectionResponse,
   LegalAttackSummary,
@@ -17,13 +18,14 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  acquireCard: [cardId: string]
+  acquireCard: [cardId: string, destination: CardAcquisitionDestination]
   assignAttack: [villainId: string, amount: number]
   playCard: [cardId: string, targets: EffectTargetBinding[]]
 }>()
 
 const cardTargets = ref<Record<string, Record<string, string[]>>>({})
 const attackAmounts = ref<Record<string, number>>({})
+const marketDestinations = ref<Record<string, CardAcquisitionDestination>>({})
 
 const pendingCardId = computed(() =>
   props.pendingOverlay?.type === 'play_card' ? props.pendingOverlay.card_id : null,
@@ -45,6 +47,7 @@ watch(
   () => {
     cardTargets.value = {}
     attackAmounts.value = {}
+    marketDestinations.value = {}
   },
 )
 
@@ -149,18 +152,33 @@ function submitAttack(intent: LegalAttackSummary): void {
 function canAcquire(cardId: string): boolean {
   return props.game.legal_intentions.acquire_cards.some((intent) => intent.card_id === cardId)
 }
+
+function acquisitionDestinations(cardId: string): CardAcquisitionDestination[] {
+  return (
+    props.game.legal_intentions.acquire_cards.find((intent) => intent.card_id === cardId)
+      ?.destinations ?? []
+  )
+}
+
+function selectAcquisitionDestination(cardId: string, event: Event): void {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'discard_pile' || value === 'draw_pile') {
+    marketDestinations.value[cardId] = value
+  }
+}
 </script>
 
 <template>
   <section class="game-table" aria-labelledby="game-table-heading">
     <header class="game-table__heading">
       <div>
-        <p>Mesa oficial v{{ game.snapshot.state_version }}</p>
         <h3 id="game-table-heading" tabindex="-1">Sua mesa</h3>
       </div>
       <div class="hero-resource-ledger" aria-label="Seus recursos oficiais">
+        <span>{{ game.participant.hero.name }} · Turno {{ game.turn.number }}</span>
         <span>Vida {{ game.participant.resources.health }}</span>
         <span v-if="game.participant.stunned">Atordoado até o fim deste turno</span>
+        <span v-if="game.participant.drawing_blocked">Compra de cartas extras bloqueada até o fim deste turno</span>
         <strong>
           Ataque {{ game.participant.resources.attack }} · Influência
           {{ game.participant.resources.influence }}
@@ -189,6 +207,12 @@ function canAcquire(cardId: string): boolean {
       </p>
     </section>
 
+    <section v-if="game.table.revealed_dark_arts" class="table-zone" aria-labelledby="dark-arts-heading">
+      <h4 id="dark-arts-heading">Arte das Trevas revelada</h4>
+      <strong>{{ game.table.revealed_dark_arts.name }}</strong>
+      <p v-if="game.table.revealed_dark_arts.description" class="table-row__description">{{ game.table.revealed_dark_arts.description }}</p>
+    </section>
+
     <section class="table-zone" aria-labelledby="villains-heading">
       <div class="table-zone__heading">
         <h4 id="villains-heading">Vilões ativos</h4>
@@ -204,6 +228,10 @@ function canAcquire(cardId: string): boolean {
           <div class="table-row__identity">
             <strong>{{ villain.name }}</strong>
             <span>Vida {{ villain.health }}</span>
+            <p v-if="villain.description" class="table-row__description">{{ villain.description }}</p>
+            <p v-if="villain.reward_description" class="table-row__description">
+              <b>Recompensa:</b> {{ villain.reward_description }}
+            </p>
             <small v-if="pendingVillainId === villain.instance_id">Intenção enviada</small>
           </div>
           <div v-if="attackIntent(villain.instance_id)" class="table-row__action">
@@ -254,6 +282,7 @@ function canAcquire(cardId: string): boolean {
         >
           <div class="table-row__identity">
             <strong>{{ card.name }}</strong>
+            <p v-if="card.description" class="table-row__description">{{ card.description }}</p>
             <span>Na mão</span>
             <small v-if="pendingCardId === card.instance_id">Intenção enviada</small>
           </div>
@@ -311,6 +340,7 @@ function canAcquire(cardId: string): boolean {
         <li v-for="card in game.table.play_area" :key="card.instance_id" class="table-row">
           <div class="table-row__identity">
             <strong>{{ card.name }}</strong>
+            <p v-if="card.description" class="table-row__description">{{ card.description }}</p>
             <span>Em jogo</span>
           </div>
         </li>
@@ -332,20 +362,45 @@ function canAcquire(cardId: string): boolean {
         >
           <div class="table-row__identity">
             <strong>{{ card.name }}</strong>
+            <p v-if="card.description" class="table-row__description">{{ card.description }}</p>
             <span>Custo {{ card.cost }}</span>
             <small v-if="pendingMarketCardId === card.instance_id">Intenção enviada</small>
           </div>
-          <button
+          <div
             v-if="canAcquire(card.instance_id)"
-            class="table-action"
-            type="button"
-            :aria-label="`Adquirir ${card.name} por ${card.cost} de Influência`"
-            :disabled="commandsDisabled"
-            @click="emit('acquireCard', card.instance_id)"
+            class="table-row__action"
+            :class="{ 'table-row__action--acquire': acquisitionDestinations(card.instance_id).length > 1 }"
           >
-            Adquirir por {{ card.cost }}
-          </button>
-          <span v-else class="table-row__note">Influência insuficiente</span>
+            <template v-if="acquisitionDestinations(card.instance_id).length > 1">
+              <label :for="`destination-${card.instance_id}`">Destino de {{ card.name }}</label>
+              <select
+                :id="`destination-${card.instance_id}`"
+                :value="marketDestinations[card.instance_id] ?? 'discard_pile'"
+                :disabled="commandsDisabled"
+                @change="selectAcquisitionDestination(card.instance_id, $event)"
+              >
+                <option
+                  v-for="destination in acquisitionDestinations(card.instance_id)"
+                  :key="destination"
+                  :value="destination"
+                >
+                  {{ destination === 'draw_pile' ? 'Topo do baralho' : 'Descarte' }}
+                </option>
+              </select>
+            </template>
+            <button
+              class="table-action"
+              type="button"
+              :aria-label="`Adquirir ${card.name} por ${card.cost} de Influência`"
+              :disabled="commandsDisabled"
+              @click="emit('acquireCard', card.instance_id, marketDestinations[card.instance_id] ?? 'discard_pile')"
+            >
+              Adquirir por {{ card.cost }}
+            </button>
+          </div>
+          <span v-else class="table-row__note">
+            {{ card.cost > game.participant.resources.influence ? 'Influência insuficiente' : 'Aquisição indisponível agora' }}
+          </span>
         </li>
       </ul>
       <p v-else class="table-empty">O mercado está vazio.</p>

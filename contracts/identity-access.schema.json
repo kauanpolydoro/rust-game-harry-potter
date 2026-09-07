@@ -4,6 +4,15 @@
   "title": "IdentityAccessContracts",
   "$comment": "Cross-property x-refinements are mandatory and enforced by scripts/generate-contracts.mjs; consumers must use the generated guards.",
   "$defs": {
+    "ChoiceOptionLabel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option_id", "label"],
+      "properties": {
+        "option_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    },
     "PendingStunChoiceSummary": {
       "type": "object",
       "additionalProperties": false,
@@ -22,6 +31,12 @@
         "max"
       ],
       "properties": {
+        "source_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "instruction": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "option_labels": {
+          "type": "array", "maxItems": 4096,
+          "items": { "$ref": "#/$defs/ChoiceOptionLabel" }
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -678,7 +693,10 @@
             "command_id": { "type": "string", "format": "uuid" },
             "expected_state_version": { "type": "integer", "minimum": 1 },
             "type": { "type": "string", "enum": ["acquire_card"] },
-            "card_id": { "type": "string", "minLength": 1 }
+            "card_id": { "type": "string", "minLength": 1 },
+            "destination": {
+              "$ref": "#/$defs/CardAcquisitionDestination"
+            }
           }
         }
       ]
@@ -995,6 +1013,12 @@
         "max"
       ],
       "properties": {
+        "source_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "instruction": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "option_labels": {
+          "type": "array", "maxItems": 4096,
+          "items": { "$ref": "#/$defs/ChoiceOptionLabel" }
+        },
         "status": { "type": "string", "enum": ["pending"] },
         "id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "cause": { "type": "string", "minLength": 1, "maxLength": 256 },
@@ -1026,6 +1050,12 @@
         "max"
       ],
       "properties": {
+        "source_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "instruction": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "option_labels": {
+          "type": "array", "maxItems": 4096,
+          "items": { "$ref": "#/$defs/ChoiceOptionLabel" }
+        },
         "status": { "type": "string", "enum": ["pending"] },
         "id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "cause": { "type": "string", "minLength": 1, "maxLength": 256 },
@@ -1117,13 +1147,33 @@
         "max_amount": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },
+    "CardAcquisitionDestination": {
+      "type": "string",
+      "enum": [
+        "discard_pile",
+        "draw_pile"
+      ]
+    },
     "LegalAcquisitionSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["card_id", "cost"],
+      "required": [
+        "card_id",
+        "cost",
+        "destinations"
+      ],
       "properties": {
         "card_id": { "type": "string", "minLength": 1 },
-        "cost": { "type": "integer", "minimum": 0, "maximum": 65535 }
+        "cost": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "destinations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CardAcquisitionDestination"
+          }
+        }
       }
     },
     "LegalIntentionsSummary": {
@@ -1156,7 +1206,8 @@
       "properties": {
         "instance_id": { "type": "string", "minLength": 1 },
         "catalog_id": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 }
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 4096 }
       }
     },
     "MarketCardSummary": {
@@ -1167,6 +1218,7 @@
         "instance_id": { "type": "string", "minLength": 1 },
         "catalog_id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "cost": { "type": "integer", "minimum": 0, "maximum": 65535 },
         "affordable": { "type": "boolean" }
       }
@@ -1179,6 +1231,8 @@
         "instance_id": { "type": "string", "minLength": 1 },
         "catalog_id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "reward_description": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "health": { "type": "integer", "minimum": 0, "maximum": 65535 },
         "attackable": { "type": "boolean" },
         "max_attack": { "type": "integer", "minimum": 0, "maximum": 65535 }
@@ -1202,6 +1256,7 @@
         "villain_discard_count"
       ],
       "properties": {
+        "revealed_dark_arts": { "$ref": "#/$defs/CardSummary" },
         "hand": {
           "type": "array",
           "items": {
@@ -1271,37 +1326,146 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "rule_id", "die", "result"],
+          "required": [
+            "type",
+            "rule_id",
+            "target_id",
+            "target_position"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["die_rolled"] },
+            "type": {
+              "type": "string",
+              "enum": [
+                "drawing_blocked"
+              ]
+            },
             "rule_id": { "type": "string", "minLength": 1 },
-            "die": { "type": "string", "enum": ["d4", "d6", "d8"] },
-            "result": { "type": "integer", "minimum": 1, "maximum": 8 }
+            "target_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "rule_id", "target_id", "from", "to"],
+          "required": [
+            "type",
+            "rule_id",
+            "upper_exclusive",
+            "result"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["moved"] },
+            "type": {
+              "type": "string",
+              "enum": [
+                "random_sampled"
+              ]
+            },
+            "rule_id": { "type": "string", "minLength": 1 },
+            "upper_exclusive": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "result": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967294
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "rule_id",
+            "die",
+            "result"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "die_rolled"
+              ]
+            },
+            "rule_id": { "type": "string", "minLength": 1 },
+            "die": {
+              "type": "string",
+              "enum": [
+                "d4",
+                "d6",
+                "d8"
+              ]
+            },
+            "result": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "rule_id",
+            "target_id",
+            "from",
+            "to"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "moved"
+              ]
+            },
             "rule_id": { "type": "string", "minLength": 1 },
             "target_id": { "type": "string", "minLength": 1 },
             "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
-            "from": { "type": "string", "minLength": 1 },
-            "to": { "type": "string", "minLength": 1 }
+            "from": {
+              "type": "string",
+              "minLength": 1
+            },
+            "to": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "rule_id", "reason"],
+          "required": [
+            "type",
+            "rule_id",
+            "reason"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["no_op"] },
+            "type": {
+              "type": "string",
+              "enum": [
+                "no_op"
+              ]
+            },
             "rule_id": { "type": "string", "minLength": 1 },
             "reason": {
               "type": "string",
-              "enum": ["explicit", "no_eligible_target", "zero_cardinality"]
+              "enum": [
+                "explicit",
+                "no_eligible_target",
+                "zero_cardinality",
+                "drawing_blocked"
+              ]
             }
           }
         },
@@ -1318,27 +1482,79 @@
             "cause"
           ],
           "properties": {
-            "type": { "type": "string", "enum": ["resource_changed"] },
-            "rule_id": { "type": "string", "minLength": 1 },
-            "target_id": { "type": "string", "minLength": 1 },
-            "target_position": { "type": "integer", "minimum": 1, "maximum": 4 },
+            "type": {
+              "type": "string",
+              "enum": [
+                "resource_changed"
+              ]
+            },
+            "rule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
             "resource": {
               "type": "string",
-              "enum": ["attack", "control", "health", "influence"]
+              "enum": [
+                "attack",
+                "control",
+                "health",
+                "influence"
+              ]
             },
-            "before": { "type": "integer", "minimum": 0, "maximum": 65535 },
-            "after": { "type": "integer", "minimum": 0, "maximum": 65535 },
-            "cause": { "type": "string", "enum": ["cost", "effect"] }
+            "before": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "after": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "cause": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "effect"
+              ]
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "rule_id", "outcome"],
+          "required": [
+            "type",
+            "rule_id",
+            "outcome"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["terminal"] },
-            "rule_id": { "type": "string", "minLength": 1 },
-            "outcome": { "type": "string", "enum": ["lost", "won"] }
+            "type": {
+              "type": "string",
+              "enum": [
+                "terminal"
+              ]
+            },
+            "rule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "lost",
+                "won"
+              ]
+            }
           }
         }
       ]
@@ -1459,6 +1675,27 @@
           "additionalProperties": false,
           "required": [
             "type",
+            "position"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "drawing_restored"
+              ]
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
             "card_id",
             "from",
             "to"
@@ -1558,6 +1795,31 @@
               "items": {
                 "type": "string",
                 "minLength": 1
+              }
+            },
+            "samples": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4095,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "upper_exclusive",
+                  "result"
+                ],
+                "properties": {
+                  "upper_exclusive": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 4096
+                  },
+                  "result": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4095
+                  }
+                }
               }
             }
           }
@@ -1714,6 +1976,7 @@
         "stunned"
       ],
       "properties": {
+        "drawing_blocked": { "type": "boolean" },
         "display_name": {
           "type": "string",
           "minLength": 1,
@@ -1814,7 +2077,8 @@
           "type": "string",
           "enum": [
             "dark_arts",
-            "villains"
+            "villains",
+            "hero_actions"
           ]
         },
         "effects": {
@@ -2522,7 +2786,8 @@
           "type": "integer",
           "enum": [
             4,
-            5
+            5,
+            6
           ]
         },
         "type": {
@@ -2599,7 +2864,8 @@
           "type": "integer",
           "enum": [
             4,
-            5
+            5,
+            6
           ]
         },
         "type": {
@@ -2702,7 +2968,8 @@
               "type": "integer",
               "enum": [
                 4,
-                5
+                5,
+                6
               ]
             },
             "type": {
@@ -2878,7 +3145,8 @@
               "type": "integer",
               "enum": [
                 4,
-                5
+                5,
+                6
               ]
             },
             "type": {
@@ -2950,7 +3218,8 @@
             "event_version": {
               "type": "integer",
               "enum": [
-                5
+                5,
+                6
               ]
             },
             "type": {

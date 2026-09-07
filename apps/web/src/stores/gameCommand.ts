@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { apiError, requestJson, transportErrorCode } from '../api/http'
 import {
   isExecuteGameCommandResponse,
+  type CardAcquisitionDestination,
   type EffectTargetBinding,
   type ExecuteGameCommandRequest,
   type GameCommandReceipt,
@@ -106,7 +107,12 @@ function createRequest(
         villain_id: intent.villain_id,
       }
     case 'acquire_card':
-      return { ...metadata, card_id: intent.card_id, type: intent.type }
+      return {
+        ...metadata,
+        card_id: intent.card_id,
+        type: intent.type,
+        ...(intent.destination === 'draw_pile' ? { destination: intent.destination } : {}),
+      }
   }
 }
 
@@ -215,8 +221,9 @@ export const useGameCommandStore = defineStore('gameCommand', {
     async acquireCard(
       game: GameProjectionResponse,
       cardId: string,
+      destination: CardAcquisitionDestination = 'discard_pile',
     ): Promise<GameProjectionResponse | null> {
-      return this.execute(game, { card_id: cardId, type: 'acquire_card' })
+      return this.execute(game, { card_id: cardId, destination, type: 'acquire_card' })
     },
     async execute(
       game: GameProjectionResponse,

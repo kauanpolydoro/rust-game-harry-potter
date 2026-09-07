@@ -113,6 +113,10 @@ const choiceInputDisabled = computed(
     commandSubmissionBlocked.value ||
     game.value?.legal_actions.includes('resolve_choice') !== true,
 )
+const showChoiceConfirmation = computed(() =>
+  Boolean(game.value) && health.availability === 'ready' && isSelectableChoiceForParticipant.value &&
+  !['uncertain', 'stale', 'resyncing', 'submitting', 'recovering'].includes(gameCommand.status),
+)
 const orderedSelectedChoiceOptions = computed(() => {
   const choice = pendingChoice.value
   if (!choice) {
@@ -759,8 +763,11 @@ onMounted(async () => {
       v-else-if="game"
       v-model:selected-choice-options="selectedChoiceOptions"
       :choice-input-disabled="choiceInputDisabled"
+      :can-confirm-choice="canResolvePendingChoice"
+      :show-choice-confirmation="showChoiceConfirmation"
       :is-choice-responsible="isResponsibleForPendingChoice"
       @access-invalidated="handleAccessInvalidation"
+      @confirm-choice="resolvePendingChoice()"
     />
 
     <section
@@ -1286,7 +1293,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <footer class="action-dock">
+    <footer v-if="!showChoiceConfirmation" class="action-dock">
       <button
         v-if="health.availability !== 'ready'"
         class="retry-button"
@@ -1346,15 +1353,6 @@ onMounted(async () => {
         {{ gameCommand.status === 'recovering' ? 'Consultando recibo' : 'Aguardando confirmação' }}
       </button>
       <button
-        v-else-if="game && isSelectableChoiceForParticipant"
-        class="primary-button"
-        :disabled="!canResolvePendingChoice"
-        type="button"
-        @click="resolvePendingChoice()"
-      >
-        Confirmar escolha
-      </button>
-      <button
         v-else-if="game && endHeroActionsIsLegal && gameSync.commandsFrozen"
         class="primary-button"
         :disabled="true"
@@ -1376,6 +1374,9 @@ onMounted(async () => {
       >
         <span aria-hidden="true"></span>
         Aguardando {{ pendingChoiceResponsibleName }} concluir a escolha.
+      </p>
+      <p v-else-if="game && game.game.status !== 'in_progress'" class="continuity-note">
+        Partida encerrada. {{ game.game.status === 'won' ? 'A equipe derrotou todos os Vilões.' : 'Os Vilões dominaram todos os Locais.' }}
       </p>
       <p v-else-if="game" class="continuity-note">
         <span aria-hidden="true"></span>

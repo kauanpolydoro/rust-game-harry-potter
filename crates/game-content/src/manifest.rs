@@ -49,6 +49,10 @@ pub struct GameSetupEntity {
 pub enum GameSetupOwner {
     None,
     EachParticipant,
+    Harry,
+    Hermione,
+    Neville,
+    Ron,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

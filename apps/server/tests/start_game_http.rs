@@ -21,6 +21,8 @@ use tokio::{
 };
 use tower::ServiceExt;
 
+mod game_one;
+
 struct ReadyRoom {
     app: axum::Router,
     state: AppState,
@@ -282,7 +284,7 @@ async fn persisted_locations_and_villain_capacity_must_remain_restorable() {
     let snapshot: Value = sqlx::query_scalar("SELECT games.snapshot FROM games JOIN rooms ON rooms.id = games.room_id WHERE rooms.code = $1")
         .bind(&room.room_code).fetch_one(&room.database).await.expect("committed snapshot");
     assert!(
-        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
+        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v5($1)")
             .bind(&snapshot)
             .fetch_one(&room.database)
             .await
@@ -306,7 +308,7 @@ async fn persisted_locations_and_villain_capacity_must_remain_restorable() {
         .push(extra);
     for invalid in [no_capacity, two_locations] {
         assert!(
-            !sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
+            !sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v5($1)")
                 .bind(&invalid)
                 .fetch_one(&room.database)
                 .await
@@ -893,7 +895,7 @@ async fn insert_test_event(
         SET state_version = ($2 ->> 'state_version')::BIGINT,
             sequence = ($2 ->> 'sequence')::BIGINT,
             snapshot = snapshot || jsonb_build_object(
-                'snapshot_version', 4,
+                'snapshot_version', 5,
                 'state_version', $2 -> 'state_version',
                 'sequence', $2 -> 'sequence',
                 'turn', jsonb_build_object(
@@ -935,7 +937,7 @@ async fn insert_test_event(
             $1,
             $2,
             1,
-            5,
+            6,
             'turn_completed',
             $3,
             $4,
@@ -981,7 +983,7 @@ fn test_turn_completed_payload(
     prng_counter: u64,
 ) -> Value {
     json!({
-        "event_version": 5,
+        "event_version": 6,
         "type": "turn_completed",
         "sequence": sequence,
         "state_version": state_version,
@@ -1664,7 +1666,7 @@ async fn assert_choice_codec_versions(room: &ReadyRoom) {
     .fetch_one(&room.database)
     .await
     .expect("the v3 Snapshot and v4 choice events must be queryable");
-    assert_eq!(versions, (4, 5, 5));
+    assert_eq!(versions, (5, 6, 6));
 }
 
 async fn assert_winning_choice_artifacts(room: &ReadyRoom, winning_command_id: uuid::Uuid) {
@@ -1823,7 +1825,7 @@ async fn routine_recovery_rotation_and_regeneration_do_not_renew_game_retention(
 }
 
 fn assert_initial_synchronization_projection(projection: &Value) {
-    assert_eq!(projection["snapshot"]["snapshot_version"], 4);
+    assert_eq!(projection["snapshot"]["snapshot_version"], 5);
     assert_eq!(projection["snapshot"]["state_version"], 1);
     assert_eq!(projection["snapshot"]["sequence"], 0);
     assert_eq!(projection["snapshot"]["cursor"], 0);
@@ -1957,7 +1959,7 @@ async fn host_seals_a_ready_room_and_every_participant_gets_a_redacted_initial_p
     assert!(stored.6.starts_with("blake3:"));
     let snapshot: Value =
         serde_json::from_str(&stored.7).expect("the persisted Snapshot must be JSON");
-    assert_eq!(snapshot["snapshot_version"], 4);
+    assert_eq!(snapshot["snapshot_version"], 5);
     assert_eq!(
         snapshot["versions"]["manifest_digest"],
         room.manifest.digest
@@ -2373,7 +2375,7 @@ fn assert_committed_turn_event(snapshot: &Value, event: &Value) {
     );
     assert_eq!(event["sequence"], 1);
     assert_eq!(event["state_version"], 2);
-    assert_eq!(event["event_version"], 5);
+    assert_eq!(event["event_version"], 6);
     assert_eq!(event["type"], "turn_completed");
     assert_eq!(event["turn"], 1);
     assert_eq!(event["actor_position"], 1);
@@ -2466,8 +2468,8 @@ async fn assert_committed_command_artifacts(room: &ReadyRoom, initial_expiration
     assert_eq!(stored.7, 1);
     assert!(stored.8, "the receipt and game must share one expiration");
     assert!(stored.9, "an accepted action must renew retention");
-    assert_eq!(stored.10, 4);
-    assert_eq!(stored.11, 5);
+    assert_eq!(stored.10, 5);
+    assert_eq!(stored.11, 6);
     let snapshot: Value = serde_json::from_str(&stored.3).expect("snapshot must be JSON");
     let event: Value = serde_json::from_str(&stored.5).expect("event must be JSON");
     assert_committed_turn_event(&snapshot, &event);
@@ -2639,7 +2641,7 @@ async fn active_player_ends_actions_and_commits_the_next_turn_after_automatic_ph
 }
 
 fn assert_initial_each_hero_choice(started: &Value) -> String {
-    assert_eq!(started["snapshot"]["snapshot_version"], 4);
+    assert_eq!(started["snapshot"]["snapshot_version"], 5);
     assert_eq!(started["snapshot"]["state_version"], 1);
     assert_eq!(started["snapshot"]["sequence"], 0);
     assert_eq!(started["turn"]["phase"], "dark_arts");
@@ -3001,7 +3003,7 @@ async fn assert_gameplay_command_history(
     );
     let acquisition_event: Value =
         serde_json::from_str(&events[2].1).expect("the acquisition event must be JSON");
-    assert_eq!(acquisition_event["event_version"], 5);
+    assert_eq!(acquisition_event["event_version"], 6);
     assert_eq!(acquisition_event["card_id"], instances.market_card);
     assert_eq!(acquisition_event["cost"], 2);
     assert_eq!(acquisition_event["refill_card_id"], refill_card_id);
@@ -3162,7 +3164,7 @@ async fn resolve_first_each_hero_choice(room: &ReadyRoom, choice_id: &str) -> St
     assert_eq!(resolved["receipt"]["type"], "resolve_choice");
     assert_eq!(resolved["receipt"]["accepted_state_version"], 2);
     assert_eq!(resolved["receipt"]["accepted_sequence"], 1);
-    assert_eq!(resolved["projection"]["snapshot"]["snapshot_version"], 4);
+    assert_eq!(resolved["projection"]["snapshot"]["snapshot_version"], 5);
     assert_eq!(resolved["projection"]["snapshot"]["state_version"], 2);
     assert_eq!(resolved["projection"]["snapshot"]["sequence"], 1);
     assert_eq!(resolved["projection"]["turn"]["active_position"], 1);
@@ -3203,7 +3205,7 @@ async fn complete_second_each_hero_choice(room: &ReadyRoom, second_choice_id: &s
     let completed = response_json(completed).await;
     assert_eq!(completed["receipt"]["accepted_state_version"], 3);
     assert_eq!(completed["receipt"]["accepted_sequence"], 2);
-    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 4);
+    assert_eq!(completed["projection"]["snapshot"]["snapshot_version"], 5);
     assert_eq!(completed["projection"]["snapshot"]["state_version"], 3);
     assert_eq!(completed["projection"]["snapshot"]["sequence"], 2);
     assert_eq!(completed["projection"]["turn"]["number"], 1);
@@ -3518,7 +3520,7 @@ async fn an_event_actor_must_belong_to_the_games_room() {
             state_version,
             payload
         )
-        VALUES ($1, $2, 1, 5, 'turn_completed', $3, $4, 2, $5)
+        VALUES ($1, $2, 1, 6, 'turn_completed', $3, $4, 2, $5)
         ",
     )
     .bind(game_id)
@@ -3590,7 +3592,7 @@ async fn an_event_envelope_and_payload_must_match_the_committed_snapshot() {
                 $1,
                 $2,
                 1,
-                5,
+                6,
                 'turn_completed',
                 $3,
                 $4,
@@ -3667,7 +3669,7 @@ async fn an_event_payload_must_match_the_supported_codec_exactly() {
                 $1,
                 $2,
                 1,
-                5,
+                6,
                 $3,
                 $4,
                 $5,
@@ -3810,7 +3812,7 @@ async fn a_v4_event_rejects_an_incomplete_automatic_effect_outcome() {
             state_version,
             payload
         )
-        VALUES ($1, $2, 1, 5, 'turn_completed', $3, $4, 2, $5)
+        VALUES ($1, $2, 1, 6, 'turn_completed', $3, $4, 2, $5)
         ",
     )
     .bind(game_id)
@@ -4347,7 +4349,7 @@ async fn v15_upgrade_preflight_rejects_legacy_snapshots_that_cannot_be_restored(
 }
 
 #[tokio::test]
-async fn v4_snapshot_validation_rejects_codec_incompatible_effects_and_identifiers() {
+async fn v5_snapshot_validation_rejects_codec_incompatible_effects_and_identifiers() {
     let room = ready_room().await;
     start_ready_game(&room, "snapshot-validator-start").await;
     let snapshot = sqlx::query_scalar::<_, Value>(
@@ -4363,7 +4365,7 @@ async fn v4_snapshot_validation_rejects_codec_incompatible_effects_and_identifie
     .await
     .expect("the current snapshot must exist");
     assert!(
-        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
+        sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v5($1)")
             .bind(&snapshot)
             .fetch_one(&room.database)
             .await
@@ -4434,7 +4436,7 @@ async fn v4_snapshot_validation_rejects_codec_incompatible_effects_and_identifie
         ),
         ("active player outside participants", absent_active_player),
     ] {
-        let accepted = sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v4($1)")
+        let accepted = sqlx::query_scalar::<_, bool>("SELECT valid_game_snapshot_v5($1)")
             .bind(candidate)
             .fetch_one(&room.database)
             .await
@@ -6219,7 +6221,7 @@ fn assert_public_choice_resolution_event(
     let event_batch: Value =
         serde_json::from_str(serialized).expect("the choice event batch must be JSON");
     let event = &event_batch["events"][0];
-    assert_eq!(event["event_version"], 5);
+    assert_eq!(event["event_version"], 6);
     assert_eq!(event["type"], "choice_resolved");
     assert_eq!(event["choice_id"], first_choice_id);
     assert_eq!(event["choice_cause"], "rule:functional");
@@ -6259,7 +6261,7 @@ fn assert_no_private_choice_continuation(serialized: &str) {
 }
 
 fn assert_realtime_turn_completed(event: &Value) {
-    assert_eq!(event["event_version"], 5);
+    assert_eq!(event["event_version"], 6);
     assert_eq!(event["type"], "turn_completed");
     assert_eq!(
         event["steps"]
@@ -6480,7 +6482,7 @@ async fn websocket_snapshots_are_authorized_versioned_and_redacted_by_participan
     assert_eq!(host["protocol_version"], 1);
     assert_eq!(host["type"], "snapshot");
     assert_eq!(host["cursor"], 0);
-    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 4);
+    assert_eq!(host["projection"]["snapshot"]["snapshot_version"], 5);
     assert_eq!(host["projection"]["snapshot"]["cursor"], 0);
     assert_eq!(
         host["projection"]["legal_actions"],
@@ -7178,7 +7180,7 @@ async fn committed_log_replays_contiguous_events_and_redacts_another_participant
         serde_json::from_str(&synchronized).expect("synchronization must be JSON");
     assert_eq!(synchronized["type"], "synchronized");
     assert_eq!(synchronized["cursor"], 0);
-    assert_eq!(synchronized["snapshot_version"], 4);
+    assert_eq!(synchronized["snapshot_version"], 5);
     assert_eq!(synchronized["digest"], projection["snapshot"]["digest"]);
 
     let command_id = uuid::Uuid::new_v4();

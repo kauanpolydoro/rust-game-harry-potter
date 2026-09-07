@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-03T11:47:45Z",
+  "generatedAt": "2026-09-04T23:09:29Z",
   "title": "Design System: Batalha de Hogwarts",
   "extensions": {
     "colorMeta": {
@@ -145,6 +145,10 @@
       "control": {
         "displayName": "Ação",
         "purpose": "Dar peso inequívoco ao único controle de recuperação."
+      },
+      "table-description": {
+        "displayName": "Descrição da mesa",
+        "purpose": "Explicar efeitos de cartas, Artes das Trevas e recompensas de Vilões com o mesmo corpo no celular e no computador."
       }
     },
     "shadows": [
@@ -271,19 +275,29 @@
         "name": "Regra do Próximo Passo",
         "body": "A região inferior mostra uma única ação de recuperação ou uma única nota de continuidade, nunca as duas ao mesmo tempo.",
         "section": "components"
+      },
+      {
+        "name": "Regra da Escolha Completa",
+        "body": "Operação, opções e confirmação permanecem juntas antes da mesa, em qualquer largura.",
+        "section": "components"
       }
     ],
     "dos": [
       "Do preservar o painel contínuo, o eixo de deixas e a hierarquia entre estado oficial e próximo passo.",
       "Do manter estados verde e âmbar acompanhados por títulos e descrições explícitas.",
       "Do respeitar safe areas, zoom, foco visível e alvos interativos com pelo menos `44px` por `44px`.",
-      "Do usar textura, latão e tipografia condensada como sinais discretos de direção de cena."
+      "Do usar textura, latão e tipografia condensada como sinais discretos de direção de cena.",
+      "Do associar validação ao campo correspondente e comunicar o resultado de ações assíncronas com texto explícito.",
+      "Do manter a operação e a confirmação junto às opções da escolha pendente, antes da mesa consultável.",
+      "Do preservar a descrição junto ao nome e colocar notas e ações abaixo nas linhas da mesa em telas estreitas."
     ],
     "donts": [
       "Don't transformar a mesa em um dashboard de cartões mágicos independentes.",
       "Don't usar cor, pulso ou preenchimento como único canal para disponibilidade.",
       "Don't arredondar trilhos, marcadores numéricos ou divisores estruturais.",
-      "Don't introduzir componentes, ornamentos ou conteúdo de franquia sem presença comprovada no produto."
+      "Don't introduzir componentes, ornamentos ou conteúdo de franquia sem presença comprovada no produto.",
+      "Don't deixar uma falha de ação silenciosa ou depender somente de cor para comunicar sucesso e erro.",
+      "Don't substituir descrições oficiais de efeitos, recompensas ou bloqueios por nomes de cartas ou indicadores visuais isolados."
     ]
   }
 }

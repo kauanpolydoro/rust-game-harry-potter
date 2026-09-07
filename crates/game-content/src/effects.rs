@@ -12,6 +12,15 @@ pub struct EffectRule {
     #[serde(default)]
     pub cost: Vec<ResourceCost>,
     pub effect: Effect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<RuleProvenance>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuleProvenance {
+    pub confidence: crate::FunctionalConfidence,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -50,6 +59,23 @@ pub struct ResourceCost {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    TopDeckAcquisition {
+        card_type: CardType,
+    },
+    CardType {
+        card_type: CardType,
+    },
+    HandDamageLimit {
+        maximum: u8,
+    },
+    Reaction {
+        trigger: ReactionTrigger,
+        effect: Box<Self>,
+    },
+    RevealDarkArts,
+    Structural {
+        rule: StructuralRule,
+    },
     Apply {
         target: Selector,
         operation: Operation,
@@ -85,12 +111,39 @@ pub enum Effect {
     },
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReactionTrigger {
+    OwnerPlaysAlly,
+    ControlAdded,
+    HeroForcedDiscard,
+    SelfForcedDiscard,
+    OwnerDefeatsVillain,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CardType {
+    Ally,
+    Item,
+    Spell,
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectChoiceAudience {
     #[default]
     Actor,
     EachHero,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralRule {
+    GameOneSetup,
+    GameOnePrecedence,
+    NoHeroAbility,
+    NoLocationEffect,
 }
 
 impl EffectChoiceAudience {
@@ -174,7 +227,10 @@ pub enum Zone {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    GainAttackPerAllyPlayed { amount: u8 },
     Discard,
+    PreventDrawing,
+    Draw { amount: u8 },
     ModifyResource { resource: Resource, amount: i16 },
     Move { to: Zone },
 }

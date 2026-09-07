@@ -2,6 +2,7 @@
 import { computed, nextTick } from 'vue'
 
 import type {
+  CardAcquisitionDestination,
   EffectOutcomeSummary,
   EffectTargetBinding,
   GameProjectionResponse,
@@ -13,11 +14,14 @@ import GameTable from './GameTable.vue'
 import RecoveryManagement from './RecoveryManagement.vue'
 
 const props = defineProps<{
+  canConfirmChoice: boolean
+  showChoiceConfirmation: boolean
   choiceInputDisabled: boolean
   isChoiceResponsible: boolean
   selectedChoiceOptions: string[]
 }>()
 const emit = defineEmits<{
+  confirmChoice: []
   accessInvalidated: [reason: 'session_revoked' | 'participant_protected' | 'room_protected']
   'update:selectedChoiceOptions': [value: string[]]
 }>()
@@ -231,6 +235,11 @@ function choiceOptionParticipant(option: string) {
 }
 
 function choiceOptionLabel(option: string): string {
+  const choice = game.value?.choice
+  if (choice?.status === 'pending') {
+    const label = choice.option_labels?.find((candidate) => candidate.option_id === option)?.label
+    if (label) return label
+  }
   const card = game.value?.table.hand.find((candidate) => candidate.instance_id === option)
   if (card) return card.name
   const participant = choiceOptionParticipant(option)
@@ -347,11 +356,11 @@ function assignAttack(villainId: string, amount: number): void {
   void applyOfficialProjection(gameCommand.assignAttack(game.value, villainId, amount))
 }
 
-function acquireCard(cardId: string): void {
+function acquireCard(cardId: string, destination: CardAcquisitionDestination): void {
   if (!game.value || tableCommandsDisabled.value) {
     return
   }
-  void applyOfficialProjection(gameCommand.acquireCard(game.value, cardId))
+  void applyOfficialProjection(gameCommand.acquireCard(game.value, cardId, destination))
 }
 </script>
 
@@ -527,16 +536,6 @@ function acquireCard(cardId: string): void {
         </p>
       </section>
 
-      <GameTable
-        v-if="game.turn.phase === 'hero_actions'"
-        :commands-disabled="tableCommandsDisabled"
-        :game="game"
-        :pending-overlay="gameCommand.pendingOverlay"
-        @acquire-card="acquireCard"
-        @assign-attack="assignAttack"
-        @play-card="playCard"
-      />
-
       <section
         v-if="game.choice.status === 'pending'"
         class="effect-choice"
@@ -547,6 +546,7 @@ function acquireCard(cardId: string): void {
           Descarte metade da mão, arredondada para baixo. Depois, o Local recebe 1 Controle.
           Você continua na partida e recupera 10 de Vida ao fim do turno ativo.
         </p>
+        <p v-if="game.choice.instruction">{{ game.choice.instruction }}</p>
         <p id="pending-choice-cardinality">
           {{ pendingChoiceOwner?.display_name ?? 'O participante responsável' }} precisa escolher
           {{
@@ -558,8 +558,9 @@ function acquireCard(cardId: string): void {
         </p>
         <p id="pending-choice-cause" class="choice-cause">
           <strong aria-hidden="true">Causa oficial</strong>
-          <code aria-hidden="true">{{ game.choice.cause }}</code>
-          <span class="choice-cause-accessible">Causa oficial {{ game.choice.cause }}</span>
+          <span v-if="game.choice.source_name" aria-hidden="true">{{ game.choice.source_name }}</span>
+          <code v-else aria-hidden="true">{{ game.choice.cause }}</code>
+          <span class="choice-cause-accessible">Causa oficial {{ game.choice.source_name ?? game.choice.cause }}</span>
         </p>
         <fieldset
           v-if="
@@ -610,7 +611,25 @@ function acquireCard(cardId: string): void {
         <ol v-else>
           <li v-for="option in game.choice.options" :key="option">{{ choiceOptionLabel(option) }}</li>
         </ol>
+        <button
+          v-if="props.showChoiceConfirmation"
+          class="primary-button choice-confirmation"
+          :disabled="!props.canConfirmChoice"
+          type="button"
+          @click="emit('confirmChoice')"
+        >
+          Confirmar escolha
+        </button>
       </section>
+
+      <GameTable
+        :commands-disabled="tableCommandsDisabled || game.turn.phase !== 'hero_actions' || game.choice.status === 'pending'"
+        :game="game"
+        :pending-overlay="gameCommand.pendingOverlay"
+        @acquire-card="acquireCard"
+        @assign-attack="assignAttack"
+        @play-card="playCard"
+      />
 
       <section
         v-if="game.effects.outcomes.length > 0"
@@ -644,6 +663,8 @@ function acquireCard(cardId: string): void {
               Vida {{ participant.resources.health }} · Ataque {{ participant.resources.attack }} ·
               Influência {{ participant.resources.influence }}
             </span>
+            <span v-if="participant.stunned">Atordoado até o fim deste turno</span>
+            <span v-if="participant.drawing_blocked">Compra de cartas extras bloqueada</span>
           </li>
         </ol>
       </div>
