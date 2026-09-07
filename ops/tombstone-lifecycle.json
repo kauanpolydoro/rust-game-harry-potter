@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-opaque-purge-proofs",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "Expiration": { "Days": 14 }
+    }
+  ]
+}

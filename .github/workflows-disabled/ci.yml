@@ -36,7 +36,7 @@ jobs:
         with:
           cache: npm
           node-version: 26.8.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.98.1
           components: clippy,rustfmt
@@ -52,5 +52,6 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium
+      - run: cargo build --release -p harry-potter-server --example e2e_harness
       - run: npm run test:e2e
       - run: node scripts/scan-secrets.mjs

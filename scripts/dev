@@ -13,7 +13,7 @@ docker compose version >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "Iniciando PostgreSQL, backend e frontend pelo Docker Compose."
+echo "Iniciando PostgreSQL, backend, worker de purge e frontend pelo Docker Compose."
 echo "A primeira execução baixa as ferramentas e compila o backend."
 echo "Após a inicialização, acesse http://127.0.0.1:5173"
 echo "Use Ctrl+C para parar os serviços e preservar os dados locais."

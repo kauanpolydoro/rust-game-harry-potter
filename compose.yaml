@@ -3,6 +3,18 @@ name: harry-potter-game
 services:
   postgres:
     image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    command:
+      - postgres
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_statement=none
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
     environment:
       POSTGRES_DB: hogwarts
       POSTGRES_PASSWORD: local-development-only
@@ -56,6 +68,27 @@ services:
       - rust-toolchains:/usr/local/rustup
       - rust-target:/target
 
+  lifecycle-worker:
+    profiles: [dev]
+    image: rust:1.98.0-slim-bookworm@sha256:1469a27c125cb5a3aebfa4f4e4665d935b02fb72cc093b2c974b3d740e43f157
+    init: true
+    working_dir: /workspace
+    command: [cargo, run, --locked, -p, harry-potter-server, --bin, lifecycle-worker]
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      CARGO_TARGET_DIR: /target
+      DATABASE_URL: postgres://hogwarts:local-development-only@postgres:5432/hogwarts
+      TOMBSTONE_HMAC_KEY: development-tombstone-key-000001
+      TOMBSTONE_LOCAL_DIRECTORY: /tombstones
+    volumes:
+      - .:/workspace:ro
+      - dev-cargo-registry:/usr/local/cargo/registry
+      - rust-toolchains:/usr/local/rustup
+      - rust-target:/target
+      - tombstones:/tombstones
+
   web:
     profiles: [dev]
     image: node:26.8.1-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e
@@ -93,3 +126,4 @@ volumes:
   node-modules:
   web-node-modules:
   npm-cache:
+  tombstones:

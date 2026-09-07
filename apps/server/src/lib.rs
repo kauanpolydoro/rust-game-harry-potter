@@ -29,6 +29,7 @@ mod current_session;
 mod game_expiration;
 mod http_support;
 mod identity_access;
+pub mod lifecycle;
 mod match_runtime;
 mod security;
 mod session;

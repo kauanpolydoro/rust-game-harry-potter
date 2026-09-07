@@ -208,7 +208,7 @@ async fn serve_session_events(
             return;
         }
         Err(_) => {
-            tracing::warn!(%room_id, participant_id = %session.participant_id, "initial session revalidation failed");
+            tracing::warn!("initial session revalidation failed");
             close_socket(
                 &mut socket,
                 close_code::ERROR,
@@ -233,7 +233,7 @@ async fn serve_session_events(
     )
     .await
     {
-        tracing::warn!(%room_id, participant_id = %session.participant_id, "initial security event synchronization failed");
+        tracing::warn!("initial security event synchronization failed");
         close_socket(
             &mut socket,
             close_code::ERROR,
@@ -362,7 +362,7 @@ async fn session_event_loop(
             )
             .await
         {
-            tracing::warn!(%room_id, participant_id = %session.participant_id, "security event synchronization failed");
+            tracing::warn!("security event synchronization failed");
             close_socket(socket, close_code::ERROR, "synchronization failed").await;
             return;
         }
