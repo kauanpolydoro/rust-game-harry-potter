@@ -10,7 +10,7 @@ use sqlx::PgPool;
 
 mod descriptions;
 mod game_one;
-pub use game_one::game_one_manifest;
+pub use game_one::{game_one_manifest, game_two_manifest};
 
 #[derive(Clone)]
 pub(crate) struct ContentCatalog {
@@ -114,18 +114,19 @@ impl ContentCatalog {
             manifest_digest: manifest.digest.clone(),
             manifest_version: manifest.manifest_version,
             playable: manifest.playable && adventure.playable,
-            prepares_game_one: adventure
+            preparation: adventure
                 .functional_provenance
                 .get(&FunctionalField::Setup)
                 .and_then(|definition| definition.rule_id.as_ref())
                 .and_then(|id| manifest.rules.iter().find(|rule| rule.id == *id))
-                .is_some_and(|rule| {
-                    matches!(
-                        rule.effect,
-                        Effect::Structural {
-                            rule: game_content::StructuralRule::GameOneSetup,
-                        }
-                    )
+                .and_then(|rule| match rule.effect {
+                    Effect::Structural {
+                        rule: game_content::StructuralRule::GameOneSetup,
+                    } => Some(GamePreparation::One),
+                    Effect::Structural {
+                        rule: game_content::StructuralRule::GameTwoSetup,
+                    } => Some(GamePreparation::Two),
+                    _ => None,
                 }),
             initial_entities,
         })
@@ -259,7 +260,13 @@ impl ContentCatalog {
             .enumerate()
             .filter_map(|(index, effect)| {
                 descriptions::describe(effect, "Você")
-                    .filter(|text| !text.is_empty())
+                    .map(|text| {
+                        if text.is_empty() {
+                            "Não aplicar efeito.".to_owned()
+                        } else {
+                            text
+                        }
+                    })
                     .map(|label| (format!("option:{}", index + 1), label))
             })
             .collect()
@@ -304,6 +311,12 @@ struct AdventureOption {
     playable: bool,
 }
 
+#[derive(Clone, Copy)]
+enum GamePreparation {
+    One,
+    Two,
+}
+
 #[derive(Clone)]
 pub(crate) struct SelectedContent {
     pub(crate) adventure_id: String,
@@ -313,7 +326,7 @@ pub(crate) struct SelectedContent {
     pub(crate) manifest_digest: String,
     pub(crate) manifest_version: u16,
     pub(crate) playable: bool,
-    pub(crate) prepares_game_one: bool,
+    preparation: Option<GamePreparation>,
     initial_entities: Vec<SelectedInitialEntity>,
 }
 
@@ -355,10 +368,10 @@ impl SelectedContent {
             },
         };
         let engine = game_domain::GameEngine::new(rules);
-        if self.prepares_game_one {
-            engine.start_game_one(input, random)
-        } else {
-            engine.start(input, random)
+        match self.preparation {
+            Some(GamePreparation::One) => engine.start_game_one(input, random),
+            Some(GamePreparation::Two) => engine.start_game_two(input, random),
+            None => engine.start(input, random),
         }
     }
 
@@ -396,7 +409,7 @@ impl SelectedContent {
                 for _ in 0..template.copies {
                     let instance_id = format!("instance:{next_instance:08}");
                     next_instance += 1;
-                    let entity = match template.kind {
+                    let mut entity = match template.kind {
                         EntryKind::DarkArts => game_domain::EffectEntity::new(instance_id, None)
                             .with_kind(game_domain::EffectEntityKind::DarkArts)
                             .with_catalog_id(&template.catalog_id)
@@ -452,6 +465,12 @@ impl SelectedContent {
                             unreachable!("validated game setup has a supported entity kind")
                         }
                     };
+                    if template.kind == EntryKind::Villain
+                        && matches!(self.preparation, Some(GamePreparation::Two))
+                    {
+                        entity = entity
+                            .with_max_health(template.health.expect("validated villain health"));
+                    }
                     placements.push(game_domain::EffectEntityPlacement::new(
                         entity,
                         template.zone,
@@ -575,6 +594,11 @@ fn compile_effect(
     rules: &BTreeMap<&game_content::RuleId, &EffectRule>,
 ) -> Option<game_domain::EffectDefinition> {
     Some(match effect {
+        Effect::PreventExtraDrawing => game_domain::EffectDefinition::PreventExtraDrawing,
+        Effect::ForEachTarget { target, effect } => game_domain::EffectDefinition::ForEachTarget {
+            target: effect_selector(target),
+            effect: Box::new(compile_effect(effect, rules)?),
+        },
         Effect::TopDeckAcquisition { card_type } => {
             game_domain::EffectDefinition::TopDeckAcquisition {
                 card_type: effect_card_type(*card_type),
@@ -662,6 +686,7 @@ fn compile_effect(
 
 fn effect_condition(condition: &Condition) -> game_domain::EffectCondition {
     match condition {
+        Condition::DrawingAllowed => game_domain::EffectCondition::DrawingAllowed,
         Condition::HasEligibleTarget { target } => {
             game_domain::EffectCondition::HasEligibleTarget {
                 target: effect_selector(target),
@@ -693,6 +718,9 @@ fn effect_selector(selector: &Selector) -> game_domain::EffectSelector {
             .eligibility
             .iter()
             .map(|eligibility| match eligibility {
+                Eligibility::CardType { card_type } => game_domain::EffectEligibility::CardType {
+                    card_type: effect_card_type(*card_type),
+                },
                 Eligibility::ResourceAtLeast { resource, amount } => {
                     game_domain::EffectEligibility::ResourceAtLeast {
                         resource: effect_resource(*resource),
@@ -714,6 +742,8 @@ fn effect_card_type(card_type: game_content::CardType) -> game_domain::EffectCar
 
 fn effect_operation(operation: &Operation) -> game_domain::EffectOperation {
     match operation {
+        Operation::DiscardVoluntarily => game_domain::EffectOperation::DiscardVoluntarily,
+        Operation::CopyPlayedAlly => game_domain::EffectOperation::CopyPlayedAlly,
         Operation::GainAttackPerAllyPlayed { amount } => {
             game_domain::EffectOperation::GainAttackPerAllyPlayed { amount: *amount }
         }

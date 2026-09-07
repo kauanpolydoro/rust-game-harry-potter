@@ -1,0 +1,3173 @@
+{
+  "players": 4,
+  "seed_byte": 7,
+  "outcome": "lost",
+  "opening_digest": "blake3:69ab8e6ade8ca06c0838438c6b4cd80568f299005f1d5d3d8222adf9a5a95595",
+  "checkpoints": {
+    "dark_arts": {
+      "decision_point": {
+        "responsible_position": 2,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 2
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 1
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 98
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000037",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 1,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000106",
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 2,
+        "phase": "hero_actions"
+      }
+    },
+    "end_turn": {
+      "decision_point": {
+        "responsible_position": 2,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 2
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 1
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 98
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000037",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 1,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000106",
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 2,
+        "phase": "hero_actions"
+      }
+    },
+    "hero_actions": {
+      "decision_point": {
+        "responsible_position": 2,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 2
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 1
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 98
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000037",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 1,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000106",
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 2,
+        "phase": "hero_actions"
+      }
+    },
+    "location_advance": {
+      "decision_point": {
+        "choice": {
+          "cause": "rule:g2-villain-006",
+          "continuation": {
+            "choice_cursor": {
+              "path": [
+                {
+                  "type": "repeat_effect"
+                },
+                {
+                  "type": "condition_then"
+                }
+              ],
+              "rule_id": "rule:g2-villain-006"
+            },
+            "queue": [],
+            "steps_completed": 3
+          },
+          "id": "choice:effect:2",
+          "kind": "effect",
+          "max": 1,
+          "min": 1,
+          "options": [
+            "option:1",
+            "option:2"
+          ],
+          "responsible_position": 2
+        },
+        "type": "effect_choice"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 7,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 8,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 9,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 4
+          },
+          "zone": "location_discard",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 107
+      },
+      "sequence": 11,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000031",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 8,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-001",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 6,
+        "phase": "villains"
+      }
+    },
+    "preparation": {
+      "decision_point": {
+        "responsible_position": 1,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 1
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 1
+        }
+      ],
+      "preparation_samples": [
+        {
+          "owner_position": null,
+          "result": 24,
+          "upper_exclusive": 44,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 34,
+          "upper_exclusive": 43,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 35,
+          "upper_exclusive": 42,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 32,
+          "upper_exclusive": 41,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 6,
+          "upper_exclusive": 40,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 23,
+          "upper_exclusive": 39,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 37,
+          "upper_exclusive": 38,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 29,
+          "upper_exclusive": 37,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 4,
+          "upper_exclusive": 36,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 35,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 6,
+          "upper_exclusive": 34,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 8,
+          "upper_exclusive": 33,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 12,
+          "upper_exclusive": 32,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 9,
+          "upper_exclusive": 31,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 22,
+          "upper_exclusive": 30,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 8,
+          "upper_exclusive": 29,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 16,
+          "upper_exclusive": 28,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 6,
+          "upper_exclusive": 27,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 13,
+          "upper_exclusive": 26,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 3,
+          "upper_exclusive": 25,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 12,
+          "upper_exclusive": 24,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 19,
+          "upper_exclusive": 23,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 18,
+          "upper_exclusive": 22,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 21,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 8,
+          "upper_exclusive": 20,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 19,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 10,
+          "upper_exclusive": 18,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 14,
+          "upper_exclusive": 17,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 11,
+          "upper_exclusive": 16,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 15,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 14,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 5,
+          "upper_exclusive": 13,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 12,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 10,
+          "upper_exclusive": 11,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 10,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 8,
+          "upper_exclusive": 9,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 5,
+          "upper_exclusive": 8,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 7,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 5,
+          "upper_exclusive": 6,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 5,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 3,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 15,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 8,
+          "upper_exclusive": 14,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 9,
+          "upper_exclusive": 13,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 3,
+          "upper_exclusive": 12,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 4,
+          "upper_exclusive": 11,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 9,
+          "upper_exclusive": 10,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 9,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 8,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 7,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 6,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 4,
+          "upper_exclusive": 5,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 3,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 6,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 5,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 3,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": 1,
+          "result": 0,
+          "upper_exclusive": 10,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 2,
+          "upper_exclusive": 9,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 2,
+          "upper_exclusive": 8,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 5,
+          "upper_exclusive": 7,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 3,
+          "upper_exclusive": 6,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 1,
+          "upper_exclusive": 5,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 2,
+          "upper_exclusive": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 0,
+          "upper_exclusive": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 3,
+          "upper_exclusive": 10,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 6,
+          "upper_exclusive": 9,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 2,
+          "upper_exclusive": 8,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 5,
+          "upper_exclusive": 7,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 0,
+          "upper_exclusive": 6,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 4,
+          "upper_exclusive": 5,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 1,
+          "upper_exclusive": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 0,
+          "upper_exclusive": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 1,
+          "upper_exclusive": 10,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 6,
+          "upper_exclusive": 9,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 6,
+          "upper_exclusive": 8,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 2,
+          "upper_exclusive": 7,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 5,
+          "upper_exclusive": 6,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 4,
+          "upper_exclusive": 5,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 1,
+          "upper_exclusive": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 1,
+          "upper_exclusive": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 3,
+          "result": 0,
+          "upper_exclusive": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 0,
+          "upper_exclusive": 10,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 4,
+          "upper_exclusive": 9,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 1,
+          "upper_exclusive": 8,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 6,
+          "upper_exclusive": 7,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 4,
+          "upper_exclusive": 6,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 4,
+          "upper_exclusive": 5,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 1,
+          "upper_exclusive": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 4,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "hero_draw_pile"
+        }
+      ],
+      "prepared_piles": [
+        {
+          "id": "hero:1",
+          "owner_position": 1,
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "owner_position": 2,
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "owner_position": 3,
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "owner_position": 4,
+          "zone": "heroes"
+        },
+        {
+          "id": "instance:00000001",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000002",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000003",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000004",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000005",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000006",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000007",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000008",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000009",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000010",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000011",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000012",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000013",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000014",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000015",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000016",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000017",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000018",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000019",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000020",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000021",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000022",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000023",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000024",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000025",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000026",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000027",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000028",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000029",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000030",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000031",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000032",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000033",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000034",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000035",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000036",
+          "owner_position": null,
+          "zone": "dark_arts_discard"
+        },
+        {
+          "id": "instance:00000037",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000038",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000039",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000040",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000041",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000042",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000043",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000044",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000045",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000046",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000047",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000048",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000049",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000050",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000051",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000052",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000053",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000054",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000055",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000056",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000057",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000058",
+          "owner_position": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000059",
+          "owner_position": 3,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000060",
+          "owner_position": 3,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000061",
+          "owner_position": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000062",
+          "owner_position": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000063",
+          "owner_position": 3,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000064",
+          "owner_position": 3,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000065",
+          "owner_position": 4,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000066",
+          "owner_position": 4,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000067",
+          "owner_position": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000068",
+          "owner_position": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000069",
+          "owner_position": 4,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000070",
+          "owner_position": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000071",
+          "owner_position": 4,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000072",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000073",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000074",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000075",
+          "owner_position": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000076",
+          "owner_position": 3,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000077",
+          "owner_position": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000078",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000079",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000080",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000081",
+          "owner_position": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000082",
+          "owner_position": 4,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000083",
+          "owner_position": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000084",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000085",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000086",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000087",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000088",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000089",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000090",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000091",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000092",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000093",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000094",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000095",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000096",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000097",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000098",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000099",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000100",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000101",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000102",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000103",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000104",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000105",
+          "owner_position": null,
+          "zone": "active_villains"
+        },
+        {
+          "id": "instance:00000106",
+          "owner_position": null,
+          "zone": "active_location"
+        },
+        {
+          "id": "instance:00000107",
+          "owner_position": null,
+          "zone": "location_deck"
+        },
+        {
+          "id": "instance:00000108",
+          "owner_position": null,
+          "zone": "location_deck"
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 98
+      },
+      "sequence": 0,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000036",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 1,
+              "before": 0,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000106",
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 1,
+        "phase": "hero_actions"
+      }
+    },
+    "stun": {
+      "decision_point": {
+        "choice": {
+          "cause": "rule:g2-villain-006",
+          "continuation": {
+            "choice_cursor": {
+              "path": [
+                {
+                  "type": "repeat_effect"
+                },
+                {
+                  "type": "condition_then"
+                },
+                {
+                  "index": 0,
+                  "type": "choice_option"
+                }
+              ],
+              "rule_id": "rule:g2-villain-006"
+            },
+            "queue": [
+              {
+                "cursor": {
+                  "path": [
+                    {
+                      "type": "repeat_effect"
+                    },
+                    {
+                      "type": "condition_then"
+                    },
+                    {
+                      "index": 0,
+                      "type": "choice_option"
+                    }
+                  ],
+                  "rule_id": "rule:g2-villain-006"
+                },
+                "responsible_position": 2,
+                "type": "finish_stun"
+              }
+            ],
+            "steps_completed": 5
+          },
+          "id": "choice:stun-discard:4",
+          "kind": "stun_discard",
+          "max": 2,
+          "min": 2,
+          "options": [
+            "instance:00000079",
+            "instance:00000080",
+            "instance:00000057",
+            "instance:00000078"
+          ],
+          "responsible_position": 2
+        },
+        "type": "effect_choice"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 4,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 0,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 3,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 2,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 4
+          },
+          "zone": "location_discard",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 2
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 184
+      },
+      "sequence": 49,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000033",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 4,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-001",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [
+            {
+              "after": 0,
+              "before": 2,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g2-villain-006",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 18,
+        "phase": "villains"
+      }
+    },
+    "terminal": {
+      "decision_point": {
+        "type": "none"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 6,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 5,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 9,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 6,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 4
+          },
+          "zone": "location_discard",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 4
+          },
+          "zone": "location_discard",
+          "zone_index": 1
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 5
+          },
+          "zone": "location_discard",
+          "zone_index": 2
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 220
+      },
+      "sequence": 72,
+      "status": "lost",
+      "steps": [
+        {
+          "effects": [
+            {
+              "outcome": "lost",
+              "rule_id": "system:game-outcome",
+              "type": "terminal"
+            }
+          ],
+          "phase": "end_turn"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 25,
+        "phase": "end_turn"
+      }
+    },
+    "villains": {
+      "decision_point": {
+        "responsible_position": 2,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:3",
+          "kind": "hero",
+          "owner_position": 3,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:4",
+          "kind": "hero",
+          "owner_position": 4,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:003",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000106",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 2
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:004",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000107",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:005",
+          "dark_arts_count": 2,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000108",
+          "kind": "location",
+          "resource_limits": {
+            "control": 5
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 1
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 98
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000037",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 1,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000106",
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 2,
+        "phase": "hero_actions"
+      }
+    }
+  },
+  "commands": [
+    {
+      "request": {
+        "expected_state_version": 1,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:5ed5ece00ab6fee0faa254a9a7ed0f13026509e55ac96ef6d007289bfd10cec6",
+      "snapshot_digest": "blake3:9de6b8564182ae3b26483cf0495251b2d487407015584e69d31f7b026a5b27a8"
+    },
+    {
+      "request": {
+        "expected_state_version": 2,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:a0da9afac8852c6358a3625dff54fbea8acbcb32b056fd8b13ed6118d099c2cd",
+      "snapshot_digest": "blake3:715bf7767de1a43eb1f1516af0d9f0343ce0e11c17d30e690e2eefb40e40562d"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:4",
+        "expected_state_version": 3,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:0c7d61b9b2551f912f92596ac0a30c0676b98cc6aa64385cc2da10959a40415b",
+      "snapshot_digest": "blake3:20912aaf7c820c8e479ba8fad6dc144961b0e8588dbda078c325aafb48cf485b"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:8",
+        "expected_state_version": 4,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:c062d24fe822c30d638a6ca66e963b4d76921b3bc92877f70cbfb1b261b9be26",
+      "snapshot_digest": "blake3:cb3405fb48cb5821178ef6515dcecd36534f9e90041abee8502dd9c1ddb2e0bb"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:9",
+        "expected_state_version": 5,
+        "selected_options": [
+          "instance:00000079"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:c41e2f914c77d196b41813f5f0fbf4fc77511698be6732f5f4406671ecd4b7cc",
+      "snapshot_digest": "blake3:3542c361d4a4129691e69cf2dd6e12c1ce92976c9afad516cddc77306e3456be"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:12",
+        "expected_state_version": 6,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:92f11ae592493216b1a5ba81e17c07a32eb4b51a7755a6a1b539a0d3a8239540",
+      "snapshot_digest": "blake3:c479f7df0d88e702472b7ff1775e7e76fa915fd11c6c949d67f82ba8f5666611"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:16",
+        "expected_state_version": 7,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:817fda27019fd83e9cc688d7a00acd9f1f1f05dd3924642cc2916345da5d0795",
+      "snapshot_digest": "blake3:01474f1ad5c8816d557a45b4a82d4057d84bb41023906836af9a37ab40c4e692"
+    },
+    {
+      "request": {
+        "expected_state_version": 8,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:a492a4a2c34a53a64c6710ec1902d908a1684d871b3f4801f7b572f5e6c49c10",
+      "snapshot_digest": "blake3:9bee0d0f1138fe5eff67c1b5139ac6698366ed407d2b52a5896b1f3573d29ff5"
+    },
+    {
+      "request": {
+        "expected_state_version": 9,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:7680633e3211d706e3edaae88350c7d02fbd4b65b625fe3c070909e802869ed8",
+      "snapshot_digest": "blake3:9b9aacf5b98e1ddc5d8369e5b92fc00d5d846cb87532d3e134e283bfc13c0fbe"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 10,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:b77685b93ce60cdd2072f18ff1fe3525d441fa2e35c9ec67919591cc86eaa737",
+      "snapshot_digest": "blake3:4c32686c247f67c2501b9218a50f73d0aa664e749182097736403d7cec755b88"
+    },
+    {
+      "request": {
+        "expected_state_version": 11,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:62ec272d4db77b45b97017567eaabdf2f4fe4860642d38627c5b94994a075c4d",
+      "snapshot_digest": "blake3:ef6e46ff3ffa253c768c3a704b4ff09800ba091ee09a2f6d7dccc332ae5b96ae"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 12,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:af4d11e413e52d9ef684bfd245248c3d5159fbec0d7fef4ce73086730d2e2a5c",
+      "snapshot_digest": "blake3:5c5a967a478d5ab3fd6a2d0dca36780cab652340aadb23262859f0e9efc21e7f"
+    },
+    {
+      "request": {
+        "expected_state_version": 13,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:14afee1ec02490a8379988ba20fe2389c0dd8fcff803df7ca46f50c31d2f8280",
+      "snapshot_digest": "blake3:552e274455e229b0ec40e384548e39f4eb81b244049d4cee5dd8b791024dce43"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:4",
+        "expected_state_version": 14,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:7280c70f1f1006b6b9968da95aaddaaf18c570a949a3e1cfafe19024d7f89033",
+      "snapshot_digest": "blake3:56bf6cd1d8f1540ca0610a2c5d36fcca87c392b502252bb73004ee630f1310e0"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:8",
+        "expected_state_version": 15,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:8281813afdbe89afe4c0069b4db6bb38429f158d046877853fdf80a55682f596",
+      "snapshot_digest": "blake3:c9ebde937ed980b813893ab7868f13eb74535a49f5647b928d144c6a44b06a82"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:12",
+        "expected_state_version": 16,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:62658cfef9bb10b7382b0e99727a2fa07ab092dde0345a21f64826486b5042c1",
+      "snapshot_digest": "blake3:b399a07c0f8000e832992e819e2834324ebe53e6e47766c8a2872cf5089cf32a"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:16",
+        "expected_state_version": 17,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:5e98cdc87eb6c2a36d024790f480b5d7643b032e544e64a481b2bf4a7b1c2a4b",
+      "snapshot_digest": "blake3:4e62c1519a3a2842679dcdd34c998bf072bb00dbc974be03d6e2c6e08d22bbe5"
+    },
+    {
+      "request": {
+        "expected_state_version": 18,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:4ee784e3e780afe482950c684f305c86325ba96c6f056487ef840bd3c55ef7fb",
+      "snapshot_digest": "blake3:a89b04c4a2815e9e703256db2e72c76c09f991bd915b25557c2d5dc550cf8fce"
+    },
+    {
+      "request": {
+        "expected_state_version": 19,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:6829caba4418fe7cb5a9dd11897564aa900319520fffbd68f77108bf8cd48e71",
+      "snapshot_digest": "blake3:c38116cbdc2c14532cd56e8760e3287483af2dee1202f2a29abf3baf5f5c6893"
+    },
+    {
+      "request": {
+        "expected_state_version": 20,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:dc5566530ec5aea091682aae77340f27d4311180a8ceb2ff8b1bbed4ddb0a7c8",
+      "snapshot_digest": "blake3:f195e90a7b55c0a68e78d8a2f33b4791cd681bc188a7d11c40c5560e22716056"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:4",
+        "expected_state_version": 21,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:ae34bb2fcd13dd146fc7b1710084304f5d023ce60f50765af996818b2002e8a8",
+      "snapshot_digest": "blake3:8fd50b8ca16f266e44e501f5a6ffc70974c8e54038c6b74d2b3ad4614a44c5c3"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:5",
+        "expected_state_version": 22,
+        "selected_options": [
+          "instance:00000046"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:27482fa447c5ea9b162f6a51f3b1be92a0c14003d2d393764ec761968179bb09",
+      "snapshot_digest": "blake3:32b4b100109ffbcb885838d0d7676142771b82cad7d2d5d4814e8fdea880ba1f"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:8",
+        "expected_state_version": 23,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:67c417ba9382c8730d93a7c08a0769a8dd090f87353cf8e86e8ef78601f0de7d",
+      "snapshot_digest": "blake3:93a1357ce013a93e5458cbbd6e9256012a4f41043512276ca5846653132d9aec"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:9",
+        "expected_state_version": 24,
+        "selected_options": [
+          "instance:00000056"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:874e8520f9091e491435e3ce9ca0c71989109168bb2f6a506714267731d72743",
+      "snapshot_digest": "blake3:8d8e0d35bee2ffdfd280fd1637821e1243219848494e114aefb80f75625263e2"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:12",
+        "expected_state_version": 25,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:eb77b9ce220f9212371c38b72772389e95a10005e046d543a7aacca4393a9924",
+      "snapshot_digest": "blake3:c4142ed15886e48e3892cff19da203874fb4c9e22685af3ef0960fd04e5921f6"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:13",
+        "expected_state_version": 26,
+        "selected_options": [
+          "instance:00000060"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:394d594a753384dc877361b6d251af558bad657d4e27ab129459b198e5416a20",
+      "snapshot_digest": "blake3:ec1d0b2ace4f052ede950556b29f906dafdeff45a16c64c4fcbaf4376e541d92"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:16",
+        "expected_state_version": 27,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:23c225f5523d7afd8c612ee832ffda2642d348234c7f3eba74271284ab2fe106",
+      "snapshot_digest": "blake3:ade4675ae8f9aea26c581265a57d60c00db766cf83ad9ec2f1b0e9ec51b7df55"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:17",
+        "expected_state_version": 28,
+        "selected_options": [
+          "instance:00000066"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:3bca82cc6fcd2a8e18b7fcebc7f923a208366f777ee2670098b4c7fd102c76d6",
+      "snapshot_digest": "blake3:896fda4b97b1636d1fa90b621a2f5e696188a2390590cd45c36ac4a8f4117092"
+    },
+    {
+      "request": {
+        "expected_state_version": 29,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:0771673e3402296252530b284db18ca0be6e0a3f9e2e0e07aa8d4e2dbba694b5",
+      "snapshot_digest": "blake3:46f0a7f12b8afff14e8674c9a070606d14f45e45ba9582fe2896db76b64a7992"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 30,
+        "selected_options": [
+          "instance:00000076"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:e217f2640d9e0163abfbd3cda9dc2df134cfd9f33b125cd645733df353cf930e",
+      "snapshot_digest": "blake3:5ba3010979db1c021befeb93b6965583b81d899597e3e13eb6f1b00f8b185245"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 31,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:ec1c32361e5204b1591cc06cb88fda7b69202bfe89c59a39bfc6a708681c41f6",
+      "snapshot_digest": "blake3:2c41a38c3087a04fed1eab27cc8ae03e2efd59672ec797496ad3020340b9ad68"
+    },
+    {
+      "request": {
+        "expected_state_version": 32,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:d93c2aaeb89f47524855a8963ba93a349ef9e4c779e560e04d7831f20ae84543",
+      "snapshot_digest": "blake3:a759d5b4aaf4ad272f93592cd79093bd1deadc84253b63db923a9dc3513ea244"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 33,
+        "selected_options": [
+          "instance:00000069"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:24ff114bac598683dfbac584d4750e9aa8e621e0f6c447c85e098be48fef5247",
+      "snapshot_digest": "blake3:bd623955e494128e4aeaf460ddee375d83f1439643dfa9dac3dc67b97e6b47b8"
+    },
+    {
+      "request": {
+        "expected_state_version": 34,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:cb90cb1200339c669622b3acf90396292319c121aea45c539df3fac04ff70218",
+      "snapshot_digest": "blake3:ffc939810267ceff46e0bd137bfd5dffb3384aace69d813c0ebb828f9faee883"
+    },
+    {
+      "request": {
+        "expected_state_version": 35,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:99a34acd5e17e9fbb8a454cd035b57f779b41ff0dff106e510abbf55cf1cf105",
+      "snapshot_digest": "blake3:906bf42861aa7ae07d19c240734c14459933e7d4ccaf08c0cfd4ad5a7d1913dd"
+    },
+    {
+      "request": {
+        "expected_state_version": 36,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:435464a006e43effb1aa3cc3df3fd62dae457cb52c3bed35d912e37103a043ac",
+      "snapshot_digest": "blake3:9d3ee33428810b8ebd21b78078736b47769524e69a52c56a8bb27b85933a431a"
+    },
+    {
+      "request": {
+        "expected_state_version": 37,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:1d461956a6fe3053733531cf4dd95cf1468a056d0f2804d8cbbb247d99cae6c2",
+      "snapshot_digest": "blake3:ab91194e333eff4ff67867aa75bc0e30e78b2154d11620c94e81e3b8e68b9719"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:4",
+        "expected_state_version": 38,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:716380248db9efb9976940de723b46e6872768de3f01802b5da6e794e22371e9",
+      "snapshot_digest": "blake3:da9cbd6d950f653c9e70abcb6aa22126c71443972b34ef36a044e10b66031a4a"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:5",
+        "expected_state_version": 39,
+        "selected_options": [
+          "instance:00000045"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:68cc0dcb86dc251027a8a13f9e4f6e34b73f92314cc88131f26a49e4f6217457",
+      "snapshot_digest": "blake3:127e8768996be9ef3f39853b4450981168264a2c861ed85c514fc0918a78ed7b"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:8",
+        "expected_state_version": 40,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:714787b0ff3777f532e9f58cce6eda19698d18d5e4f4e79399a6380bf12bdfa6",
+      "snapshot_digest": "blake3:c92fd6a76406e2d500afca5e2678813a76c5d74190aca9d4fe12711f9158bf9a"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:9",
+        "expected_state_version": 41,
+        "selected_options": [
+          "instance:00000052"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:06f1a56f12017943c8bac897f2ae10ed296c70c4e655f899faab636697557215",
+      "snapshot_digest": "blake3:42c2f2084ec02113b0e036b90bdbfcc957f0b2ef41e89e567a599253ce46da3f"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:12",
+        "expected_state_version": 42,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:58e843acf42ecb133428800b3e0eacd60ea403c552330b9118b56314e4cf6044",
+      "snapshot_digest": "blake3:8a488a7076d154e66499eff3de87f0f1c977b79d4e231ae1f133c2849bd9c447"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:13",
+        "expected_state_version": 43,
+        "selected_options": [
+          "instance:00000063"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:e208670b43f04cecfc08c8dca75ad38cbd522796a05be5cde370d42838425334",
+      "snapshot_digest": "blake3:1d7f973cfbf06d7a6ea9b06b8e59cb0c58383e910475a2bd89b317fbea39e560"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:16",
+        "expected_state_version": 44,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:57fa96eecfe8cd1a644c3aaf57857998b8b5c5883105dbeffff29cb3581134e0",
+      "snapshot_digest": "blake3:0799b804a5803e0343fa5e9f789e3f35d60dbeec63a09213e31e4d93a2b413f5"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:17",
+        "expected_state_version": 45,
+        "selected_options": [
+          "instance:00000067"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:451dade2ddb78cc5ed66b408df50d07c47ec9177bc65fb4b59675c8ab65d9a90",
+      "snapshot_digest": "blake3:e7f06cf10b87af3b067a8566406c661fd30d9e279d19ea29beb44955537e0265"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 46,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:95e4a9b95c453b871bbb306e6b2be1f343bbe2b7b721475b18bcb8cb63f2b586",
+      "snapshot_digest": "blake3:9f8dff1f0bc18aff696624f7eae407c174de40a74487853a59523f1a41c485f6"
+    },
+    {
+      "request": {
+        "expected_state_version": 47,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:5850b3988778c7762561fb01e4e3672ced381a8b81fedfef65a4123ee8c164ba",
+      "snapshot_digest": "blake3:8d7fca019cb4f8fe4be8a350bae4ebdf574c45f460a46f77d5a276bb4bb2ca05"
+    },
+    {
+      "request": {
+        "expected_state_version": 48,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:d5e68baeda7c81b1013f6c1865d332a05356e6d99a9a4545d1d55dab6fcdb764",
+      "snapshot_digest": "blake3:f7b5be143f5ec67f01478354f009eb858c693692a08755ed33862e50aced8204"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 49,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:30c35083751dba254ed3ae36c74547aec636460a43e6cada81811d5ed2651ee4",
+      "snapshot_digest": "blake3:fbb6f676cbec365a58bb08941c81747940d5c3db4dade17915319d675395dbf3"
+    },
+    {
+      "request": {
+        "choice_id": "choice:stun-discard:4",
+        "expected_state_version": 50,
+        "selected_options": [
+          "instance:00000079",
+          "instance:00000080"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:0076243556db0ce5803910c4ab47458e2d4bf77c68fc4b0f961571f74e0b4d80",
+      "snapshot_digest": "blake3:6d793ec7893524f3f283c6b5d50ec90d817e4e0763a176f3791b42829f2e736d"
+    },
+    {
+      "request": {
+        "expected_state_version": 51,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:3992cc20dbe307d6f00da39a16c8cd6a757e8fcdfb5772cf8d863b6e7acc0f1b",
+      "snapshot_digest": "blake3:e9dfb2a2dba8b1b689266997e595152ff57d0a7888cbf3e7b80a2ecf5a256607"
+    },
+    {
+      "request": {
+        "expected_state_version": 52,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:61941e3d2dfc862bf0ccab920cfc7c503535e8aec019efeb5d637dd1173d566d",
+      "snapshot_digest": "blake3:a6bb478dfb9d8e6bb15c1a2092f44de89bcaea2af851faf64d523b008d4e967c"
+    },
+    {
+      "request": {
+        "choice_id": "choice:stun-discard:3",
+        "expected_state_version": 53,
+        "selected_options": [
+          "instance:00000062",
+          "instance:00000059"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:0120ed90a34c9ffd11d505dab631008f38c5e89b135900c361d490269be7b232",
+      "snapshot_digest": "blake3:6fadd52e70792df8b1c1575bcb6a72563002200959e1c171861cee6e0e17094e"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 54,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:815d973fb05804cd6773b9577623b135bb916369270005df96b6b11f781d82c5",
+      "snapshot_digest": "blake3:a9c72108ea1a2bed932f8060573d87d77ea7448ffedc0a10bcdf333f59397eb0"
+    },
+    {
+      "request": {
+        "choice_id": "choice:stun-discard:4",
+        "expected_state_version": 55,
+        "selected_options": [
+          "instance:00000083",
+          "instance:00000067"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:cca8874e605e18f179ee4188ee1128718b1fecf061d84e9a40883c0556fcf8ad",
+      "snapshot_digest": "blake3:722635f96b13b3488489630bddb38048e1f8462ba93f3017e0c64e8b8f91fafa"
+    },
+    {
+      "request": {
+        "expected_state_version": 56,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:d474790fc1dcf0cc2ef22bb541ce33b64becf437485c36b7149c8bd7a6423532",
+      "snapshot_digest": "blake3:fbe74b9a35befeba5d99add05117e74697d7b9dca3964830e7cfc1c2b348ed9e"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 57,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:2b9ea0cc399d82e47fd8b1d9e04c1b93d2eb6d1d70515e1996c50889f7cbbe58",
+      "snapshot_digest": "blake3:673b280117a753d0e4eb3cecd0862b0fdba6ba6556a689110608c86d20147468"
+    },
+    {
+      "request": {
+        "choice_id": "choice:stun-discard:4",
+        "expected_state_version": 58,
+        "selected_options": [
+          "instance:00000048",
+          "instance:00000074"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:479f5343fa17aa5b9bd2dbe053d48bb1016a47a09bf229ac3da3bcfc61906dd0",
+      "snapshot_digest": "blake3:9deafc2920303fc0863fa68db4a266f00678cfe5a65b4f4e6ae0812bc3a996e6"
+    },
+    {
+      "request": {
+        "expected_state_version": 59,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:78b40e9a2415bb9b67279e3cec09c2cc79e9f236fd03af7b6f213b621c6cd2d6",
+      "snapshot_digest": "blake3:4b9350b0acff0c9caace6efdaf92bb2c3c054180cbec7e096ffc15781bd4dfac"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 60,
+        "selected_options": [
+          "instance:00000051"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:2abab4e07c8fe970cad4df4d1ca0756882799f08c6003490b1317e3b60e92539",
+      "snapshot_digest": "blake3:923118c08805bd55fa094efe01e6ed9d6ef339d42f43fd74a74e6520d531887a"
+    },
+    {
+      "request": {
+        "expected_state_version": 61,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:00105d59715ddde3f92fa2f6cbe4d0fa18af476d7b69858224976b2c475775ef",
+      "snapshot_digest": "blake3:046352b3b09121abf72ce6926fad17713d01b1bf4b757aca24299c9668accfd7"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:14",
+        "expected_state_version": 62,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:98ed5fc12576ee7a16c0e53ddfe6118a193e9c9d66b07f63c7e699ef6e21bfdb",
+      "snapshot_digest": "blake3:84019f0a078a3820bddca1bd6c2049d651d3ab20d92895f35ef99868291a99f9"
+    },
+    {
+      "request": {
+        "expected_state_version": 63,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:37861a1e2253d3ab6349590b279d6af231643561a206059bf65585dc93b94790",
+      "snapshot_digest": "blake3:959dfd60600e4d846d6da3ddf102b3d3cd1039b8190af677b4aab86cd02278f9"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:4",
+        "expected_state_version": 64,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:041253f8db240f00c066cbccf247859227826a2bcd42a61660b73d512492ff11",
+      "snapshot_digest": "blake3:73ceaff987537d647dff770d637c309d5c9406b8a6b2bf19600020d1970eee01"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:8",
+        "expected_state_version": 65,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:c196d68073fbe4292be40390235f74c77d562b2d51fcc2cdc64e3c03cc3c46c8",
+      "snapshot_digest": "blake3:747cafa9dfd64ba6ed64a0e9dd90256bdc1161d382d0686c1b8ae8eb63e48929"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:9",
+        "expected_state_version": 66,
+        "selected_options": [
+          "instance:00000079"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:55d6389b4458ba59d86982d3e56ba69109d21b32ee335a0e60ff62a393d8a3c3",
+      "snapshot_digest": "blake3:c3e81abffd27607790639a90de47df0bf5ec3bdbd0b416022593758d9e2d67f6"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:12",
+        "expected_state_version": 67,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:09b6ac7f3cc25d72c13fb3e3f542a4a405ab94645d6d6d34f4b6c28bc00077a6",
+      "snapshot_digest": "blake3:c848471cd9e17e49dce139b28f78354c4602f5f396a4f1c94788ff49931e9651"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:16",
+        "expected_state_version": 68,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:610382b03ff9a45fcb5347118e666e241c0028eb8482c39d38c5180189ecacc6",
+      "snapshot_digest": "blake3:3fe8fdd746c901c00789adf231af834a5248c9548863d9658432835eda863ede"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:17",
+        "expected_state_version": 69,
+        "selected_options": [
+          "instance:00000081"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:ed59b64fa35719beb5bb9929947017bc22c034d631ee6bea3a276d18a91c10d7",
+      "snapshot_digest": "blake3:98851c0e32df02521b2978802de63d7a105f1fd6db1921047e254dd949b8cd5b"
+    },
+    {
+      "request": {
+        "expected_state_version": 70,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:ca58a2d7d9fa1cc3f55cc806da1f1531538875ef9a612c24a134f0ff83e54aec",
+      "snapshot_digest": "blake3:c1e8bae0b44515acfe0586b6f4f5e80b3ba4092103e20cbe420b8bd7ed309d27"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 71,
+        "selected_options": [
+          "instance:00000047"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:d205ae768887e5f638ca98966c5a5d3a08dbac138c4b928e671fd1714957ec5b",
+      "snapshot_digest": "blake3:1dbc605fb94eec8366270036d0122d1ff23c6ae2305048e7a001401b01530085"
+    },
+    {
+      "request": {
+        "expected_state_version": 72,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:8bda8a39af41f3c7d99a39605f3f42966d53b52435d6177da0637705e4f443a2",
+      "snapshot_digest": "blake3:884d38e5d9e6f2458a1a3e4b6175ec89da012c63d2f9e8aa76772d4ff89f9b89"
+    }
+  ]
+}

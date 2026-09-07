@@ -1038,13 +1038,15 @@ async fn synchronize_socket(
             "projection Snapshot version cannot be represented",
         ));
     };
-    let requested_cursor = position.cursor;
     let anchor_matches =
         requested_anchor_matches(&state.database, participant_id, game_id, position).await?;
+    // Terminal turns can stop after EndTurn alone. Older public event contracts
+    // require two steps; their Snapshot contract already represents this state.
     let needs_snapshot = force_snapshot
+        || (projection.game.status != "in_progress" && position.cursor != Some(current_cursor))
         || position.snapshot_version != Some(current_snapshot_version)
-        || requested_cursor.is_none_or(|value| value > current_cursor)
-        || replay_gap_requires_snapshot(requested_cursor, current_cursor)
+        || position.cursor.is_none_or(|value| value > current_cursor)
+        || replay_gap_requires_snapshot(position.cursor, current_cursor)
         || !anchor_matches;
 
     if needs_snapshot {
@@ -1060,7 +1062,7 @@ async fn synchronize_socket(
         return Ok(());
     }
 
-    let Some(from_cursor) = requested_cursor else {
+    let Some(from_cursor) = position.cursor else {
         return Err(RealtimeFailure::InvalidData(
             "compatible realtime cursor is missing",
         ));
@@ -1217,9 +1219,22 @@ fn realtime_event(
     stored: &StoredGameEvent,
     participant_id: Uuid,
 ) -> Result<RealtimeGameEvent, ApiError> {
-    let payload = decode_persisted_event(&stored.payload_json)?;
+    let mut payload = decode_persisted_event(&stored.payload_json)?;
     if !realtime_event_metadata_matches(&payload, stored) {
         return Err(ApiError::internal());
+    }
+    // Copy links belong to canonical persistence. Public v6 already expresses
+    // targets, copied effects, choices and the resulting projected table.
+    if payload.event_version == 7 {
+        payload
+            .effects
+            .retain(|effect| !matches!(effect, PersistedEffectOutcome::AllyCopied { .. }));
+        if let Some(steps) = &mut payload.steps {
+            for step in steps {
+                step.effects
+                    .retain(|effect| !matches!(effect, PersistedEffectOutcome::AllyCopied { .. }));
+            }
+        }
     }
     let command_id =
         (stored.actor_participant_id == participant_id).then(|| stored.command_id.to_string());
@@ -1227,13 +1242,17 @@ fn realtime_event(
     match (payload.event_version, payload.event_type.as_str()) {
         (1..=3, "dark_arts_completed")
         | (3, "choice_resolved")
-        | (3..=6, "card_played" | "attack_assigned" | "card_acquired") => {
+        | (3..=7, "card_played" | "attack_assigned" | "card_acquired") => {
             realtime_legacy_event(stored, payload, command_id)
         }
-        (4..=6, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
-        (4..=6, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
+        (4..=7, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
+        (4..=7, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
         _ => Err(ApiError::internal()),
     }
+}
+
+const fn public_event_version(persisted: i16) -> i16 {
+    if persisted == 7 { 6 } else { persisted }
 }
 
 fn realtime_legacy_event(
@@ -1248,7 +1267,7 @@ fn realtime_legacy_event(
         .map(realtime_choice_summary)
         .transpose()?;
     Ok(RealtimeGameEvent::Legacy(RealtimeLegacyGameEvent {
-        event_version: stored.event_version,
+        event_version: public_event_version(stored.event_version),
         event_type: fields.event_type,
         sequence: stored.sequence,
         state_version: stored.state_version,
@@ -1283,7 +1302,7 @@ fn realtime_turn_completed_event(
     };
     Ok(RealtimeGameEvent::TurnCompleted(
         RealtimeTurnCompletedGameEvent {
-            event_version: stored.event_version,
+            event_version: public_event_version(stored.event_version),
             event_type: "turn_completed",
             sequence: stored.sequence,
             state_version: stored.state_version,
@@ -1314,7 +1333,7 @@ fn realtime_choice_resolved_event(
     };
     Ok(RealtimeGameEvent::ChoiceResolved(
         RealtimeChoiceResolvedGameEvent {
-            event_version: stored.event_version,
+            event_version: public_event_version(stored.event_version),
             event_type: "choice_resolved",
             sequence: stored.sequence,
             state_version: stored.state_version,
@@ -1488,9 +1507,9 @@ fn realtime_event_type(
     match (payload.event_version, stored_event_type) {
         (1..=3, "dark_arts_completed") => Ok("dark_arts_completed"),
         (3, "choice_resolved") => Ok("choice_resolved"),
-        (3..=6, "card_played") => Ok("card_played"),
-        (3..=6, "attack_assigned") => Ok("attack_assigned"),
-        (3..=6, "card_acquired") => Ok("card_acquired"),
+        (3..=7, "card_played") => Ok("card_played"),
+        (3..=7, "attack_assigned") => Ok("attack_assigned"),
+        (3..=7, "card_acquired") => Ok("card_acquired"),
         _ => Err(ApiError::internal()),
     }
 }
@@ -1602,6 +1621,39 @@ mod tests {
         let event = realtime_event(stored, viewer)
             .unwrap_or_else(|_| panic!("valid persisted event must become realtime output"));
         serde_json::to_value(event).expect("realtime event must serialize")
+    }
+
+    #[test]
+    fn game_two_events_reach_the_websocket_adapter() {
+        let actor = Uuid::new_v4();
+        let stored = stored_event(
+            &json!({
+                "event_version": 7, "type": "card_played", "sequence": 1,
+                "state_version": 2, "turn": 1, "actor_position": 1,
+                "card_id": "instance:starter:1",
+                "targets": [{"selector_id": "target:ally", "target_ids": ["instance:ally:1"]}],
+                "effects": [
+                    {"type": "ally_copied", "rule_id": "rule:polyjuice", "card_id": "instance:starter:1", "ally_id": "instance:ally:1", "owner_position": 1},
+                    {"type": "resource_changed", "rule_id": "rule:ally", "target_id": "hero:1", "target_position": 1, "resource": "attack", "before": 0, "after": 2, "cause": "effect"}
+                ],
+                "effect_stop": "stable", "prng_counter": 80
+            }),
+            actor,
+        );
+        let forwarded = serialized_realtime_event(&stored, actor);
+        assert_eq!(forwarded["event_version"], 6);
+        assert_eq!(
+            forwarded["effects"]
+                .as_array()
+                .expect("public effects")
+                .len(),
+            1
+        );
+        assert_eq!(forwarded["effects"][0]["after"], 2);
+        assert_eq!(forwarded["targets"][0]["target_ids"][0], "instance:ally:1");
+        assert!(stored.payload_json.contains("ally_copied"));
+        assert_eq!(forwarded["card_id"], "instance:starter:1");
+        assert_eq!(forwarded["command_id"], stored.command_id.to_string());
     }
 
     #[test]

@@ -34,8 +34,8 @@ pub(super) fn validate(
     validate_inventory(bundle, inventory)?;
     validate_provenance(bundle)?;
     validate_game_setups(bundle)?;
-    if matches!(inventory, super::Inventory::GameOne) {
-        game_one::validate_setup(bundle)?;
+    if !matches!(inventory, super::Inventory::Base) {
+        game_one::validate_setup(bundle, inventory)?;
     }
     validate_effects(bundle)?;
     validate_reactive_definitions(bundle)?;
@@ -72,7 +72,7 @@ fn validate_structural_definitions(bundle: &CandidateBundle) -> Result<(), Impor
                 ) | (
                     EntryKind::Adventure,
                     FunctionalField::Setup,
-                    StructuralRule::GameOneSetup
+                    StructuralRule::GameOneSetup | StructuralRule::GameTwoSetup
                 ) | (
                     EntryKind::Adventure | EntryKind::Ruleset,
                     FunctionalField::Precedence,
@@ -257,14 +257,18 @@ fn validate_inventory(
         });
     }
 
-    if matches!(inventory, super::Inventory::GameOne) {
-        validate_game_one_inventory(bundle)?;
+    if !matches!(inventory, super::Inventory::Base) {
+        validate_adventure_inventory(bundle, inventory)?;
     }
 
     Ok(())
 }
 
-fn validate_game_one_inventory(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+fn validate_adventure_inventory(
+    bundle: &CandidateBundle,
+    inventory: super::Inventory,
+) -> Result<(), ImportFailure> {
+    let game_two = matches!(inventory, super::Inventory::GameTwo);
     let mut expected = BTreeMap::new();
     for (prefix, kind, copies) in [
         (
@@ -296,18 +300,57 @@ fn validate_game_one_inventory(bundle: &CandidateBundle) -> Result<(), ImportFai
     ] {
         expected.insert(id.to_owned(), (kind, 0));
     }
+    let inherited_ids = expected.keys().cloned().collect::<BTreeSet<_>>();
+    if game_two {
+        for id in [
+            "location:001",
+            "location:002",
+            "adventure:001",
+            "catalog:game-one-v1",
+            "ruleset:game-one-v1",
+        ] {
+            expected.remove(id);
+        }
+        for (prefix, kind, start, copies) in [
+            (
+                "hogwarts-card",
+                EntryKind::HogwartsCard,
+                14,
+                &[1, 1, 2, 1, 2, 1, 1, 1, 2, 2][..],
+            ),
+            ("dark-arts", EntryKind::DarkArts, 5, &[2, 1, 1, 1][..]),
+            ("villain", EntryKind::Villain, 4, &[1, 1, 1][..]),
+            ("location", EntryKind::Location, 3, &[1, 1, 1][..]),
+        ] {
+            for (index, copies) in copies.iter().enumerate() {
+                expected.insert(format!("{prefix}:{:03}", start + index), (kind, *copies));
+            }
+        }
+        for (id, kind) in [
+            ("adventure:002", EntryKind::Adventure),
+            ("catalog:game-two-v1", EntryKind::Catalog),
+            ("ruleset:game-two-v1", EntryKind::Ruleset),
+        ] {
+            expected.insert(id.to_owned(), (kind, 0));
+        }
+    }
     for entry in &bundle.entries {
-        if entry.introduced_in != 1
+        if entry.introduced_in
+            != if inherited_ids.contains(entry.id.as_str()) {
+                1
+            } else {
+                2
+            }
             || expected.remove(entry.id.as_str()) != Some((entry.kind, entry.copies))
         {
             return Err(ImportFailure {
-                message: format!("entry {} does not match the Game 1 inventory", entry.id),
+                message: format!("entry {} does not match the adventure inventory", entry.id),
             });
         }
     }
     if !expected.is_empty() {
         return Err(ImportFailure {
-            message: "Game 1 inventory is incomplete".to_owned(),
+            message: "adventure inventory is incomplete".to_owned(),
         });
     }
     Ok(())
@@ -862,13 +905,16 @@ pub(super) fn validate_runtime_rules(
 struct EffectRuleStats<'a> {
     definitions: BTreeMap<&'a RuleId, &'a Effect>,
     hero_card_count: usize,
+    shared_draw_inventory: bool,
     dark_arts_card_count: usize,
+    dark_arts_reveals: usize,
     dark_arts_rules: Vec<&'a RuleId>,
 }
 
 impl<'a> EffectRuleStats<'a> {
     fn new(bundle: &'a CandidateBundle) -> Self {
         Self {
+            shared_draw_inventory: bundle.schema_version >= 4,
             definitions: bundle
                 .rules
                 .iter()
@@ -882,6 +928,14 @@ impl<'a> EffectRuleStats<'a> {
                 })
                 .map(|entry| usize::from(entry.copies))
                 .sum(),
+            dark_arts_reveals: bundle
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == EntryKind::Location)
+                .filter_map(|entry| entry.functional.get(&FunctionalField::DarkArtsCount)?.value)
+                .map(usize::from)
+                .max()
+                .unwrap_or(1),
             dark_arts_card_count: bundle
                 .entries
                 .iter()
@@ -922,8 +976,45 @@ fn revelation_stats(
         card_outcomes = card_outcomes.max(card.runtime_outcomes);
     }
     stats.runtime_nodes = checked_total(stats.runtime_nodes, card_nodes)?;
-    stats.runtime_outcomes = outcome_total(stats.runtime_outcomes, card_outcomes);
+    stats.runtime_outcomes = repeated_outcomes(
+        outcome_total(stats.runtime_outcomes, card_outcomes),
+        rules.dark_arts_reveals,
+    );
+    stats.runtime_nodes = checked_total(
+        0,
+        stats.runtime_nodes.saturating_mul(rules.dark_arts_reveals),
+    )?;
     Some(stats)
+}
+
+fn copy_stats(
+    rules: &EffectRuleStats<'_>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    fn is_ally(effect: &Effect) -> bool {
+        match effect {
+            Effect::CardType {
+                card_type: crate::CardType::Ally,
+            } => true,
+            Effect::Sequence { effects } => effects.iter().any(is_ally),
+            _ => false,
+        }
+    }
+    let mut nodes = 0;
+    let mut outcomes = 0;
+    for (id, definition) in &rules.definitions {
+        if is_ally(definition) {
+            let child = rule_stats(id, rules, memo)?;
+            nodes = nodes.max(child.runtime_nodes);
+            outcomes = outcomes.max(child.runtime_outcomes);
+        }
+    }
+    Some(EffectStats {
+        compiled_nodes: 1,
+        reference_depth: 0,
+        runtime_nodes: checked_total(1, nodes)?,
+        runtime_outcomes: outcome_total(1, outcomes),
+    })
 }
 
 fn rule_stats(
@@ -945,13 +1036,23 @@ fn application_stats(
     rules: &EffectRuleStats<'_>,
 ) -> EffectStats {
     let runtime_outcomes = if let Operation::Draw { amount } = operation {
-        repeated_outcomes(
+        // All recipients share the inventory bound: a card can belong to only one
+        // hero, so shuffling every recipient cannot shuffle the inventory four times.
+        let targets = usize::from(target.cardinality.max).clamp(1, MAX_PARTICIPANT_HEROES);
+        if rules.shared_draw_inventory {
             outcome_total(
                 rules.hero_card_count.saturating_mul(2),
-                usize::from(*amount),
-            ),
-            usize::from(target.cardinality.max).clamp(1, MAX_PARTICIPANT_HEROES),
-        )
+                usize::from(*amount).saturating_mul(targets),
+            )
+        } else {
+            repeated_outcomes(
+                outcome_total(
+                    rules.hero_card_count.saturating_mul(2),
+                    usize::from(*amount),
+                ),
+                targets,
+            )
+        }
     } else {
         usize::from(target.cardinality.max).max(1)
     };
@@ -969,7 +1070,9 @@ fn effect_stats(
     memo: &mut BTreeMap<RuleId, EffectStats>,
 ) -> Option<EffectStats> {
     match effect {
-        Effect::CardType { .. } | Effect::TopDeckAcquisition { .. } => Some(EffectStats {
+        Effect::PreventExtraDrawing
+        | Effect::CardType { .. }
+        | Effect::TopDeckAcquisition { .. } => Some(EffectStats {
             compiled_nodes: 1,
             reference_depth: 0,
             runtime_nodes: 1,
@@ -983,6 +1086,10 @@ fn effect_stats(
             Some(stats)
         }
         Effect::RevealDarkArts => revelation_stats(rules, memo),
+        Effect::Apply {
+            operation: Operation::CopyPlayedAlly,
+            ..
+        } => copy_stats(rules, memo),
         Effect::Apply { target, operation } => Some(application_stats(target, operation, rules)),
         Effect::Choice { audience, options } => {
             let mut stats = branch_stats(options, 1, 0, true, rules, memo)?;
@@ -1040,6 +1147,7 @@ fn effect_stats(
             stats.reference_depth = stats.reference_depth.checked_add(1)?;
             Some(stats)
         }
+        Effect::ForEachTarget { target, effect } => iteration_stats(target, effect, rules, memo),
         Effect::Repeat { times, effect } => {
             let child = effect_stats(effect, rules, memo)?;
             Some(EffectStats {
@@ -1055,6 +1163,29 @@ fn effect_stats(
         Effect::Roll { outcomes, .. } => branch_stats(outcomes, 1, 1, true, rules, memo),
         Effect::Sequence { effects } => branch_stats(effects, 1, 0, false, rules, memo),
     }
+}
+
+fn iteration_stats(
+    target: &Selector,
+    effect: &Effect,
+    rules: &EffectRuleStats<'_>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    let child = effect_stats(effect, rules, memo)?;
+    Some(EffectStats {
+        compiled_nodes: checked_total(1, child.compiled_nodes)?,
+        reference_depth: child.reference_depth,
+        runtime_nodes: checked_total(
+            1,
+            child
+                .runtime_nodes
+                .checked_mul(usize::from(target.cardinality.max))?,
+        )?,
+        runtime_outcomes: repeated_outcomes(
+            child.runtime_outcomes,
+            usize::from(target.cardinality.max),
+        ),
+    })
 }
 
 fn branch_stats(
@@ -1219,6 +1350,11 @@ impl Effect {
         }
 
         match self {
+            Self::ForEachTarget { target, effect } => {
+                target.validate(rule_id, selectors)?;
+                target.validate_iteration(rule_id)?;
+                effect.validate(rule_id, depth + 1, nodes, selectors)?;
+            }
             Self::Reaction { effect, .. } => {
                 effect.validate(rule_id, depth + 1, nodes, selectors)?;
             }
@@ -1292,7 +1428,8 @@ impl Effect {
                     ),
                 });
             }
-            Self::NoOp
+            Self::PreventExtraDrawing
+            | Self::NoOp
             | Self::TopDeckAcquisition { .. }
             | Self::CardType { .. }
             | Self::HandDamageLimit { .. }
@@ -1312,6 +1449,7 @@ impl Condition {
         selectors: &mut BTreeMap<String, Selector>,
     ) -> Result<(), ImportFailure> {
         match self {
+            Self::DrawingAllowed => Ok(()),
             Self::HasEligibleTarget { target } => target.validate(rule_id, selectors),
             Self::ResourceAtLeast {
                 target,
@@ -1335,6 +1473,15 @@ impl Condition {
 }
 
 impl Selector {
+    fn validate_iteration(&self, rule_id: &RuleId) -> Result<(), ImportFailure> {
+        if self.id.is_some() || self.cardinality.min != 0 || self.cardinality.max == 0 {
+            return Err(ImportFailure {
+                message: format!("rule {rule_id} iteration must collect all bounded targets"),
+            });
+        }
+        Ok(())
+    }
+
     fn validate(
         &self,
         rule_id: &RuleId,
@@ -1381,7 +1528,22 @@ impl Selector {
                         ),
                     });
                 }
-                Eligibility::ResourceAtLeast { .. } => {}
+                Eligibility::CardType { .. }
+                    if !matches!(
+                        self.zone,
+                        Zone::HeroHand
+                            | Zone::HeroDrawPile
+                            | Zone::HeroDiscardPile
+                            | Zone::HeroPlayArea
+                            | Zone::HogwartsDeck
+                            | Zone::Market
+                    ) =>
+                {
+                    return Err(ImportFailure {
+                        message: format!("rule {rule_id} card category requires a hero card zone"),
+                    });
+                }
+                Eligibility::ResourceAtLeast { .. } | Eligibility::CardType { .. } => {}
             }
         }
         Ok(())
@@ -1391,7 +1553,8 @@ impl Selector {
 impl Operation {
     fn validate_zone(&self, zone: Zone, rule_id: &RuleId) -> Result<(), ImportFailure> {
         let compatible = match self {
-            Self::Discard => zone == Zone::HeroHand,
+            Self::CopyPlayedAlly => zone == Zone::HeroPlayArea,
+            Self::Discard | Self::DiscardVoluntarily => zone == Zone::HeroHand,
             Self::PreventDrawing => zone == Zone::Heroes,
             Self::Draw { amount } | Self::GainAttackPerAllyPlayed { amount } => {
                 (1..=16).contains(amount) && zone == Zone::Heroes
@@ -1415,6 +1578,8 @@ impl Operation {
 
     fn as_str(&self) -> &'static str {
         match self {
+            Self::CopyPlayedAlly => "copy_played_ally",
+            Self::DiscardVoluntarily => "discard_voluntarily",
             Self::Discard => "discard",
             Self::PreventDrawing => "prevent_drawing",
             Self::GainAttackPerAllyPlayed { .. } => "gain_attack_per_ally_played",

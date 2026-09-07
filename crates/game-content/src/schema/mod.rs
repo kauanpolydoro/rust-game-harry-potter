@@ -48,10 +48,42 @@ pub fn import_game_one_bundle_with_runtime_rules(
     import_bundle(bytes, trusted_sources, executable_rules, Inventory::GameOne)
 }
 
+/// Inspects Game 2 without granting source trust or runtime support.
+///
+/// # Errors
+/// Returns a validation failure for an invalid cumulative bundle.
+pub fn inspect_game_two_rules(bytes: &[u8]) -> Result<Vec<EffectRule>, ImportFailure> {
+    let mut bundle = parse_bundle(bytes, Inventory::GameTwo)?;
+    bundle.canonicalize();
+    validation::validate(&bundle, Inventory::GameTwo)?;
+    Ok(bundle.rules)
+}
+
+/// Imports Game 2 without granting functional trust.
+///
+/// # Errors
+/// Returns a validation failure for an invalid cumulative bundle.
+pub fn import_game_two_bundle(bytes: &[u8]) -> Result<ContentManifest, ImportFailure> {
+    import_bundle(bytes, &[], &BTreeSet::new(), Inventory::GameTwo)
+}
+
+/// Imports Game 2 with externally granted provenance and runtime capabilities.
+///
+/// # Errors
+/// Returns a validation failure for invalid inventory, provenance, or rules.
+pub fn import_game_two_bundle_with_runtime_rules(
+    bytes: &[u8],
+    trusted_sources: &[ProvenanceSource],
+    executable_rules: &BTreeSet<RuleId>,
+) -> Result<ContentManifest, ImportFailure> {
+    import_bundle(bytes, trusted_sources, executable_rules, Inventory::GameTwo)
+}
+
 #[derive(Clone, Copy)]
 enum Inventory {
     Base,
     GameOne,
+    GameTwo,
 }
 
 impl Inventory {
@@ -59,6 +91,7 @@ impl Inventory {
         match self {
             Self::Base => 2,
             Self::GameOne => 3,
+            Self::GameTwo => 4,
         }
     }
 
@@ -66,6 +99,7 @@ impl Inventory {
         match self {
             Self::Base => 3,
             Self::GameOne => 4,
+            Self::GameTwo => 5,
         }
     }
 
@@ -73,6 +107,7 @@ impl Inventory {
         match self {
             Self::Base => (BASE_RECORD_COUNT, BASE_CARD_COUNT),
             Self::GameOne => (45, 93),
+            Self::GameTwo => (63, 116),
         }
     }
 }
@@ -175,7 +210,7 @@ fn import_bundle(
     let has_required_catalog_shape = REQUIRED_BASE_ENTRY_KINDS
         .iter()
         .filter(|kind| {
-            !matches!(inventory, Inventory::GameOne)
+            matches!(inventory, Inventory::Base)
                 || !matches!(kind, EntryKind::Horcrux | EntryKind::Proficiency)
         })
         .all(|kind| entries.iter().any(|entry| entry.kind == *kind));
@@ -577,9 +612,12 @@ impl Effect {
                 }
                 references
             }
-            Self::Repeat { effect, .. } | Self::Reaction { effect, .. } => effect.references(),
+            Self::ForEachTarget { effect, .. }
+            | Self::Repeat { effect, .. }
+            | Self::Reaction { effect, .. } => effect.references(),
             Self::Reference { rule } => vec![rule],
-            Self::Apply { .. }
+            Self::PreventExtraDrawing
+            | Self::Apply { .. }
             | Self::TopDeckAcquisition { .. }
             | Self::CardType { .. }
             | Self::HandDamageLimit { .. }
@@ -596,7 +634,8 @@ impl Effect {
         visited: &mut BTreeSet<RuleId>,
     ) -> bool {
         match self {
-            Self::Apply { .. }
+            Self::PreventExtraDrawing
+            | Self::Apply { .. }
             | Self::TopDeckAcquisition { .. }
             | Self::HandDamageLimit { .. }
             | Self::Structural { .. }
@@ -620,9 +659,9 @@ impl Effect {
                         .get(rule)
                         .is_some_and(|effect| effect.has_operation(rules, visited))
             }
-            Self::Repeat { effect, .. } | Self::Reaction { effect, .. } => {
-                effect.has_operation(rules, visited)
-            }
+            Self::ForEachTarget { effect, .. }
+            | Self::Repeat { effect, .. }
+            | Self::Reaction { effect, .. } => effect.has_operation(rules, visited),
             Self::Roll { outcomes, .. } => outcomes
                 .iter()
                 .any(|outcome| outcome.has_operation(rules, visited)),

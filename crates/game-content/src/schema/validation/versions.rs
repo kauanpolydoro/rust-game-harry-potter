@@ -3,6 +3,16 @@ use crate::{Effect, GameSetupOwner, ImportFailure, Operation, Zone};
 use super::CandidateBundle;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    if bundle.schema_version < 4
+        && bundle
+            .rules
+            .iter()
+            .any(|rule| requires_game_two(&rule.effect))
+    {
+        return Err(ImportFailure {
+            message: "Game 2 definitions require bundle schema version 4".to_owned(),
+        });
+    }
     if bundle.schema_version != 2 {
         return Ok(());
     }
@@ -31,7 +41,9 @@ pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
 
 fn requires_game_one(effect: &Effect) -> bool {
     match effect {
-        Effect::TopDeckAcquisition { .. }
+        Effect::PreventExtraDrawing
+        | Effect::ForEachTarget { .. }
+        | Effect::TopDeckAcquisition { .. }
         | Effect::CardType { .. }
         | Effect::HandDamageLimit { .. }
         | Effect::Reaction { .. }
@@ -53,5 +65,72 @@ fn requires_game_one(effect: &Effect) -> bool {
         } => requires_game_one(then) || otherwise.as_deref().is_some_and(requires_game_one),
         Effect::Repeat { effect, .. } => requires_game_one(effect),
         Effect::NoOp | Effect::Reference { .. } | Effect::Terminal { .. } => false,
+    }
+}
+
+fn requires_game_two(effect: &Effect) -> bool {
+    let category = |target: &crate::Selector| {
+        target
+            .eligibility
+            .iter()
+            .any(|entry| matches!(entry, crate::Eligibility::CardType { .. }))
+    };
+    match effect {
+        Effect::PreventExtraDrawing
+        | Effect::ForEachTarget { .. }
+        | Effect::Structural {
+            rule: crate::StructuralRule::GameTwoSetup,
+        } => true,
+        Effect::Apply { target, operation } => {
+            category(target)
+                || matches!(
+                    operation,
+                    Operation::CopyPlayedAlly | Operation::DiscardVoluntarily
+                )
+        }
+        Effect::Choice { options, .. }
+        | Effect::Roll {
+            outcomes: options, ..
+        }
+        | Effect::Sequence { effects: options } => options.iter().any(requires_game_two),
+        Effect::Condition {
+            condition,
+            then,
+            otherwise,
+        } => {
+            let target = match condition {
+                crate::Condition::DrawingAllowed => return true,
+                crate::Condition::HasEligibleTarget { target }
+                | crate::Condition::ResourceAtLeast { target, .. } => target,
+            };
+            category(target)
+                || requires_game_two(then)
+                || otherwise.as_deref().is_some_and(requires_game_two)
+        }
+        Effect::Repeat { effect, .. } => requires_game_two(effect),
+        Effect::Reaction { effect, .. } => new_reaction_effect(effect) || requires_game_two(effect),
+        _ => false,
+    }
+}
+
+fn new_reaction_effect(effect: &Effect) -> bool {
+    match effect {
+        Effect::Apply {
+            operation: Operation::Draw { .. },
+            ..
+        } => true,
+        Effect::Apply {
+            target,
+            operation:
+                Operation::ModifyResource {
+                    resource: crate::Resource::Health,
+                    amount,
+                },
+        } => target.zone == Zone::ActiveVillains && *amount > 0,
+        Effect::Sequence { effects }
+        | Effect::Choice {
+            options: effects, ..
+        } => effects.iter().any(new_reaction_effect),
+        _ => false,
     }
 }

@@ -64,19 +64,22 @@ impl EffectExecutor<'_> {
         let mut reactions = Vec::new();
         for outcome in &self.outcomes[outcome_start..] {
             for (zone, source) in self.world.entities() {
-                let Some(rule) = self
-                    .rules
-                    .iter()
-                    .find(|rule| Some(rule.id.as_str()) == source.effect_rule_id())
-                else {
-                    continue;
-                };
+                let copied_rule = source
+                    .copied_ally_id
+                    .as_deref()
+                    .and_then(|id| self.world.entity(id))
+                    .and_then(|(_, ally)| ally.effect_rule_id());
                 let mut declarations = Vec::new();
-                collect_reactions(
-                    &rule.effect,
-                    &EffectCursor::root(&rule.id),
-                    &mut declarations,
-                )?;
+                for id in [source.effect_rule_id(), copied_rule].into_iter().flatten() {
+                    let Some(rule) = self.rules.iter().find(|rule| rule.id == id) else {
+                        continue;
+                    };
+                    collect_reactions(
+                        &rule.effect,
+                        &EffectCursor::root(&rule.id),
+                        &mut declarations,
+                    )?;
+                }
                 for (trigger, cursor) in declarations {
                     if let Some((position, count)) = reaction_context(
                         trigger,
@@ -181,6 +184,7 @@ fn reaction_context(
         (
             EffectReactionTrigger::HeroForcedDiscard | EffectReactionTrigger::SelfForcedDiscard,
             EffectOutcome::Moved {
+                rule_id,
                 target_id,
                 target_position: Some(position),
                 from: EffectZone::HeroHand,
@@ -189,7 +193,8 @@ fn reaction_context(
             },
         ) if (trigger == EffectReactionTrigger::HeroForcedDiscard
             && zone == EffectZone::ActiveVillains
-            && source.kind() == EffectEntityKind::Villain)
+            && source.kind() == EffectEntityKind::Villain
+            && rule_id != "system:voluntary-discard")
             || (trigger == EffectReactionTrigger::SelfForcedDiscard
                 && source.id() == target_id
                 && zone == EffectZone::HeroDiscardPile) =>
@@ -256,6 +261,26 @@ fn permits_top_deck(effect: &EffectDefinition, category: EffectCardType) -> bool
         EffectDefinition::Sequence { effects } => effects
             .iter()
             .any(|effect| permits_top_deck(effect, category)),
+        _ => false,
+    }
+}
+
+pub(super) fn drawing_prevented(world: &EffectWorld, rules: &[EffectRule]) -> bool {
+    world
+        .entities_in(EffectZone::ActiveVillains)
+        .iter()
+        .any(|villain| {
+            rules
+                .iter()
+                .find(|rule| Some(rule.id.as_str()) == villain.effect_rule_id())
+                .is_some_and(|rule| prevents_drawing(&rule.effect))
+        })
+}
+
+fn prevents_drawing(effect: &EffectDefinition) -> bool {
+    match effect {
+        EffectDefinition::PreventExtraDrawing => true,
+        EffectDefinition::Sequence { effects } => effects.iter().any(prevents_drawing),
         _ => false,
     }
 }

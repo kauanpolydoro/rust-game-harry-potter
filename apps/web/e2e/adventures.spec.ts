@@ -1,7 +1,8 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
+import gameTwoPurchasePriority from '../../server/tests/fixtures/game-two/purchase-priority.json' with { type: 'json' }
 
-import { isGameProjectionResponse, type GameProjectionResponse } from '../src/contracts/identity-access.generated'
+import { isGameProjectionResponse, isRealtimeEventBatchMessage, type GameProjectionResponse } from '../src/contracts/identity-access.generated'
 
 test.use({ actionTimeout: 10_000 })
 
@@ -19,7 +20,8 @@ class ObservedPlayer {
     })
     page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => {
       const message: unknown = JSON.parse(String(payload))
-      if (message && typeof message === 'object' && 'type' in message && message.type === 'events') {
+      if (message && typeof message === 'object' && 'type' in message && message.type === 'events' && 'projection' in message) {
+        expect(isRealtimeEventBatchMessage(message), JSON.stringify(message)).toBe(true)
         this.eventBatches += 1
       }
       this.observe(message)
@@ -44,7 +46,7 @@ class ObservedPlayer {
   }
 }
 
-async function startTable(browser: Browser, host: ObservedPlayer, count: number) {
+async function startTable(browser: Browser, host: ObservedPlayer, count: number, game: 'one' | 'two') {
   const players = [host]
   await host.page.goto('/')
   await host.page.getByLabel('Seu nome').fill('Harry')
@@ -69,7 +71,7 @@ async function startTable(browser: Browser, host: ObservedPlayer, count: number)
   }
   await host.page.getByRole('button', { name: 'Atualizar estado da sala' }).click()
   const selection = host.page.getByLabel('Aventura e conteúdo da partida')
-  const option = selection.locator('option').filter({ hasText: / · game-one-v1$/ })
+  const option = selection.locator('option').filter({ hasText: new RegExp(` · game-${game}-v1$`) })
   await expect(option).toHaveCount(1)
   await selection.selectOption(await option.getAttribute('value') ?? '')
   await host.page.getByRole('button', { name: 'Selar sala e iniciar' }).click()
@@ -84,7 +86,7 @@ async function startTable(browser: Browser, host: ObservedPlayer, count: number)
     await expect(player.page.locator('.presence-label--online')).toHaveCount(count)
     await expect(player.page.getByRole('region', { name: 'Arte das Trevas revelada' })).toBeVisible()
     const state = player.current()
-    expect(state.snapshot.versions.content).toBe('game-one-en-v1')
+    expect(state.snapshot.versions.content).toBe(`game-${game}-en-v1`)
     expect(state.table.market).toHaveLength(6)
     expect(state.table.hand.every((card) => Boolean(card.description))).toBe(true)
   }
@@ -129,7 +131,14 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
       card,
       index: projection.table.market.findIndex((item) => item.instance_id === card.card_id),
     })).sort((a, b) => {
-      const priority = (index: number) => purchasePriority.indexOf(projection.table.market[index].catalog_id.split(':')[1])
+      const priority = (index: number) => {
+        const catalog = projection.table.market[index].catalog_id
+        const order = projection.snapshot.versions.content === 'game-two-en-v1'
+          ? gameTwoPurchasePriority[String(projection.participants.length) as keyof typeof gameTwoPurchasePriority]
+          : purchasePriority.map((id) => `hogwarts-card:${id}`)
+        const rank = order.indexOf(catalog)
+        return rank < 0 ? order.length : rank
+      }
       return priority(a.index) - priority(b.index) || b.index - a.index
     })
     const { card, index } = candidates[0]
@@ -141,50 +150,52 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
   }
 }
 
-for (const count of [2, 3, 4]) {
-  for (const outcome of ['lost', 'won'] as const) {
-    test(`Game 1 with ${count} players reaches ${outcome} through the browser and WebSocket`, async ({ browser, page }, testInfo) => {
-      test.setTimeout(240_000)
-      const host = new ObservedPlayer(page)
-      const players = await startTable(browser, host, count)
-      const commands: unknown[] = []
-      try {
-        if (count === 2 && outcome === 'lost') {
-          await page.screenshot({ path: testInfo.outputPath('game-one-mobile.png'), fullPage: true })
-          await page.setViewportSize({ width: 1440, height: 1000 })
-          await page.screenshot({ path: testInfo.outputPath('game-one-desktop.png'), fullPage: true })
-          await page.setViewportSize({ width: 393, height: 851 })
+for (const game of ['one', 'two'] as const) {
+  for (const count of [2, 3, 4]) {
+    for (const outcome of ['lost', 'won'] as const) {
+      test(`Game ${game === 'one' ? 1 : 2} with ${count} players reaches ${outcome} through the browser and WebSocket`, async ({ browser, page }, testInfo) => {
+        test.setTimeout(240_000)
+        const host = new ObservedPlayer(page)
+        const players = await startTable(browser, host, count, game)
+        const commands: unknown[] = []
+        try {
+          if (count === 2 && outcome === 'lost') {
+            await page.screenshot({ path: testInfo.outputPath(`game-${game}-mobile.png`), fullPage: true })
+            await page.setViewportSize({ width: 1440, height: 1000 })
+            await page.screenshot({ path: testInfo.outputPath(`game-${game}-desktop.png`), fullPage: true })
+            await page.setViewportSize({ width: 393, height: 851 })
+          }
+          for (let command = 0; command < 600 && host.current().game.status === 'in_progress'; command += 1) {
+            const state = host.current()
+            const position = state.choice.status === 'pending' ? state.choice.responsible_position : state.turn.active_position
+            const actor = players[position - 1]
+            await actor.reaches(state.snapshot.sequence)
+            const accepted = actor.page.waitForResponse((response) => response.url().endsWith('/api/games/current/commands') && response.request().method() === 'POST')
+            await playThroughInterface(actor, outcome === 'won')
+            const response = await accepted
+            expect(response.status()).toBe(200)
+            const request = response.request().postDataJSON() as Record<string, unknown>
+            delete request.command_id
+            commands.push(request)
+            await host.reaches(state.snapshot.sequence + 1)
+          }
+          expect(host.current().game.status).toBe(outcome)
+          for (const player of players) {
+            await player.reaches(host.current().snapshot.sequence)
+            await expect(player.page.getByRole('heading', { level: 2, name: outcome === 'won' ? 'Vitória da equipe' : 'Derrota da equipe' })).toBeVisible()
+            expect(player.current().snapshot.digest).toBe(host.current().snapshot.digest)
+            expect(player.eventBatches).toBeGreaterThan(0)
+            expect(player.errors).toEqual([])
+            await expect(player.page.getByRole('button', { name: 'Encerrar ações do Herói' })).toHaveCount(0)
+            await expect(player.page.locator('.action-dock')).toContainText('Partida encerrada')
+          }
+          const transcriptPath = testInfo.outputPath(`game-${game}-commands.json`)
+          await writeFile(transcriptPath, JSON.stringify({ players: count, seed_byte: 7, outcome, commands }, null, 2))
+          await testInfo.attach(`game-${game}-commands`, { path: transcriptPath, contentType: 'application/json' })
+        } finally {
+          await Promise.all(players.slice(1).map((player) => player.page.context().close()))
         }
-        for (let command = 0; command < 600 && host.current().game.status === 'in_progress'; command += 1) {
-          const state = host.current()
-          const position = state.choice.status === 'pending' ? state.choice.responsible_position : state.turn.active_position
-          const actor = players[position - 1]
-          await actor.reaches(state.snapshot.sequence)
-          const accepted = actor.page.waitForResponse((response) => response.url().endsWith('/api/games/current/commands') && response.request().method() === 'POST')
-          await playThroughInterface(actor, outcome === 'won')
-          const response = await accepted
-          expect(response.status()).toBe(200)
-          const request = response.request().postDataJSON() as Record<string, unknown>
-          delete request.command_id
-          commands.push(request)
-          await host.reaches(state.snapshot.sequence + 1)
-        }
-        expect(host.current().game.status).toBe(outcome)
-        for (const player of players) {
-          await player.reaches(host.current().snapshot.sequence)
-          await expect(player.page.getByRole('heading', { level: 2, name: outcome === 'won' ? 'Vitória da equipe' : 'Derrota da equipe' })).toBeVisible()
-          expect(player.current().snapshot.digest).toBe(host.current().snapshot.digest)
-          expect(player.eventBatches).toBeGreaterThan(0)
-          expect(player.errors).toEqual([])
-          await expect(player.page.getByRole('button', { name: 'Encerrar ações do Herói' })).toHaveCount(0)
-          await expect(player.page.locator('.action-dock')).toContainText('Partida encerrada')
-        }
-        const transcriptPath = testInfo.outputPath('game-one-commands.json')
-        await writeFile(transcriptPath, JSON.stringify({ players: count, seed_byte: 7, outcome, commands }, null, 2))
-        await testInfo.attach('game-one-commands', { path: transcriptPath, contentType: 'application/json' })
-      } finally {
-        await Promise.all(players.slice(1).map((player) => player.page.context().close()))
-      }
-    })
+      })
+    }
   }
 }

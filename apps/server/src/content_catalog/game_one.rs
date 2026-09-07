@@ -10,9 +10,35 @@ use game_content::{ContentManifest, ProvenanceSource, SourceKind};
 /// Content and runtime tests protect this startup invariant.
 #[must_use]
 pub fn game_one_manifest() -> ContentManifest {
-    let bytes = include_bytes!("../../../../content/bundles/game-one-en-v1.json");
-    let inspected = game_content::inspect_game_one_rules(bytes)
-        .expect("the shipped Game 1 bundle must contain a valid closed AST");
+    adventure_manifest(false)
+}
+
+/// Loads the cumulative Game 2 adaptation with independently granted provenance.
+///
+/// # Panics
+/// Panics if the shipped bundle is invalid, unsupported, or incomplete.
+#[must_use]
+pub fn game_two_manifest() -> ContentManifest {
+    adventure_manifest(true)
+}
+
+fn adventure_manifest(game_two: bool) -> ContentManifest {
+    let bytes: &[u8] = if game_two {
+        include_bytes!("../../../../content/bundles/game-two-en-v1.json")
+    } else {
+        include_bytes!("../../../../content/bundles/game-one-en-v1.json")
+    };
+    let inspect = if game_two {
+        game_content::inspect_game_two_rules
+    } else {
+        game_content::inspect_game_one_rules
+    };
+    let import = if game_two {
+        game_content::import_game_two_bundle_with_runtime_rules
+    } else {
+        game_content::import_game_one_bundle_with_runtime_rules
+    };
+    let inspected = inspect(bytes).expect("shipped adventure must contain a valid closed AST");
     let rules = inspected
         .iter()
         .map(|rule| (&rule.id, rule))
@@ -21,22 +47,19 @@ pub fn game_one_manifest() -> ContentManifest {
         .iter()
         .map(|rule| super::compile_rule(rule, &rules))
         .collect::<Option<Vec<_>>>()
-        .expect("every shipped Game 1 rule must compile before receiving runtime support");
-    game_domain::ValidatedGameRules::new(compiled)
-        .expect("the compiled Game 1 rules must satisfy domain execution limits");
+        .expect("every shipped rule must compile before receiving runtime support");
+    game_domain::ValidatedGameRules::new(compiled).expect("compiled rules satisfy domain limits");
     let supported = inspected.iter().map(|rule| rule.id.clone()).collect();
-    let manifest = game_content::import_game_one_bundle_with_runtime_rules(
-        bytes,
-        &[ProvenanceSource {
-            id: "game-one-adaptation-v1".to_owned(),
-            uri: "https://github.com/kauanpolydoro/rust-game-harry-potter/blob/main/content/game-one-rules-v1.md".to_owned(),
-            kind: SourceKind::Adaptation,
-        }],
-        &supported,
-    ).expect("the shipped Game 1 content must pass the publication boundary");
+    let sources = ["one", "two"].into_iter().take(if game_two { 2 } else { 1 }).map(|game| ProvenanceSource {
+        id: format!("game-{game}-adaptation-v1"),
+        uri: format!("https://github.com/kauanpolydoro/rust-game-harry-potter/blob/main/content/game-{game}-rules-v1.md"),
+        kind: SourceKind::Adaptation,
+    }).collect::<Vec<_>>();
+    let manifest = import(bytes, &sources, &supported)
+        .expect("shipped content passes the publication boundary");
     assert!(
         manifest.playable,
-        "the shipped Game 1 manifest must close every functional gap"
+        "shipped manifest must close every functional gap"
     );
     manifest
 }
