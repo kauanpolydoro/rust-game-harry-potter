@@ -51,6 +51,7 @@ export async function startTable(browser: Browser, host: ObservedPlayer, count: 
   await host.page.getByRole('radio', { name: 'Harry', exact: true }).check()
   await host.page.getByRole('button', { name: 'Confirmar Herói' }).click()
   await host.page.getByRole('button', { name: 'Estou pronto' }).click()
+  await expect(host.page.getByRole('button', { name: 'Atualizar estado da sala', exact: true })).toBeEnabled()
   for (const hero of ['Hermione', 'Ron', 'Neville'].slice(0, count - 1)) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true })
     const player = new ObservedPlayer(await context.newPage())
@@ -63,6 +64,7 @@ export async function startTable(browser: Browser, host: ObservedPlayer, count: 
     await player.page.getByRole('radio', { name: hero, exact: true }).check()
     await player.page.getByRole('button', { name: 'Entrar na sala' }).click()
     await player.page.getByRole('button', { name: 'Estou pronto' }).click()
+    await expect(player.page.getByRole('button', { name: 'Atualizar estado da sala', exact: true })).toBeEnabled()
   }
   await host.page.getByRole('button', { name: 'Atualizar estado da sala' }).click()
   const selection = host.page.getByLabel('Aventura e conteúdo da partida')
