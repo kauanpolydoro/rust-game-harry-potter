@@ -14,21 +14,7 @@ pub(super) fn protected_health_loss(
     let Some((EffectZone::Heroes, hero)) = world.entity(hero_id) else {
         return amount;
     };
-    let harmful_source = source.rules.iter().any(|rule| {
-        rule.id == source.rule_id
-            && matches!(
-                rule.trigger,
-                EffectTrigger::DarkArts
-                    | EffectTrigger::DarkArtsCompleted
-                    | EffectTrigger::Villains
-            )
-    }) || world.entities().any(|(zone, entity)| {
-        matches!(
-            (zone, entity.kind()),
-            (EffectZone::DarkArtsDiscard, EffectEntityKind::DarkArts)
-                | (EffectZone::ActiveVillains, EffectEntityKind::Villain)
-        ) && entity.effect_rule_id() == Some(source.rule_id)
-    });
+    let harmful_source = is_harmful_rule(world, source.rule_id, source.rules);
     if !harmful_source {
         return amount;
     }
@@ -44,6 +30,24 @@ pub(super) fn protected_health_loss(
         })
         .filter_map(|rule| hand_damage_limit(&rule.effect))
         .fold(amount, |loss, maximum| loss.max(-i16::from(maximum)))
+}
+
+fn is_harmful_rule(world: &EffectWorld, rule_id: &str, rules: &[EffectRule]) -> bool {
+    rules.iter().any(|rule| {
+        rule.id == rule_id
+            && matches!(
+                rule.trigger,
+                EffectTrigger::DarkArts
+                    | EffectTrigger::DarkArtsCompleted
+                    | EffectTrigger::Villains
+            )
+    }) || world.entities().any(|(zone, entity)| {
+        matches!(
+            (zone, entity.kind()),
+            (EffectZone::DarkArtsDiscard, EffectEntityKind::DarkArts)
+                | (EffectZone::ActiveVillains, EffectEntityKind::Villain)
+        ) && entity.effect_rule_id() == Some(rule_id)
+    })
 }
 
 fn hand_damage_limit(effect: &EffectDefinition) -> Option<u8> {
@@ -64,6 +68,9 @@ impl EffectExecutor<'_> {
         let mut reactions = Vec::new();
         for outcome in &self.outcomes[outcome_start..] {
             for (zone, source) in self.world.entities() {
+                if source.villain_ability_suppressed() {
+                    continue;
+                }
                 let copied_rule = source
                     .copied_ally_id
                     .as_deref()
@@ -182,12 +189,14 @@ fn reaction_context(
             Some((active_position, after - before))
         }
         (
-            EffectReactionTrigger::HeroForcedDiscard | EffectReactionTrigger::SelfForcedDiscard,
+            EffectReactionTrigger::HeroForcedDiscard
+            | EffectReactionTrigger::SelfForcedDiscard
+            | EffectReactionTrigger::SelfHarmfulDiscard,
             EffectOutcome::Moved {
                 rule_id,
                 target_id,
                 target_position: Some(position),
-                from: EffectZone::HeroHand,
+                from: EffectZone::HeroHand | EffectZone::HeroDrawPile,
                 to: EffectZone::HeroDiscardPile,
                 ..
             },
@@ -197,7 +206,12 @@ fn reaction_context(
             && rule_id != "system:voluntary-discard")
             || (trigger == EffectReactionTrigger::SelfForcedDiscard
                 && source.id() == target_id
-                && zone == EffectZone::HeroDiscardPile) =>
+                && zone == EffectZone::HeroDiscardPile)
+            || (trigger == EffectReactionTrigger::SelfHarmfulDiscard
+                && source.id() == target_id
+                && zone == EffectZone::HeroDiscardPile
+                && rule_id != "system:voluntary-discard"
+                && (rule_id == "system:stunned" || is_harmful_rule(world, rule_id, rules))) =>
         {
             Some((*position, 1))
         }
@@ -269,6 +283,7 @@ pub(super) fn drawing_prevented(world: &EffectWorld, rules: &[EffectRule]) -> bo
     world
         .entities_in(EffectZone::ActiveVillains)
         .iter()
+        .filter(|villain| !villain.villain_ability_suppressed())
         .any(|villain| {
             rules
                 .iter()

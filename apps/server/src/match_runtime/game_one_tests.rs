@@ -40,6 +40,19 @@ pub(super) fn prepared_adventure(
     Vec<StoredRoomParticipant>,
     ValidatedGameRules,
 ) {
+    prepared_adventure_with_seed(count, manifest, adventure, 7)
+}
+
+pub(super) fn prepared_adventure_with_seed(
+    count: usize,
+    manifest: game_content::ContentManifest,
+    adventure: &str,
+    seed: u8,
+) -> (
+    game_domain::InitialGameState,
+    Vec<StoredRoomParticipant>,
+    ValidatedGameRules,
+) {
     let digest = manifest.digest.clone();
     let version = manifest.ruleset_version.clone();
     let catalog = ContentCatalog::new(vec![manifest]);
@@ -60,7 +73,7 @@ pub(super) fn prepared_adventure(
             ParticipantRole::Host,
             &domain_players,
             &rules,
-            &mut ChaChaEffectRoller::new(&[7; 32], 0).ok().expect("seed"),
+            &mut ChaChaEffectRoller::new(&[seed; 32], 0).ok().expect("seed"),
         )
         .expect("real preparation");
     (state, participants, rules)

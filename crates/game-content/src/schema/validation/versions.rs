@@ -3,6 +3,16 @@ use crate::{Effect, GameSetupOwner, ImportFailure, Operation, Zone};
 use super::CandidateBundle;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    if bundle.schema_version < 5
+        && bundle
+            .rules
+            .iter()
+            .any(|rule| requires_game_three(&rule.effect))
+    {
+        return Err(ImportFailure {
+            message: "Game 3 definitions require bundle schema version 5".to_owned(),
+        });
+    }
     if bundle.schema_version < 4
         && bundle
             .rules
@@ -41,7 +51,10 @@ pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
 
 fn requires_game_one(effect: &Effect) -> bool {
     match effect {
-        Effect::PreventExtraDrawing
+        Effect::HeroAbility { .. }
+        | Effect::RevealTopCard { .. }
+        | Effect::LimitVillainAttack { .. }
+        | Effect::PreventExtraDrawing
         | Effect::ForEachTarget { .. }
         | Effect::TopDeckAcquisition { .. }
         | Effect::CardType { .. }
@@ -76,7 +89,10 @@ fn requires_game_two(effect: &Effect) -> bool {
             .any(|entry| matches!(entry, crate::Eligibility::CardType { .. }))
     };
     match effect {
-        Effect::PreventExtraDrawing
+        Effect::HeroAbility { .. }
+        | Effect::RevealTopCard { .. }
+        | Effect::LimitVillainAttack { .. }
+        | Effect::PreventExtraDrawing
         | Effect::ForEachTarget { .. }
         | Effect::Structural {
             rule: crate::StructuralRule::GameTwoSetup,
@@ -131,6 +147,52 @@ fn new_reaction_effect(effect: &Effect) -> bool {
         | Effect::Choice {
             options: effects, ..
         } => effects.iter().any(new_reaction_effect),
+        _ => false,
+    }
+}
+
+fn requires_game_three(effect: &Effect) -> bool {
+    let other = |target: &crate::Selector| target.owner == crate::TargetOwner::Other;
+    match effect {
+        Effect::HeroAbility { .. }
+        | Effect::RevealTopCard { .. }
+        | Effect::LimitVillainAttack { .. }
+        | Effect::Structural {
+            rule: crate::StructuralRule::GameThreeSetup,
+        } => true,
+        Effect::Apply { target, operation } => {
+            other(target)
+                || matches!(
+                    operation,
+                    Operation::SuppressVillain
+                        | Operation::GainInfluenceAndHealth { .. }
+                        | Operation::DiscardForSpellBonus { .. }
+                )
+        }
+        Effect::ForEachTarget { target, effect } => other(target) || requires_game_three(effect),
+        Effect::Reaction { trigger, effect } => {
+            *trigger == crate::ReactionTrigger::SelfHarmfulDiscard || requires_game_three(effect)
+        }
+        Effect::Choice { options, .. }
+        | Effect::Roll {
+            outcomes: options, ..
+        }
+        | Effect::Sequence { effects: options } => options.iter().any(requires_game_three),
+        Effect::Condition {
+            condition,
+            then,
+            otherwise,
+        } => {
+            let new_condition = match condition {
+                crate::Condition::HasEligibleTarget { target }
+                | crate::Condition::ResourceAtLeast { target, .. } => other(target),
+                crate::Condition::DrawingAllowed => false,
+            };
+            new_condition
+                || requires_game_three(then)
+                || otherwise.as_deref().is_some_and(requires_game_three)
+        }
+        Effect::Repeat { effect, .. } => requires_game_three(effect),
         _ => false,
     }
 }

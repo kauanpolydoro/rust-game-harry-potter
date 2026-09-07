@@ -1,27 +1,30 @@
+mod game_three;
 mod versions;
 
 use game_domain::{
     DecisionPoint, EffectChangeCause, EffectContinuation, EffectCursor, EffectDie, EffectEntity,
     EffectEntityKind, EffectEntityPlacement, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
     EffectPathSegment, EffectResource, EffectStop, EffectTargetBinding, EffectWorld, EffectZone,
-    EndTurnOutcome, EngineControl, GAME_TWO_SNAPSHOT_VERSION, GameEvent, GamePhase,
-    GameStateRestoreInput, GameStatus, HERO_MAX_HEALTH, InitialGameState, InitialPlayer,
-    MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, MAX_TURN_STEPS,
-    PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect, SNAPSHOT_VERSION, TurnStep,
-    restore_game_state,
+    EndTurnOutcome, EngineControl, GAME_THREE_SNAPSHOT_VERSION, GAME_TWO_SNAPSHOT_VERSION,
+    GameEvent, GamePhase, GameStateRestoreInput, GameStatus, HERO_MAX_HEALTH, InitialGameState,
+    InitialPlayer, MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX,
+    MAX_TURN_STEPS, PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect, SNAPSHOT_VERSION,
+    TurnStep, restore_game_state,
 };
 use serde::Deserialize;
 
 const GAME_TWO_EVENT_VERSION: u16 = 7;
+const GAME_THREE_EVENT_VERSION: u16 = 8;
 
 use super::{
     GAME_EVENT_VERSION, HERO_ACTION_EVENT_VERSION, PersistedDecisionPoint, PersistedEffectChoice,
     PersistedEffectContinuation, PersistedEffectCursor, PersistedEffectEntity,
     PersistedEffectOutcome, PersistedEffectPathSegment, PersistedEffectTargetBinding,
-    PersistedEffects, PersistedEndTurnOutcome, PersistedEngineControl, PersistedEventChoice,
-    PersistedGameEvent, PersistedLegacyEffectChoice, PersistedPlayer, PersistedPrng,
-    PersistedQueuedEffect, PersistedSnapshot, PersistedTurn, PersistedTurnStep, PersistedVersions,
-    StoredCommandGame, StoredGame, StoredRoomParticipant, TERMINAL_EVENT_VERSION, hero_id,
+    PersistedEffectTurnState, PersistedEffects, PersistedEndTurnOutcome, PersistedEngineControl,
+    PersistedEventChoice, PersistedGameEvent, PersistedLegacyEffectChoice, PersistedPlayer,
+    PersistedPrng, PersistedQueuedEffect, PersistedSnapshot, PersistedTurn, PersistedTurnStep,
+    PersistedVersions, StoredCommandGame, StoredGame, StoredRoomParticipant,
+    TERMINAL_EVENT_VERSION, hero_id,
 };
 use crate::http_support::ApiError;
 
@@ -217,10 +220,13 @@ pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSna
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     if !matches!(
         snapshot.snapshot_version,
-        1 | 2 | 3 | 4 | SNAPSHOT_VERSION | GAME_TWO_SNAPSHOT_VERSION
+        1 | 2 | 3 | 4 | SNAPSHOT_VERSION | GAME_TWO_SNAPSHOT_VERSION | GAME_THREE_SNAPSHOT_VERSION
     ) || (snapshot.snapshot_version == 1 && snapshot.effects.choice.is_some())
     {
         return Err(ApiError::internal());
+    }
+    if snapshot.snapshot_version < GAME_THREE_SNAPSHOT_VERSION {
+        versions::reject_game_three_fields(serialized)?;
     }
     if snapshot.snapshot_version < GAME_TWO_SNAPSHOT_VERSION {
         versions::reject_game_two_fields(serialized)?;
@@ -245,18 +251,23 @@ pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEv
             HERO_ACTION_EVENT_VERSION
             | TERMINAL_EVENT_VERSION
             | GAME_EVENT_VERSION
-            | GAME_TWO_EVENT_VERSION,
+            | GAME_TWO_EVENT_VERSION
+            | GAME_THREE_EVENT_VERSION,
             "turn_completed",
         ) => decode_v4_turn_event(serialized)?,
         (
             HERO_ACTION_EVENT_VERSION
             | TERMINAL_EVENT_VERSION
             | GAME_EVENT_VERSION
-            | GAME_TWO_EVENT_VERSION,
+            | GAME_TWO_EVENT_VERSION
+            | GAME_THREE_EVENT_VERSION,
             "choice_resolved",
         ) => decode_v4_choice_event(serialized)?,
         (
-            TERMINAL_EVENT_VERSION | GAME_EVENT_VERSION | GAME_TWO_EVENT_VERSION,
+            TERMINAL_EVENT_VERSION
+            | GAME_EVENT_VERSION
+            | GAME_TWO_EVENT_VERSION
+            | GAME_THREE_EVENT_VERSION,
             "dark_arts_completed",
         ) => serde_json::from_str(serialized)
             .map_err(|error| ApiError::internal_with("match application operation", error))?,
@@ -265,12 +276,16 @@ pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEv
             | HERO_ACTION_EVENT_VERSION
             | TERMINAL_EVENT_VERSION
             | GAME_EVENT_VERSION
-            | GAME_TWO_EVENT_VERSION,
+            | GAME_TWO_EVENT_VERSION
+            | GAME_THREE_EVENT_VERSION,
             "card_played" | "attack_assigned" | "card_acquired",
         ) => serde_json::from_str(serialized)
             .map_err(|error| ApiError::internal_with("match application operation", error))?,
         _ => return Err(ApiError::internal()),
     };
+    if header.event_version < GAME_THREE_EVENT_VERSION {
+        versions::reject_game_three_fields(serialized)?;
+    }
     if header.event_version < GAME_TWO_EVENT_VERSION {
         versions::reject_game_two_fields(serialized)?;
     }
@@ -646,14 +661,18 @@ fn validate_persisted_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiEr
         }
         2 => !has_structured_control && snapshot.active_villain_limit.is_none(),
         3 => has_structured_control && snapshot.active_villain_limit.is_none(),
-        4 | SNAPSHOT_VERSION | GAME_TWO_SNAPSHOT_VERSION => {
+        4 | SNAPSHOT_VERSION | GAME_TWO_SNAPSHOT_VERSION | GAME_THREE_SNAPSHOT_VERSION => {
             has_structured_control && snapshot.active_villain_limit.is_some()
         }
         _ => false,
     };
+    let game_three_manifest = snapshot.versions.manifest == 6;
+    let game_three_codec = snapshot.snapshot_version == GAME_THREE_SNAPSHOT_VERSION;
     let game_two_manifest = snapshot.versions.manifest == 5;
     let game_two_codec = snapshot.snapshot_version == GAME_TWO_SNAPSHOT_VERSION;
     if !version_shape_is_valid
+        || game_three_manifest != game_three_codec
+        || (game_three_codec && snapshot.adventure_id != "adventure:003")
         || game_two_manifest != game_two_codec
         || (game_two_codec && snapshot.adventure_id != "adventure:002")
     {
@@ -806,7 +825,11 @@ fn validate_persisted_effects(effects: &PersistedEffects, require_address: bool)
 }
 
 fn valid_effect_entity(entity: &PersistedEffectEntity, bounded_identifiers: bool) -> bool {
-    valid_identifier_for_version(&entity.id, bounded_identifiers)
+    entity
+        .turn_state
+        .as_ref()
+        .is_none_or(game_three::valid_turn_state)
+        && valid_identifier_for_version(&entity.id, bounded_identifiers)
         && entity
             .drawing_blocked
             .is_none_or(|blocked| blocked && entity.kind.as_deref() == Some("hero"))
@@ -941,6 +964,8 @@ fn valid_effect_cursor(
                 }
                 PersistedEffectPathSegment::ConditionThen
                 | PersistedEffectPathSegment::ConditionOtherwise
+                | PersistedEffectPathSegment::HeroAbilityEffect
+                | PersistedEffectPathSegment::RevealedCardEffect
                 | PersistedEffectPathSegment::ReactionEffect
                 | PersistedEffectPathSegment::RepeatEffect => true,
             }))
@@ -960,6 +985,10 @@ fn valid_decision_point(decision: &PersistedDecisionPoint, require_address: bool
 
 fn valid_effect_outcome(outcome: &PersistedEffectOutcome, bounded_identifiers: bool) -> bool {
     match outcome {
+        PersistedEffectOutcome::TurnStateChanged { .. }
+        | PersistedEffectOutcome::TopCardRevealed { .. } => {
+            game_three::valid_outcome(outcome, bounded_identifiers)
+        }
         PersistedEffectOutcome::AllyCopied {
             rule_id,
             card_id,
@@ -1104,15 +1133,16 @@ fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> 
                 valid_v4_event(event)
             }
         }
-        TERMINAL_EVENT_VERSION | GAME_EVENT_VERSION | GAME_TWO_EVENT_VERSION => {
-            match event.event_type.as_str() {
-                "dark_arts_completed" => valid_closed_effect_event(event, true),
-                "card_played" | "attack_assigned" | "card_acquired" => {
-                    valid_hero_action_event(event, true)
-                }
-                _ => valid_v4_event(event),
+        TERMINAL_EVENT_VERSION
+        | GAME_EVENT_VERSION
+        | GAME_TWO_EVENT_VERSION
+        | GAME_THREE_EVENT_VERSION => match event.event_type.as_str() {
+            "dark_arts_completed" => valid_closed_effect_event(event, true),
+            "card_played" | "attack_assigned" | "card_acquired" => {
+                valid_hero_action_event(event, true)
             }
-        }
+            _ => valid_v4_event(event),
+        },
         _ => false,
     };
     if !valid {
@@ -1761,6 +1791,12 @@ pub(super) fn persisted_game_two_event(
     encode_event(event, GAME_TWO_EVENT_VERSION)
 }
 
+pub(super) fn persisted_game_three_event(
+    event: GameEvent,
+) -> Result<(u16, &'static str, String), ApiError> {
+    encode_event(event, GAME_THREE_EVENT_VERSION)
+}
+
 fn encode_event(event: GameEvent, version: u16) -> Result<(u16, &'static str, String), ApiError> {
     let mut persisted = if matches!(
         &event,
@@ -2313,22 +2349,26 @@ const fn game_status_name(status: GameStatus) -> &'static str {
     }
 }
 
+fn legacy_hero_world(players: &[InitialPlayer]) -> EffectWorld {
+    EffectWorld::new(
+        players
+            .iter()
+            .map(|player| {
+                EffectEntityPlacement::new(
+                    EffectEntity::hero(player.position()),
+                    EffectZone::Heroes,
+                )
+            })
+            .collect(),
+    )
+}
+
 fn domain_effect_world(
     persisted: &PersistedEffects,
     players: &[InitialPlayer],
 ) -> Result<EffectWorld, ApiError> {
     if persisted.entities.is_empty() {
-        return Ok(EffectWorld::new(
-            players
-                .iter()
-                .map(|player| {
-                    EffectEntityPlacement::new(
-                        EffectEntity::hero(player.position()),
-                        EffectZone::Heroes,
-                    )
-                })
-                .collect(),
-        ));
+        return Ok(legacy_hero_world(players));
     }
 
     let mut entities = persisted.entities.iter().enumerate().collect::<Vec<_>>();
@@ -2389,8 +2429,10 @@ fn domain_effect_world(
                         .ok_or_else(ApiError::internal)?,
                 ),
             };
-            domain = domain.with_copied_ally_id(entity.copied_ally_id.clone());
-            domain = domain.with_drawing_blocked(entity.drawing_blocked.unwrap_or(false));
+            domain = domain
+                .with_turn_state(entity.turn_state.as_ref().map(Into::into))
+                .with_copied_ally_id(entity.copied_ally_id.clone())
+                .with_drawing_blocked(entity.drawing_blocked.unwrap_or(false));
             if kind == EffectEntityKind::Villain
                 && let Some(maximum) = resource_limits.get(&EffectResource::Health)
             {
@@ -2422,6 +2464,8 @@ fn domain_effect_world(
 
 fn domain_effect_outcome(outcome: &PersistedEffectOutcome) -> Result<EffectOutcome, ApiError> {
     Ok(match outcome {
+        PersistedEffectOutcome::TurnStateChanged { .. }
+        | PersistedEffectOutcome::TopCardRevealed { .. } => game_three::domain_outcome(outcome)?,
         PersistedEffectOutcome::AllyCopied {
             rule_id,
             card_id,
@@ -2560,6 +2604,12 @@ fn domain_effect_cursor(cursor: &PersistedEffectCursor) -> EffectCursor {
                     EffectPathSegment::ConditionOtherwise
                 }
                 PersistedEffectPathSegment::RepeatEffect => EffectPathSegment::RepeatEffect,
+                PersistedEffectPathSegment::HeroAbilityEffect => {
+                    EffectPathSegment::HeroAbilityEffect
+                }
+                PersistedEffectPathSegment::RevealedCardEffect => {
+                    EffectPathSegment::RevealedCardEffect
+                }
                 PersistedEffectPathSegment::ReactionEffect => EffectPathSegment::ReactionEffect,
                 PersistedEffectPathSegment::RollOutcome { index } => {
                     EffectPathSegment::RollOutcome(*index)
@@ -2618,6 +2668,7 @@ fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
             let zone_index = *next_index;
             *next_index = next_index.saturating_add(1);
             PersistedEffectEntity {
+                turn_state: entity.turn_state().map(Into::into),
                 copied_ally_id: entity.copied_ally_id().map(str::to_owned),
                 drawing_blocked: entity.drawing_blocked().then_some(true),
                 id: entity.id().to_owned(),
@@ -2657,6 +2708,9 @@ fn persisted_effects(state: &InitialGameState) -> PersistedEffects {
 
 pub(super) fn persisted_effect_outcome(outcome: &EffectOutcome) -> PersistedEffectOutcome {
     match outcome {
+        EffectOutcome::TurnStateChanged { .. } | EffectOutcome::TopCardRevealed { .. } => {
+            game_three::persisted_outcome(outcome)
+        }
         EffectOutcome::AllyCopied {
             rule_id,
             card_id,
@@ -2795,6 +2849,12 @@ fn persisted_effect_cursor(cursor: &EffectCursor) -> PersistedEffectCursor {
                     PersistedEffectPathSegment::ConditionOtherwise
                 }
                 EffectPathSegment::RepeatEffect => PersistedEffectPathSegment::RepeatEffect,
+                EffectPathSegment::HeroAbilityEffect => {
+                    PersistedEffectPathSegment::HeroAbilityEffect
+                }
+                EffectPathSegment::RevealedCardEffect => {
+                    PersistedEffectPathSegment::RevealedCardEffect
+                }
                 EffectPathSegment::ReactionEffect => PersistedEffectPathSegment::ReactionEffect,
                 EffectPathSegment::RollOutcome(index) => {
                     PersistedEffectPathSegment::RollOutcome { index: *index }
@@ -3640,6 +3700,7 @@ mod tests {
 
     fn legacy_entity_with_metadata() -> PersistedEffectEntity {
         PersistedEffectEntity {
+            turn_state: None,
             copied_ally_id: None,
             catalog_id: Some("card:legacy".to_owned()),
             effect_rule_id: Some("rule:legacy".to_owned()),
@@ -3664,6 +3725,7 @@ mod tests {
 
     fn legacy_entity(id: &str, owner_position: Option<u8>, zone: &str) -> PersistedEffectEntity {
         PersistedEffectEntity {
+            turn_state: None,
             copied_ally_id: None,
             id: id.to_owned(),
             kind: None,
@@ -3687,6 +3749,7 @@ mod tests {
         influence_cost: u16,
     ) -> PersistedEffectEntity {
         PersistedEffectEntity {
+            turn_state: None,
             copied_ally_id: None,
             id: id.to_owned(),
             kind: Some("hogwarts_card".to_owned()),

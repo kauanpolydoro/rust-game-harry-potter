@@ -59,6 +59,17 @@ pub struct ResourceCost {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    HeroAbility {
+        strategy: HeroAbilityStrategy,
+        effect: Box<Self>,
+    },
+    RevealTopCard {
+        minimum_cost: u16,
+        effect: Box<Self>,
+    },
+    LimitVillainAttack {
+        maximum: u8,
+    },
     PreventExtraDrawing,
     ForEachTarget {
         target: Selector,
@@ -119,6 +130,7 @@ pub enum Effect {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReactionTrigger {
+    SelfHarmfulDiscard,
     OwnerPlaysAlly,
     ControlAdded,
     HeroForcedDiscard,
@@ -147,9 +159,20 @@ pub enum EffectChoiceAudience {
 pub enum StructuralRule {
     GameOneSetup,
     GameTwoSetup,
+    GameThreeSetup,
     GameOnePrecedence,
     NoHeroAbility,
     NoLocationEffect,
+}
+
+/// Closed Rust strategies for the four printed Game 3 abilities.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HeroAbilityStrategy {
+    HarryGameThreeV1,
+    HermioneGameThreeV1,
+    NevilleGameThreeV1,
+    RonGameThreeV1,
 }
 
 impl EffectChoiceAudience {
@@ -201,6 +224,7 @@ pub struct Cardinality {
 #[serde(rename_all = "snake_case")]
 pub enum TargetOwner {
     Actor,
+    Other,
     #[default]
     Any,
 }
@@ -235,6 +259,9 @@ pub enum Zone {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    SuppressVillain,
+    GainInfluenceAndHealth { influence: u8, health: u8 },
+    DiscardForSpellBonus { influence: u8 },
     DiscardVoluntarily,
     CopyPlayedAlly,
     GainAttackPerAllyPlayed { amount: u8 },

@@ -41,6 +41,11 @@ fn game_two_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
     replay_adventure("two");
 }
 
+#[test]
+fn game_three_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
+    replay_adventure("three");
+}
+
 fn replay_adventure(game: &str) {
     let update = std::env::var_os(format!("UPDATE_GAME_{}_GOLDENS", game.to_uppercase())).is_some();
     for count in [2, 3, 4] {
@@ -74,23 +79,31 @@ type EventEncoder = fn(
 ) -> Result<(u16, &'static str, String), crate::http_support::ApiError>;
 
 fn event_encoder(game: &str) -> EventEncoder {
-    if game == "two" {
-        codec::persisted_game_two_event
-    } else {
-        codec::persisted_event
+    match game {
+        "three" => codec::persisted_game_three_event,
+        "two" => codec::persisted_game_two_event,
+        _ => codec::persisted_event,
+    }
+}
+
+fn prepare_scenario(
+    count: usize,
+    game: &str,
+) -> (
+    InitialGameState,
+    Vec<super::super::StoredRoomParticipant>,
+    ValidatedGameRules,
+) {
+    match game {
+        "one" => prepared_game(count),
+        "two" => prepared_adventure(count, crate::game_two_manifest(), "adventure:002"),
+        "three" => prepared_adventure(count, crate::game_three_manifest(), "adventure:003"),
+        _ => panic!("unknown adventure"),
     }
 }
 
 fn replay_scenario(scenario: &mut Scenario, update: bool, game: &str) {
-    let (mut state, participants, rules) = if game == "one" {
-        prepared_game(scenario.players)
-    } else {
-        prepared_adventure(
-            scenario.players,
-            crate::game_two_manifest(),
-            "adventure:002",
-        )
-    };
+    let (mut state, participants, rules) = prepare_scenario(scenario.players, game);
     let mut persisted = codec::persisted_snapshot(&state, &participants);
     let opening = serde_json::to_string(&persisted).expect("opening");
     check_digest(

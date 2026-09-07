@@ -6,13 +6,16 @@ pub(super) fn validate_setup(
     bundle: &CandidateBundle,
     inventory: super::super::Inventory,
 ) -> Result<(), ImportFailure> {
+    let game_three = matches!(inventory, super::super::Inventory::GameThree);
     let game_two = matches!(inventory, super::super::Inventory::GameTwo);
     let Some(setup) = bundle.game_setups.first() else {
         return Ok(());
     };
     if bundle.game_setups.len() != 1
         || setup.adventure_id.as_str()
-            != if game_two {
+            != if game_three {
+                "adventure:003"
+            } else if game_two {
                 "adventure:002"
             } else {
                 "adventure:001"
@@ -39,7 +42,9 @@ pub(super) fn validate_setup(
         .map(|entity| entity.catalog_id.as_str())
         .collect::<Vec<_>>();
     if locations
-        != if game_two {
+        != if game_three {
+            vec!["location:007", "location:008"]
+        } else if game_two {
             vec!["location:004", "location:005"]
         } else {
             vec!["location:002"]
@@ -51,9 +56,13 @@ pub(super) fn validate_setup(
     }
     let mut expected_entities = 0;
     for entry in &bundle.entries {
-        let Some((zone, owner, copies)) =
-            placement(entry.kind, entry.id.as_str(), entry.copies, game_two)
-        else {
+        let Some((zone, owner, copies)) = placement(
+            entry.kind,
+            entry.id.as_str(),
+            entry.copies,
+            game_two,
+            game_three,
+        ) else {
             continue;
         };
         expected_entities += 1;
@@ -83,6 +92,7 @@ fn placement(
     id: &str,
     copies: u16,
     game_two: bool,
+    game_three: bool,
 ) -> Option<(Zone, GameSetupOwner, u16)> {
     match kind {
         EntryKind::HogwartsCard => Some((Zone::HogwartsDeck, GameSetupOwner::None, copies)),
@@ -90,7 +100,9 @@ fn placement(
         EntryKind::Villain => Some((Zone::VillainDeck, GameSetupOwner::None, copies)),
         EntryKind::Location => Some((
             if id
-                == if game_two {
+                == if game_three {
+                    "location:006"
+                } else if game_two {
                     "location:003"
                 } else {
                     "location:001"
@@ -101,6 +113,17 @@ fn placement(
                 Zone::LocationDeck
             },
             GameSetupOwner::None,
+            1,
+        )),
+        EntryKind::Hero if game_three => Some((
+            Zone::Heroes,
+            match id {
+                "hero:002" => GameSetupOwner::Harry,
+                "hero:005" => GameSetupOwner::Hermione,
+                "hero:008" => GameSetupOwner::Neville,
+                "hero:011" => GameSetupOwner::Ron,
+                _ => return None,
+            },
             1,
         )),
         EntryKind::StarterCard => Some((

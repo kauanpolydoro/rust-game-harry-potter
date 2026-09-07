@@ -1,3 +1,5 @@
+mod game_three;
+
 use game_domain::{
     EffectChangeCause, EffectDie, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
     EffectResource, EffectZone, GameEngine, GameStatus, InitialGameState, LegalGameIntentions,
@@ -581,7 +583,7 @@ fn table_summary(
             .count()
     };
 
-    Ok(TableSummary {
+    let mut table = TableSummary {
         revealed_dark_arts: state
             .effect_world()
             .entities_in(EffectZone::DarkArtsDiscard)
@@ -614,7 +616,9 @@ fn table_summary(
             .effect_world()
             .entities_in(EffectZone::VillainDiscard)
             .len(),
-    })
+    };
+    game_three::describe_table(&mut table, state, content, manifest_digest);
+    Ok(table)
 }
 
 fn villain_summary(
@@ -804,7 +808,9 @@ fn choice_summary(
 
 fn effect_outcome_summary(outcome: &EffectOutcome) -> Option<EffectOutcomeSummary> {
     Some(match outcome {
-        EffectOutcome::AllyCopied { .. } => return None,
+        EffectOutcome::AllyCopied { .. }
+        | EffectOutcome::TurnStateChanged { .. }
+        | EffectOutcome::TopCardRevealed { .. } => return None,
         EffectOutcome::DrawingBlocked {
             rule_id,
             target_id,

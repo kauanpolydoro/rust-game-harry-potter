@@ -1225,14 +1225,25 @@ fn realtime_event(
     }
     // Copy links belong to canonical persistence. Public v6 already expresses
     // targets, copied effects, choices and the resulting projected table.
-    if payload.event_version == 7 {
-        payload
-            .effects
-            .retain(|effect| !matches!(effect, PersistedEffectOutcome::AllyCopied { .. }));
+    if matches!(payload.event_version, 7 | 8) {
+        payload.effects.retain(|effect| {
+            !matches!(
+                effect,
+                PersistedEffectOutcome::AllyCopied { .. }
+                    | PersistedEffectOutcome::TurnStateChanged { .. }
+                    | PersistedEffectOutcome::TopCardRevealed { .. }
+            )
+        });
         if let Some(steps) = &mut payload.steps {
             for step in steps {
-                step.effects
-                    .retain(|effect| !matches!(effect, PersistedEffectOutcome::AllyCopied { .. }));
+                step.effects.retain(|effect| {
+                    !matches!(
+                        effect,
+                        PersistedEffectOutcome::AllyCopied { .. }
+                            | PersistedEffectOutcome::TurnStateChanged { .. }
+                            | PersistedEffectOutcome::TopCardRevealed { .. }
+                    )
+                });
             }
         }
     }
@@ -1242,17 +1253,21 @@ fn realtime_event(
     match (payload.event_version, payload.event_type.as_str()) {
         (1..=3, "dark_arts_completed")
         | (3, "choice_resolved")
-        | (3..=7, "card_played" | "attack_assigned" | "card_acquired") => {
+        | (3..=8, "card_played" | "attack_assigned" | "card_acquired") => {
             realtime_legacy_event(stored, payload, command_id)
         }
-        (4..=7, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
-        (4..=7, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
+        (4..=8, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
+        (4..=8, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
         _ => Err(ApiError::internal()),
     }
 }
 
 const fn public_event_version(persisted: i16) -> i16 {
-    if persisted == 7 { 6 } else { persisted }
+    if matches!(persisted, 7 | 8) {
+        6
+    } else {
+        persisted
+    }
 }
 
 fn realtime_legacy_event(
@@ -1507,9 +1522,9 @@ fn realtime_event_type(
     match (payload.event_version, stored_event_type) {
         (1..=3, "dark_arts_completed") => Ok("dark_arts_completed"),
         (3, "choice_resolved") => Ok("choice_resolved"),
-        (3..=7, "card_played") => Ok("card_played"),
-        (3..=7, "attack_assigned") => Ok("attack_assigned"),
-        (3..=7, "card_acquired") => Ok("card_acquired"),
+        (3..=8, "card_played") => Ok("card_played"),
+        (3..=8, "attack_assigned") => Ok("attack_assigned"),
+        (3..=8, "card_acquired") => Ok("card_acquired"),
         _ => Err(ApiError::internal()),
     }
 }

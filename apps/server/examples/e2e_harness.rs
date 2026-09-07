@@ -221,6 +221,7 @@ async fn main() {
             executable_fixture_manifest(),
             harry_potter_server::game_one_manifest(),
             harry_potter_server::game_two_manifest(),
+            harry_potter_server::game_three_manifest(),
         ],
     )
     .with_game_seed_source(|| Ok([7; 32]))

@@ -5,6 +5,18 @@ use game_domain::{
 
 pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String> {
     Some(match effect {
+        EffectDefinition::HeroAbility { strategy, effect } => {
+            let condition = match strategy {
+                game_domain::HeroAbilityStrategy::HarryGameThreeV1 => "Uma vez por turno, quando Controle for removido de um Local",
+                game_domain::HeroAbilityStrategy::HermioneGameThreeV1 => "Uma vez no seu turno, após jogar quatro Feitiços",
+                game_domain::HeroAbilityStrategy::NevilleGameThreeV1 => "No seu turno, a primeira vez que cada Herói recuperar Vida",
+                game_domain::HeroAbilityStrategy::RonGameThreeV1 => "Uma vez no seu turno, após atribuir ao menos três de Ataque a Vilões",
+            };
+            let recipient = if *strategy == game_domain::HeroAbilityStrategy::NevilleGameThreeV1 { "Esse Herói" } else { actor };
+            format!("{condition}: {}", describe(effect, recipient)?)
+        },
+        EffectDefinition::RevealTopCard { minimum_cost, effect } => format!("{actor} revela o topo do próprio baralho. Se custar {minimum_cost} ou mais, descarta essa carta e resolve: {}", describe(effect, actor)?),
+        EffectDefinition::LimitVillainAttack { maximum } => format!("Neste turno, cada Vilão pode receber no máximo {maximum} de Ataque no total."),
         EffectDefinition::PreventExtraDrawing => "Enquanto este Vilão estiver ativo, os Heróis não podem comprar cartas extras. A reposição da mão no fim do turno continua permitida.".to_owned(),
         EffectDefinition::ForEachTarget { target, effect } => if target.zone == EffectZone::Heroes && target.owner == EffectTargetOwner::Actor {
             describe(effect, actor)?
@@ -26,7 +38,7 @@ pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String>
         EffectDefinition::Choice { options, .. } => {
             let options = options
                 .iter()
-                .map(|option| describe(option, actor))
+                .map(|option| describe(option, actor).map(|text| if text.is_empty() { "Não realizar esta ação.".to_owned() } else { text }))
                 .collect::<Option<Vec<_>>>()?;
             format!("Escolha uma opção: {}", options.join(" Ou: "))
         }
@@ -50,6 +62,7 @@ pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String>
                     "Quando um Herói descartar uma carta por um efeito",
                     "Esse Herói",
                 ),
+                EffectReactionTrigger::SelfHarmfulDiscard => ("Ao descartar esta carta por Artes das Trevas, Vilão ou Atordoamento", "Você"),
                 EffectReactionTrigger::SelfForcedDiscard => {
                     ("Ao descartar esta carta por um efeito", "Você")
                 }
@@ -106,6 +119,8 @@ pub(super) fn at_path<'a>(
                 },
                 Path::ConditionOtherwise,
             )
+            | (EffectDefinition::HeroAbility { effect, .. }, Path::HeroAbilityEffect)
+            | (EffectDefinition::RevealTopCard { effect, .. }, Path::RevealedCardEffect)
             | (EffectDefinition::Reaction { effect, .. }, Path::ReactionEffect)
             | (
                 EffectDefinition::ForEachTarget { effect, .. }
@@ -128,7 +143,11 @@ fn describe_operation(
         EffectZone::Heroes if target.owner == EffectTargetOwner::Any && target.max == 1 => {
             "Um Herói à sua escolha"
         }
+        EffectZone::Heroes if target.owner == EffectTargetOwner::Any && target.max < 4 => {
+            "Dois Heróis distintos à sua escolha"
+        }
         EffectZone::Heroes if target.owner == EffectTargetOwner::Any => "Cada Herói",
+        EffectZone::Heroes if target.owner == EffectTargetOwner::Other => "Cada outro Herói",
         EffectZone::ActiveVillains => "Cada Vilão ativo",
         EffectZone::Heroes
         | EffectZone::HeroHand
@@ -137,6 +156,9 @@ fn describe_operation(
         _ => return None,
     };
     Some(match operation {
+        EffectOperation::SuppressVillain => "Escolha um Vilão ativo. Ignore sua habilidade até o início do seu próximo turno; a recompensa de derrota continua valendo.".to_owned(),
+        EffectOperation::GainInfluenceAndHealth { influence, health } => format!("{subject} recebe {influence} de Influência e {health} de Vida."),
+        EffectOperation::DiscardForSpellBonus { influence } => format!("{subject} descarta uma carta da mão. Se for um Feitiço, recebe {influence} de Influência."),
         EffectOperation::CopyPlayedAlly => {
             "Escolha um Aliado que você jogou neste turno e copie seus efeitos.".to_owned()
         }

@@ -75,3 +75,31 @@ pub(super) fn reject_game_two_fields(serialized: &str) -> Result<(), ApiError> {
         Ok(())
     }
 }
+
+pub(super) fn reject_game_three_fields(serialized: &str) -> Result<(), ApiError> {
+    fn contains(value: &Value) -> bool {
+        match value {
+            Value::Array(items) => items.iter().any(contains),
+            Value::Object(fields) => {
+                fields.contains_key("turn_state")
+                    || matches!(
+                        fields.get("type").and_then(Value::as_str),
+                        Some(
+                            "turn_state_changed"
+                                | "top_card_revealed"
+                                | "hero_ability_effect"
+                                | "revealed_card_effect"
+                        )
+                    )
+                    || fields.values().any(contains)
+            }
+            _ => false,
+        }
+    }
+    let value: Value = serde_json::from_str(serialized).map_err(|_| ApiError::internal())?;
+    if contains(&value) {
+        Err(ApiError::internal())
+    } else {
+        Ok(())
+    }
+}
