@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:18.6-alpine3.24
         env:
           POSTGRES_DB: hogwarts_test
           POSTGRES_PASSWORD: local-development-only
@@ -36,7 +36,7 @@ jobs:
         with:
           cache: npm
           node-version: 24.18.0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.98.0
           components: clippy,rustfmt
@@ -52,5 +52,6 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium
+      - run: cargo build --release -p harry-potter-server --example e2e_harness
       - run: npm run test:e2e
       - run: node scripts/scan-secrets.mjs

@@ -2,7 +2,6 @@ use std::{env, error::Error, io, net::SocketAddr, time::Duration};
 
 use harry_potter_server::{AppState, build_router, initialize};
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
 
 const INITIALIZATION_RETRY_DELAY: Duration = Duration::from_secs(2);
 
@@ -71,9 +70,8 @@ fn session_token_key() -> Result<[u8; 32], Box<dyn Error>> {
 }
 
 fn initialize_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt()
-        .with_env_filter(filter)
+        .with_env_filter("harry_potter_server=info")
         .json()
         .init();
 }
@@ -85,8 +83,8 @@ async fn initialize_until_ready(state: AppState) {
                 tracing::info!("startup initialization completed");
                 return;
             }
-            Err(error) => {
-                tracing::warn!(error = %error, "startup initialization failed; retrying");
+            Err(_error) => {
+                tracing::warn!("startup initialization failed; retrying");
                 tokio::time::sleep(INITIALIZATION_RETRY_DELAY).await;
             }
         }

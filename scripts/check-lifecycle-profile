@@ -5,9 +5,8 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
 docker compose up -d --wait postgres
-npm ci
 
-test_database="hogwarts_check_${RANDOM}_$$"
+test_database="hogwarts_lifecycle_profile_${RANDOM}_$$"
 cleanup_database() {
   docker compose exec -T postgres dropdb --if-exists --force --username hogwarts "$test_database" >/dev/null 2>&1 || true
 }
@@ -16,15 +15,11 @@ trap cleanup_database EXIT INT TERM
 docker compose exec -T postgres createdb --username hogwarts "$test_database"
 export TEST_DATABASE_URL="postgres://hogwarts:local-development-only@127.0.0.1:55432/$test_database"
 
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
-node scripts/check-boundaries.mjs
-npm run generate:check
-npm run lint
-npm run typecheck
-npm test
-npm run build
-cargo build --release -p harry-potter-server --example e2e_harness
-env -u NO_COLOR npm run test:e2e
-node scripts/scan-secrets.mjs
+cargo test \
+  -p harry-potter-server \
+  --test start_game_http \
+  lifecycle::lifecycle_profile_measures_detection_and_purge_for_one_hundred_games \
+  -- \
+  --exact \
+  --ignored \
+  --nocapture

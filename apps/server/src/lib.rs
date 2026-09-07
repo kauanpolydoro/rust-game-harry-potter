@@ -10,7 +10,7 @@ use std::{error::Error, fmt, fmt::Write as _};
 
 use axum::{
     Json, Router,
-    extract::{Request, State},
+    extract::{MatchedPath, Request, State},
     http::{HeaderValue, StatusCode},
     middleware::{self, Next},
     response::Response,
@@ -29,6 +29,7 @@ mod current_session;
 mod game_expiration;
 mod http_support;
 mod identity_access;
+pub mod lifecycle;
 mod match_runtime;
 mod session;
 mod session_events;
@@ -280,8 +281,8 @@ impl AppState {
                                     tracing::warn!("ignored malformed session revocation notification");
                                 }
                             }
-                            Err(error) => {
-                                tracing::warn!(error = %error, "session revocation listener failed");
+                            Err(_error) => {
+                                tracing::warn!("session revocation listener failed");
                                 tokio::time::sleep(Duration::from_secs(1)).await;
                             }
                         }
@@ -308,8 +309,8 @@ impl AppState {
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            if let Err(error) = game_expiration::expire_due_games(&database).await {
-                                tracing::warn!(%error, "game expiration scan failed");
+                            if let Err(_error) = game_expiration::expire_due_games(&database).await {
+                                tracing::warn!("game expiration scan failed");
                             }
                         }
                         changed = shutdown.changed() => {
@@ -458,13 +459,15 @@ pub fn build_router(state: AppState) -> Router {
 
 async fn correlate_request(request: Request, next: Next) -> Response {
     let correlation_id = Uuid::new_v4();
-    let method = request.method().clone();
-    let path = request.uri().path().to_owned();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or("unmatched", MatchedPath::as_str)
+        .to_owned();
     let span = tracing::info_span!(
         "http_request",
         correlation_id = %correlation_id,
-        %method,
-        %path
+        %route
     );
     REQUEST_CORRELATION_ID
         .scope(correlation_id, async move {

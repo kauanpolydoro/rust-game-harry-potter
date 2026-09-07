@@ -94,7 +94,9 @@ A migration `0020_game_expiration.sql` registra a expiração de acesso de forma
 Cada instância verifica até 100 candidatas por segundo com `SKIP LOCKED`, e a decisão final sempre consulta `clock_timestamp()` depois do lock.
 A autenticação também aplica esse gate sob demanda.
 O processamento é idempotente, notifica as outras instâncias após o commit e não modifica o histórico oficial.
-Purge, ledger de Tombstones e política de backup pertencem aos tickets posteriores de ciclo de vida.
+O worker de purge remove os dados operacionais depois desse gate e mantém a prova opaca fora do banco.
+A operação, o inventário de armazenamento e os SLOs estão descritos em [Ciclo de vida](ops/lifecycle.md).
+A reconciliação de restore e a política de backups pertencem à próxima fatia de operação.
 
 HTTP responde `GAME_EXPIRED` sem projeção privada e apaga o cookie da Sessão.
 Recuperação preserva o erro genérico `RECOVERY_FAILED`.

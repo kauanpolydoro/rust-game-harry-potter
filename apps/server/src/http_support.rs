@@ -522,8 +522,8 @@ impl ApiError {
         )
     }
 
-    pub(crate) fn internal_with(operation: &'static str, error: impl Display) -> Self {
-        tracing::error!(operation, error = %error, "internal operation failed");
+    pub(crate) fn internal_with(operation: &'static str, _error: impl Display) -> Self {
+        tracing::error!(operation, "internal operation failed");
         Self::internal()
     }
 

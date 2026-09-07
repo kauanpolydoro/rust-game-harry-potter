@@ -2,7 +2,19 @@ name: harry-potter-game
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgres:18.6-alpine3.24
+    command:
+      - postgres
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_statement=none
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
     environment:
       POSTGRES_DB: hogwarts
       POSTGRES_PASSWORD: local-development-only

@@ -22,6 +22,7 @@ use tokio::{
 use tower::ServiceExt;
 
 mod game_one;
+mod lifecycle;
 
 struct ReadyRoom {
     app: axum::Router,
@@ -1723,6 +1724,15 @@ async fn ready_room() -> ReadyRoom {
 
 async fn ready_room_with_manifest(manifest: ContentManifest) -> ReadyRoom {
     let (app, database, state) = test_app(manifest.clone()).await;
+    ready_room_in_app(app, database, state, manifest).await
+}
+
+async fn ready_room_in_app(
+    app: axum::Router,
+    database: PgPool,
+    state: AppState,
+    manifest: ContentManifest,
+) -> ReadyRoom {
     let (room_code, host_cookie, host_recovery_token) = create_room(&app).await;
     assert_eq!(
         select_hero(&app, &host_cookie, "harry").await.status(),
