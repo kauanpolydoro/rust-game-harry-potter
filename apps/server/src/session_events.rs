@@ -208,8 +208,8 @@ async fn serve_session_events(
         Ok(false) => {
             close_socket(
                 &mut socket,
-                close_code::POLICY,
-                "session is no longer active",
+                crate::session::inactive_session_close_code(&state, session).await,
+                "access ended",
             )
             .await;
             drop(signal);
@@ -306,7 +306,7 @@ async fn session_event_loop(
                     match session_is_active(state, session).await {
                         Ok(true) => true,
                         Ok(false) => {
-                            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                            close_socket(socket, crate::session::inactive_session_close_code(state, session).await, "access ended").await;
                             return;
                         }
                         Err(_) => {
@@ -322,7 +322,7 @@ async fn session_event_loop(
                 if matches!(notification, Ok(()) | Err(broadcast::error::RecvError::Lagged(_))) {
                     match session_is_active(state, session).await {
                         Ok(false) => {
-                            close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                            close_socket(socket, crate::session::inactive_session_close_code(state, session).await, "access ended").await;
                             return;
                         }
                         Ok(true) => false,
@@ -340,7 +340,7 @@ async fn session_event_loop(
                 if let Ok(true) = session_is_active(state, session).await {
                     false
                 } else {
-                    close_socket(socket, close_code::POLICY, "session is no longer active").await;
+                    close_socket(socket, crate::session::inactive_session_close_code(state, session).await, "access ended").await;
                     return;
                 }
             }

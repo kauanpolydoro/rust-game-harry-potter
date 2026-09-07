@@ -58,6 +58,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
   const cursor = ref(0)
   const notices = ref<SecurityNotice[]>([])
   const sessionInvalidated = ref(false)
+  const gameExpired = ref(false)
   const latestPasswordRotationCursor = ref(0)
   const latestCredentialCursorByPosition = ref<Record<number, number>>({})
   const latestNotice = computed(() => notices.value.at(-1) ?? null)
@@ -284,8 +285,9 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
         status.value = 'disconnected'
         return
       }
-      if (event.code === 1008) {
+      if (event.code === 1008 || event.code === 4001) {
         status.value = 'failed'
+        gameExpired.value = event.code === 4001
         sessionInvalidated.value = true
         return
       }
@@ -320,6 +322,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
     latestPasswordRotationCursor.value = 0
     latestCredentialCursorByPosition.value = {}
     sessionInvalidated.value = false
+    gameExpired.value = false
     reconnectAttempt = 0
   }
 
@@ -345,6 +348,7 @@ export const useSecuritySyncStore = defineStore('securitySync', () => {
     receive,
     retry,
     sessionInvalidated,
+    gameExpired,
     status,
   }
 })

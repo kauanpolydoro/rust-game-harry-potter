@@ -843,7 +843,7 @@ pub(super) async fn load_recovery_password_authority(
         LEFT JOIN games ON games.room_id = rooms.id
         WHERE participants.id = $1
           AND rooms.status <> 'cancelled'
-          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+          AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
         ",
     )
     .bind(participant_id)
@@ -870,7 +870,7 @@ pub(super) async fn lock_recovery_password_authority(
         LEFT JOIN games ON games.room_id = rooms.id
         WHERE participants.id = $1
           AND rooms.status <> 'cancelled'
-          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+          AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
         FOR UPDATE OF rooms
         ",
     )
@@ -1790,7 +1790,7 @@ pub(super) async fn load_recovery_candidate(
          AND consumed_device_sessions.participant_id = participants.id
         WHERE recovery_credentials.token_hmac = $1
           AND rooms.status <> 'cancelled'
-          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+          AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
           AND (
               (
                   recovery_credentials.status = 'active'
@@ -1829,7 +1829,7 @@ pub(super) async fn lock_recovery_room(
         LEFT JOIN games ON games.room_id = rooms.id
         WHERE rooms.id = $1
           AND rooms.status <> 'cancelled'
-          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+          AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
         FOR UPDATE OF rooms
         ",
     )
@@ -1880,7 +1880,7 @@ pub(super) async fn lock_recovery_candidate(
          AND consumed_device_sessions.participant_id = participants.id
         WHERE recovery_credentials.token_hmac = $1
           AND rooms.status <> 'cancelled'
-          AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+          AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
           AND (
               (
                   recovery_credentials.status = 'active'
@@ -2023,7 +2023,7 @@ pub(super) async fn consume_recovery_credential(
               LEFT JOIN games ON games.room_id = rooms.id
               WHERE participants.id = recovery_credentials.participant_id
                 AND rooms.status <> 'cancelled'
-                AND (games.id IS NULL OR games.expires_at > clock_timestamp())
+                AND (games.id IS NULL OR (games.access_expired_at IS NULL AND games.expires_at > clock_timestamp()))
           )
           AND 2 >= (
               SELECT COUNT(*)
