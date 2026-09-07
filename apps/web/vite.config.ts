@@ -1,5 +1,7 @@
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const applicationOrigin = process.env.APPLICATION_ORIGIN ?? 'http://127.0.0.1:5173'
 const socketOrigin = applicationOrigin.replace(/^http/, 'ws')
@@ -18,9 +20,14 @@ const securityHeaders = {
 
 export default defineConfig(({ command, isPreview }) => ({
   plugins: [vue()],
+  build: { rollupOptions: { input: { app: 'index.html', prototype: 'prototype.html' } } },
   // Vite injects styles during HMR. The development nonce is absent from builds/preview.
   html: command === 'serve' && !isPreview ? { cspNonce: 'hogwarts-vite-development' } : {},
   preview: {
+    https: process.env.E2E_TLS_DIRECTORY ? {
+      key: readFileSync(resolve(process.env.E2E_TLS_DIRECTORY, 'key.pem')),
+      cert: readFileSync(resolve(process.env.E2E_TLS_DIRECTORY, 'cert.pem')),
+    } : undefined,
     strictPort: true,
     cors: false,
     headers: securityHeaders,

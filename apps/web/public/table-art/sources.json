@@ -1,0 +1,25 @@
+{
+  "source": "https://theop.games/blogs/theop/complete-guide-to-vanquishing-voldemort-in-harry-potter-hogwarts-battle",
+  "retrieved": "2026-09-07",
+  "assets": {
+    "heroes.jpg": "https://cdn.shopify.com/s/files/1/0611/3958/3198/files/Harry-Potter-Hogwarts-Battle-Hero_Cards-resized_600x600.jpg?v=1649172684",
+    "alohomora.jpg": "https://cdn.shopify.com/s/files/1/0611/3958/3198/files/Harry-Potter-Hogwarts-Battle-Alohomora-resized_240x240.jpg?v=1649172889",
+    "starting-cards.jpg": "https://cdn.shopify.com/s/files/1/0611/3958/3198/files/Harry-Potter-Hogwarts-Battle-Beginning_Cards-resized_480x480.jpg?v=1649173178",
+    "hogwarts-cards.png": "https://cdn.shopify.com/s/files/1/0611/3958/3198/files/harry-potter-hogwarts-battle-hogwarts-cards_480x480.png?v=1649173401",
+    "crabbe-goyle.png": "https://cdn.shopify.com/s/files/1/0611/3958/3198/files/harry-potter-hogwarts-battle-crabbe-and-goyle-card_480x480.png?v=1649173607",
+    "incendio.png": "https://cdn.shopify.com/s/files/1/0611/3958/3198/files/harry-potter-hogwarts-battle-incendio-card_240x240.png?v=1649173700"
+  },
+  "rulebook": {
+    "file": "hogwarts-battle-regras-ano1-galapagos-v1.0-04-23.pdf",
+    "sha256": "dcaaa54389d416251bb2af6841a0231490084e37360bf9939fa5308e236dce71",
+    "extracted_images": {
+      "wood.png": "p1-0.png",
+      "draco.png": "p5-17.png",
+      "quirrell.png": "p13-8.png",
+      "diagon-alley.png": "p12-5.png",
+      "great-hall.png": "p12-9.png",
+      "hagrid.png": "p5-24.png",
+      "card-back.png": "p4-72.png"
+    }
+  }
+}

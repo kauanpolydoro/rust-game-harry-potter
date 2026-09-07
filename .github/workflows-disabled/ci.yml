@@ -51,7 +51,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: cargo build --release -p harry-potter-server --example e2e_harness
-      - run: npm run test:e2e
+      - run: xvfb-run -a npm run test:e2e
       - run: node scripts/scan-secrets.mjs

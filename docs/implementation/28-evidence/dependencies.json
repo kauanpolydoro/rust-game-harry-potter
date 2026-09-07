@@ -1,0 +1,403 @@
+{
+  "checkedAt": "2026-09-07T21:21:42.842120+00:00",
+  "npmDirect": [
+    {
+      "manifest": "package.json",
+      "kind": "devDependencies",
+      "name": "typescript",
+      "registryName": "@typescript/typescript6",
+      "pinned": "6.0.2",
+      "latest": "6.0.2",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40typescript%2Ftypescript6/latest"
+    },
+    {
+      "manifest": "package.json",
+      "kind": "devDependencies",
+      "name": "typescript7",
+      "registryName": "typescript",
+      "pinned": "7.0.2",
+      "latest": "7.0.2",
+      "current": true,
+      "source": "https://registry.npmjs.org/typescript/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "dependencies",
+      "name": "@babylonjs/core",
+      "registryName": "@babylonjs/core",
+      "pinned": "9.25.0",
+      "latest": "9.25.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40babylonjs%2Fcore/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "dependencies",
+      "name": "@fontsource-variable/archivo-narrow",
+      "registryName": "@fontsource-variable/archivo-narrow",
+      "pinned": "5.3.0",
+      "latest": "5.3.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40fontsource-variable%2Farchivo-narrow/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "dependencies",
+      "name": "@fontsource-variable/inter",
+      "registryName": "@fontsource-variable/inter",
+      "pinned": "5.3.0",
+      "latest": "5.3.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40fontsource-variable%2Finter/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "dependencies",
+      "name": "pinia",
+      "registryName": "pinia",
+      "pinned": "4.0.3",
+      "latest": "4.0.3",
+      "current": true,
+      "source": "https://registry.npmjs.org/pinia/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "dependencies",
+      "name": "vue",
+      "registryName": "vue",
+      "pinned": "3.5.42",
+      "latest": "3.5.42",
+      "current": true,
+      "source": "https://registry.npmjs.org/vue/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@playwright/test",
+      "registryName": "@playwright/test",
+      "pinned": "1.63.0",
+      "latest": "1.63.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40playwright%2Ftest/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@testing-library/dom",
+      "registryName": "@testing-library/dom",
+      "pinned": "10.4.1",
+      "latest": "10.4.1",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40testing-library%2Fdom/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@testing-library/jest-dom",
+      "registryName": "@testing-library/jest-dom",
+      "pinned": "7.0.1",
+      "latest": "7.0.1",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40testing-library%2Fjest-dom/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@testing-library/vue",
+      "registryName": "@testing-library/vue",
+      "pinned": "8.1.0",
+      "latest": "8.1.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40testing-library%2Fvue/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@types/node",
+      "registryName": "@types/node",
+      "pinned": "26.5.0",
+      "latest": "26.5.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40types%2Fnode/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@vitejs/plugin-vue",
+      "registryName": "@vitejs/plugin-vue",
+      "pinned": "6.0.8",
+      "latest": "6.0.8",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40vitejs%2Fplugin-vue/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@vue/compiler-dom",
+      "registryName": "@vue/compiler-dom",
+      "pinned": "3.5.42",
+      "latest": "3.5.42",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40vue%2Fcompiler-dom/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "@vue/compiler-sfc",
+      "registryName": "@vue/compiler-sfc",
+      "pinned": "3.5.42",
+      "latest": "3.5.42",
+      "current": true,
+      "source": "https://registry.npmjs.org/%40vue%2Fcompiler-sfc/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "jsdom",
+      "registryName": "jsdom",
+      "pinned": "30.0.1",
+      "latest": "30.0.1",
+      "current": true,
+      "source": "https://registry.npmjs.org/jsdom/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "oxlint",
+      "registryName": "oxlint",
+      "pinned": "1.82.0",
+      "latest": "1.82.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/oxlint/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "oxlint-tsgolint",
+      "registryName": "oxlint-tsgolint",
+      "pinned": "7.0.2001",
+      "latest": "7.0.2001",
+      "current": true,
+      "source": "https://registry.npmjs.org/oxlint-tsgolint/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "vite",
+      "registryName": "vite",
+      "pinned": "8.2.2",
+      "latest": "8.2.2",
+      "current": true,
+      "source": "https://registry.npmjs.org/vite/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "vitest",
+      "registryName": "vitest",
+      "pinned": "5.0.0",
+      "latest": "5.0.0",
+      "current": true,
+      "source": "https://registry.npmjs.org/vitest/latest"
+    },
+    {
+      "manifest": "apps/web/package.json",
+      "kind": "devDependencies",
+      "name": "vue-tsc",
+      "registryName": "vue-tsc",
+      "pinned": "3.3.11",
+      "latest": "3.3.11",
+      "current": true,
+      "source": "https://registry.npmjs.org/vue-tsc/latest"
+    }
+  ],
+  "transitiveResolution": {
+    "npm": "npm update --package-lock-only: up to date; restored three optional platform bindings in lockfile",
+    "cargo": "cargo update and cargo update --dry-run --verbose: 0 packages; latest compatible resolution for Rust 1.98. Cargo reports crypto-common 0.1.6 (available 0.1.7) and matchit 0.8.4 (available 0.8.6) as unchanged transitives."
+  },
+  "cratesDirect": [
+    {
+      "name": "aws-config",
+      "pinned": "1.12.0",
+      "latest": "1.12.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/aws-config"
+    },
+    {
+      "name": "aws-sdk-s3",
+      "pinned": "1.145.0",
+      "latest": "1.145.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/aws-sdk-s3"
+    },
+    {
+      "name": "argon2",
+      "pinned": "0.6.0",
+      "latest": "0.6.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/argon2"
+    },
+    {
+      "name": "axum",
+      "pinned": "0.8.9",
+      "latest": "0.8.9",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/axum"
+    },
+    {
+      "name": "blake3",
+      "pinned": "1.8.7",
+      "latest": "1.8.7",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/blake3"
+    },
+    {
+      "name": "getrandom",
+      "pinned": "0.4.3",
+      "latest": "0.4.3",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/getrandom"
+    },
+    {
+      "name": "hmac",
+      "pinned": "0.13.0",
+      "latest": "0.13.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/hmac"
+    },
+    {
+      "name": "http-body-util",
+      "pinned": "0.1.5",
+      "latest": "0.1.5",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/http-body-util"
+    },
+    {
+      "name": "rand_chacha",
+      "pinned": "0.10.0",
+      "latest": "0.10.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/rand_chacha"
+    },
+    {
+      "name": "serde",
+      "pinned": "1.0.229",
+      "latest": "1.0.229",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/serde"
+    },
+    {
+      "name": "serde_json",
+      "pinned": "1.0.151",
+      "latest": "1.0.151",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/serde_json"
+    },
+    {
+      "name": "sha2",
+      "pinned": "0.11.0",
+      "latest": "0.11.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/sha2"
+    },
+    {
+      "name": "sqlx",
+      "pinned": "0.9.0",
+      "latest": "0.9.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/sqlx"
+    },
+    {
+      "name": "tokio",
+      "pinned": "1.53.1",
+      "latest": "1.53.1",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/tokio"
+    },
+    {
+      "name": "tower",
+      "pinned": "0.5.3",
+      "latest": "0.5.3",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/tower"
+    },
+    {
+      "name": "tracing",
+      "pinned": "0.1.44",
+      "latest": "0.1.44",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/tracing"
+    },
+    {
+      "name": "tracing-subscriber",
+      "pinned": "0.3.23",
+      "latest": "0.3.23",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/tracing-subscriber"
+    },
+    {
+      "name": "uuid",
+      "pinned": "1.26.0",
+      "latest": "1.26.0",
+      "current": true,
+      "source": "https://crates.io/api/v1/crates/uuid"
+    }
+  ],
+  "containerImages": [
+    {
+      "name": "postgres",
+      "tag": "18-alpine",
+      "digest": "sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+      "source": "https://hub.docker.com/v2/repositories/library/postgres/tags/18-alpine",
+      "latestStableTag": "18.6-alpine",
+      "stableTagsSource": "https://hub.docker.com/v2/repositories/library/postgres/tags?page_size=100&name=alpine"
+    },
+    {
+      "name": "node",
+      "tag": "26.8.1-bookworm-slim",
+      "digest": "sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e",
+      "source": "https://hub.docker.com/v2/repositories/library/node/tags/26.8.1-bookworm-slim",
+      "latestStableTag": "26.8.1-bookworm-slim",
+      "stableTagsSource": "https://hub.docker.com/v2/repositories/library/node/tags?page_size=100&name=bookworm-slim"
+    },
+    {
+      "name": "rust",
+      "tag": "1.98.0-slim-bookworm",
+      "digest": "sha256:1469a27c125cb5a3aebfa4f4e4665d935b02fb72cc093b2c974b3d740e43f157",
+      "source": "https://hub.docker.com/v2/repositories/library/rust/tags/1.98.0-slim-bookworm",
+      "latestStableTag": "1.98.0-slim-bookworm",
+      "stableTagsSource": "https://hub.docker.com/v2/repositories/library/rust/tags?page_size=100&name=slim-bookworm"
+    }
+  ],
+  "githubActions": [
+    {
+      "name": "actions/checkout",
+      "pinned": "v7.0.1",
+      "latest": "v7.0.1",
+      "current": true,
+      "source": "https://api.github.com/repos/actions/checkout/releases/latest"
+    },
+    {
+      "name": "actions/setup-node",
+      "pinned": "v7.0.0",
+      "latest": "v7.0.0",
+      "current": true,
+      "source": "https://api.github.com/repos/actions/setup-node/releases/latest"
+    },
+    {
+      "name": "Swatinem/rust-cache",
+      "pinned": "v2.9.2",
+      "latest": "v2.9.2",
+      "current": true,
+      "source": "https://api.github.com/repos/Swatinem/rust-cache/releases/latest"
+    },
+    {
+      "name": "dtolnay/rust-toolchain",
+      "pinned": "6bed0761d98439e5a578e2877258200ad565ba87",
+      "latest": "6bed0761d98439e5a578e2877258200ad565ba87",
+      "current": true,
+      "source": "https://api.github.com/repos/dtolnay/rust-toolchain/commits/stable"
+    }
+  ]
+}
