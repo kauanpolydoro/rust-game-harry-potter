@@ -51,7 +51,8 @@ export default defineConfig({
         RUST_LOG: 'harry_potter_server=info',
       },
       reuseExistingServer: false,
-      timeout: 120_000,
+      // A cold Rust build after a toolchain update precedes backend readiness.
+      timeout: 600_000,
       url: `${backendOrigin}/health/live`,
     },
     {

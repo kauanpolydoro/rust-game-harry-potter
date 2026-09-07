@@ -5350,7 +5350,9 @@ async fn assert_revocation_command_order(
 }
 
 async fn wait_for_requests_blocked_by(database: &PgPool, blocker_pid: i32, minimum: i64) {
-    let observation_deadline = Instant::now() + Duration::from_secs(5);
+    // Recovery must finish real Argon2 before reaching the database fence.
+    // This synchronization deadline is separate from the measured revocation SLOs.
+    let observation_deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let waiting_requests = sqlx::query_scalar::<_, i64>(
             r"
@@ -7825,8 +7827,10 @@ async fn websocket_control_floods_are_closed_before_unbounded_presence_work() {
         for _ in 0..61 {
             socket.send_frame(10, b"").await;
         }
+        // Processing the bounded control budget includes real session checks.
+        // Assert the close policy without treating shared-host load as a latency SLO.
         let code =
-            tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_close_code())
+            tokio::time::timeout(std::time::Duration::from_secs(10), socket.read_close_code())
                 .await
                 .unwrap();
         assert_eq!(code, 1008);

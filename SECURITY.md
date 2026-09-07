@@ -114,7 +114,7 @@ O cenário de saturação ocupa o executor real e cancela as requisições para 
 
 Na validação de 2026-09-07, `make check` passou, incluindo os 21 cenários de navegador.
 O perfil separado de reconexão preparou 100 jogos com clientes distintos e limites reais, mas excedeu os SLOs de replay p95 de 3 segundos e Snapshot p95 de 5 segundos.
-No PostgreSQL isolado, esta implementação mediu 7.137 ms e 6.531 ms, respectivamente.
+No PostgreSQL isolado, o commit de segurança `7a72977` mediu 7.137 ms e 6.531 ms, respectivamente.
 O commit-base `26bf6cabec8e1fff0b2f31e75d9f2bc65d06258c`, sem alterações e no mesmo ambiente, também falhou, com 8.130 ms e 7.613 ms.
 Essas execuções confirmam uma violação preexistente dos SLOs; não estabelecem uma comparação estatística de desempenho.
 O impacto é a recuperação mais lenta durante a reconexão simultânea de 400 canais.
