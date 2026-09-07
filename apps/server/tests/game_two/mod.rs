@@ -47,10 +47,6 @@ async fn game_two_starts_through_http_with_its_own_persisted_inventory() {
 
 #[tokio::test]
 async fn game_two_with_two_three_and_four_players_reaches_both_outcomes_through_http() {
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::ERROR)
-        .with_test_writer()
-        .try_init();
     for count in [2, 3, 4] {
         for seek_victory in [false, true] {
             let (room, cookies) =

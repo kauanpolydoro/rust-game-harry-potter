@@ -2,7 +2,19 @@ name: harry-potter-game
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    command:
+      - postgres
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_statement=none
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
     environment:
       POSTGRES_DB: hogwarts
       POSTGRES_PASSWORD: local-development-only
@@ -13,9 +25,105 @@ services:
       timeout: 2s
       retries: 15
     ports:
-      - "55432:5432"
+      - "${POSTGRES_PORT:-55432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
 
+  server:
+    profiles: [dev]
+    # This is the latest published slim-bookworm image; rustup installs the
+    # exact compiler and components declared in rust-toolchain.toml.
+    image: rust:1.98.0-slim-bookworm@sha256:1469a27c125cb5a3aebfa4f4e4665d935b02fb72cc093b2c974b3d740e43f157
+    init: true
+    working_dir: /workspace
+    command: [cargo, run, --locked, -p, harry-potter-server]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APPLICATION_ORIGIN: http://127.0.0.1:5173
+      BIND_ADDRESS: 0.0.0.0:8080
+      CARGO_TARGET_DIR: /target
+      DATABASE_URL: postgres://hogwarts:local-development-only@postgres:5432/hogwarts
+      SESSION_TOKEN_KEY: local-development-session-key-v1
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf 'GET /health/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+          IFS= read -r response <&3 &&
+          [[ "$$response" == *" 200 "* ]]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 10m
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - .:/workspace:ro
+      - dev-cargo-registry:/usr/local/cargo/registry
+      - rust-toolchains:/usr/local/rustup
+      - rust-target:/target
+
+  lifecycle-worker:
+    profiles: [dev]
+    image: rust:1.98.0-slim-bookworm@sha256:1469a27c125cb5a3aebfa4f4e4665d935b02fb72cc093b2c974b3d740e43f157
+    init: true
+    working_dir: /workspace
+    command: [cargo, run, --locked, -p, harry-potter-server, --bin, lifecycle-worker]
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      CARGO_TARGET_DIR: /target
+      DATABASE_URL: postgres://hogwarts:local-development-only@postgres:5432/hogwarts
+      TOMBSTONE_HMAC_KEY: development-tombstone-key-000001
+      TOMBSTONE_LOCAL_DIRECTORY: /tombstones
+    volumes:
+      - .:/workspace:ro
+      - dev-cargo-registry:/usr/local/cargo/registry
+      - rust-toolchains:/usr/local/rustup
+      - rust-target:/target
+      - tombstones:/tombstones
+
+  web:
+    profiles: [dev]
+    image: node:26.8.1-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e
+    init: true
+    working_dir: /workspace
+    command: [sh, -c, "npm ci && exec npm run dev:web"]
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      BACKEND_PROXY_TARGET: http://server:8080
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5173/').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 10m
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - .:/workspace:ro
+      - node-modules:/workspace/node_modules
+      - web-node-modules:/workspace/apps/web/node_modules
+      - npm-cache:/root/.npm
+
 volumes:
   postgres-data:
+  dev-cargo-registry:
+  rust-toolchains:
+  rust-target:
+  node-modules:
+  web-node-modules:
+  npm-cache:
+  tombstones:

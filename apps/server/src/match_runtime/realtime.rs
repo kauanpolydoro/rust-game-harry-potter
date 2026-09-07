@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use axum::{
     extract::{
-        Query, State, WebSocketUpgrade,
+        State, WebSocketUpgrade,
         ws::{CloseFrame, Message, WebSocket, close_code},
     },
-    http::{HeaderMap, header},
+    http::HeaderMap,
     response::Response,
 };
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     AppState,
-    http_support::ApiError,
+    http_support::{ApiError, StrictQuery},
     session::{AuthenticatedSession, authenticated_session, session_is_active},
 };
 
@@ -343,11 +343,11 @@ impl RealtimeIntervals {
 
 pub(super) async fn game_events(
     State(state): State<AppState>,
-    Query(query): Query<RealtimeQuery>,
+    StrictQuery(query): StrictQuery<RealtimeQuery>,
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    require_realtime_origin(&state, &headers)?;
+    crate::security::require_origin(&state, &headers)?;
     let mut accepts_v1 = false;
     let mut accepts_v2 = false;
     for requested in websocket.requested_protocols() {
@@ -373,21 +373,10 @@ pub(super) async fn game_events(
     Ok(websocket
         .protocols([protocol.subprotocol()])
         .max_message_size(4 * 1024)
+        .max_frame_size(4 * 1024)
         .on_upgrade(move |socket| {
             serve_game_events(socket, state, session, game_id, query, protocol)
         }))
-}
-
-fn require_realtime_origin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    let mut origins = headers.get_all(header::ORIGIN).iter();
-    let origin = origins
-        .next()
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(ApiError::origin_not_allowed)?;
-    if origins.next().is_some() || origin != state.application_origin() {
-        return Err(ApiError::origin_not_allowed());
-    }
-    Ok(())
 }
 
 async fn serve_game_events(
@@ -398,7 +387,6 @@ async fn serve_game_events(
     query: RealtimeQuery,
     protocol: RealtimeProtocol,
 ) {
-    let participant_id = session.participant_id;
     let mut position = RealtimePosition {
         cursor: query.cursor.and_then(|value| i64::try_from(value).ok()),
         snapshot_version: query.snapshot_version,
@@ -472,7 +460,7 @@ async fn serve_game_events(
         },
     )
     .await;
-    disconnect_presence(&state, connection_id, game_id, participant_id).await;
+    disconnect_presence(&state, connection_id, game_id).await;
     state.prune_game_synchronization_channel(game_id);
     state.prune_game_presence_channel(game_id);
     state.prune_session_revocation_channel(session.session_id);
@@ -507,7 +495,7 @@ async fn register_connection_presence(
             return None;
         }
         Err(_error) => {
-            tracing::warn!(%game_id, %participant_id, "realtime presence registration failed");
+            tracing::warn!("realtime presence registration failed");
             close_socket(socket, close_code::ERROR, "presence registration failed").await;
             return None;
         }
@@ -515,12 +503,12 @@ async fn register_connection_presence(
 
     let mut last_presence = None;
     if protocol.publishes_presence()
-        && let Err(error) =
+        && let Err(_error) =
             send_realtime_presence(socket, state, game_id, &mut last_presence, true, protocol).await
     {
-        tracing::warn!(error = %error, %game_id, %participant_id, "initial realtime presence failed");
+        tracing::warn!("initial realtime presence failed");
         close_socket(socket, close_code::ERROR, "initial presence failed").await;
-        disconnect_presence(state, connection_id, game_id, participant_id).await;
+        disconnect_presence(state, connection_id, game_id).await;
         return None;
     }
     Some((connection_id, last_presence))
@@ -586,7 +574,7 @@ async fn realtime_event_loop(
             notification = revocation.recv() => {
                 match notification {
                     Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                        validate_realtime_session(socket, state, session, game_id).await
+                        validate_realtime_session(socket, state, session).await
                     }
                     Err(broadcast::error::RecvError::Closed) => RealtimeLoopAction::Continue,
                 }
@@ -596,15 +584,10 @@ async fn realtime_event_loop(
                 RealtimeLoopAction::Presence
             },
             _ = intervals.session_revalidation.tick() => {
-                validate_realtime_session(socket, state, session, game_id).await
+                validate_realtime_session(socket, state, session).await
             }
             _ = intervals.heartbeat.tick() => {
-                send_realtime_heartbeat(
-                    socket,
-                    game_id,
-                    participant_id,
-                    last_client_activity,
-                )
+                send_realtime_heartbeat(socket, last_client_activity)
                 .await
             }
             () = &mut connection_lifetime => {
@@ -695,7 +678,7 @@ async fn synchronize_presence(
         protocol,
         ..
     } = context;
-    match revalidate_socket_session(state, session, game_id).await {
+    match revalidate_socket_session(state, session).await {
         Ok(true) => {}
         Ok(false) => {
             close_socket(
@@ -711,10 +694,10 @@ async fn synchronize_presence(
             return false;
         }
     }
-    if let Err(error) =
+    if let Err(_error) =
         send_realtime_presence(socket, state, game_id, last_presence, false, protocol).await
     {
-        tracing::warn!(error = %error, %game_id, participant_id = %session.participant_id, failure_message);
+        tracing::warn!(failure_message);
         close_socket(socket, close_code::ERROR, "presence synchronization failed").await;
         return false;
     }
@@ -731,14 +714,16 @@ async fn handle_client_message(
     last_client_activity: &mut tokio::time::Instant,
 ) -> RealtimeLoopAction {
     let participant_id = session.participant_id;
+    if message.as_ref().is_some_and(Result::is_ok)
+        && !state.admit_request("websocket-message", session.session_id.as_bytes(), 60)
+    {
+        close_socket(socket, close_code::POLICY, "message rate exceeded").await;
+        return RealtimeLoopAction::Stop;
+    }
     match message {
-        Some(Ok(Message::Close(frame))) => {
-            tracing::info!(
-                %game_id,
-                %participant_id,
-                ?frame,
-                "realtime client closed the connection"
-            );
+        Some(Ok(Message::Close(_frame))) => {
+            tracing::info!("realtime client closed the connection");
+            crate::security::acknowledge_websocket_close(socket).await;
             RealtimeLoopAction::Stop
         }
         Some(Ok(Message::Text(_) | Message::Binary(_))) => {
@@ -774,23 +759,18 @@ async fn handle_client_message(
                     RealtimeLoopAction::Stop
                 }
                 Err(_error) => {
-                    tracing::warn!(%game_id, %participant_id, "realtime presence heartbeat failed");
+                    tracing::warn!("realtime presence heartbeat failed");
                     close_socket(socket, close_code::ERROR, "presence heartbeat failed").await;
                     RealtimeLoopAction::Stop
                 }
             }
         }
-        Some(Err(error)) => {
-            tracing::warn!(
-                error = %error,
-                %game_id,
-                %participant_id,
-                "realtime receive failed"
-            );
+        Some(Err(_error)) => {
+            tracing::warn!("realtime receive failed");
             RealtimeLoopAction::Stop
         }
         None => {
-            tracing::info!(%game_id, %participant_id, "realtime peer disconnected");
+            tracing::info!("realtime peer disconnected");
             RealtimeLoopAction::Stop
         }
     }
@@ -798,12 +778,10 @@ async fn handle_client_message(
 
 async fn send_realtime_heartbeat(
     socket: &mut WebSocket,
-    game_id: Uuid,
-    participant_id: Uuid,
     last_client_activity: tokio::time::Instant,
 ) -> RealtimeLoopAction {
     if last_client_activity.elapsed() >= REALTIME_CLIENT_WATCHDOG {
-        tracing::warn!(%game_id, %participant_id, "realtime client watchdog expired");
+        tracing::warn!("realtime client watchdog expired");
         close_socket(socket, close_code::POLICY, "heartbeat timeout").await;
         return RealtimeLoopAction::Stop;
     }
@@ -815,17 +793,12 @@ async fn send_realtime_heartbeat(
     .await
     {
         Ok(Ok(())) => RealtimeLoopAction::Continue,
-        Ok(Err(error)) => {
-            tracing::warn!(
-                error = %error,
-                %game_id,
-                %participant_id,
-                "realtime heartbeat send failed"
-            );
+        Ok(Err(_error)) => {
+            tracing::warn!("realtime heartbeat send failed");
             RealtimeLoopAction::Stop
         }
         Err(_) => {
-            tracing::warn!(%game_id, %participant_id, "realtime heartbeat write timed out");
+            tracing::warn!("realtime heartbeat write timed out");
             RealtimeLoopAction::Stop
         }
     }
@@ -835,9 +808,8 @@ async fn validate_realtime_session(
     socket: &mut WebSocket,
     state: &AppState,
     session: AuthenticatedSession,
-    game_id: Uuid,
 ) -> RealtimeLoopAction {
-    match revalidate_socket_session(state, session, game_id).await {
+    match revalidate_socket_session(state, session).await {
         Ok(true) => RealtimeLoopAction::Continue,
         Ok(false) => {
             close_socket(
@@ -864,7 +836,7 @@ async fn synchronize_connection(
     force_snapshot: bool,
     protocol: RealtimeProtocol,
 ) -> bool {
-    match revalidate_socket_session(state, session, game_id).await {
+    match revalidate_socket_session(state, session).await {
         Ok(true) => {}
         Ok(false) => {
             close_socket(
@@ -881,7 +853,7 @@ async fn synchronize_connection(
         }
     }
 
-    if let Err(error) = synchronize_socket(
+    if let Err(_error) = synchronize_socket(
         socket,
         state,
         session.participant_id,
@@ -892,12 +864,7 @@ async fn synchronize_connection(
     )
     .await
     {
-        tracing::warn!(
-            error = %error,
-            %game_id,
-            participant_id = %session.participant_id,
-            "realtime synchronization failed"
-        );
+        tracing::warn!("realtime synchronization failed");
         close_socket(socket, close_code::ERROR, "synchronization failed").await;
         return false;
     }
@@ -906,16 +873,11 @@ async fn synchronize_connection(
 async fn revalidate_socket_session(
     state: &AppState,
     session: AuthenticatedSession,
-    game_id: Uuid,
 ) -> Result<bool, ApiError> {
     session_is_active(state, session)
         .await
         .inspect_err(|_error| {
-            tracing::warn!(
-                %game_id,
-                participant_id = %session.participant_id,
-                "realtime session revalidation failed"
-            );
+            tracing::warn!("realtime session revalidation failed");
         })
 }
 
@@ -937,21 +899,16 @@ async fn close_socket(socket: &mut WebSocket, code: u16, reason: &'static str) {
     .await;
     match result {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(error = %error, code, reason, "realtime close failed"),
+        Ok(Err(_error)) => tracing::warn!(code, reason, "realtime close failed"),
         Err(_) => tracing::warn!(code, reason, "realtime close write timed out"),
     }
 }
 
-async fn disconnect_presence(
-    state: &AppState,
-    connection_id: Uuid,
-    game_id: Uuid,
-    participant_id: Uuid,
-) {
+async fn disconnect_presence(state: &AppState, connection_id: Uuid, game_id: Uuid) {
     if let Err(_error) =
         postgres::disconnect_realtime_connection(&state.database, connection_id).await
     {
-        tracing::warn!(%game_id, %participant_id, "realtime presence disconnect failed");
+        tracing::warn!("realtime presence disconnect failed");
     }
     state.signal_game_presence(game_id);
 }

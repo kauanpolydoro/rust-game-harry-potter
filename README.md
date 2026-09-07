@@ -6,33 +6,53 @@ Este primeiro incremento entrega PostgreSQL, backend Rust e shell Vue sob um ún
 
 ## Pré-requisitos
 
-- Docker com Compose.
+- Docker funcionando com o plugin Compose.
 
-- Node.js 24.18.0 ou mais recente.
-
-- Rustup, que instala automaticamente o Rust 1.98.0 fixado em `rust-toolchain.toml`.
+O ambiente de desenvolvimento instala Node.js, Rust e as dependências dentro dos containers.
+Não é necessário instalar essas ferramentas ou `make` na máquina para executar o jogo.
 
 ## Executar
 
 Em um checkout limpo, execute:
 
 ```bash
-make dev
+./scripts/dev
 ```
 
-O comando instala as dependências fixadas, inicia o PostgreSQL, aplica migrations pelo backend e abre os servidores de desenvolvimento.
+Se `make` estiver instalado, `make dev` executa o mesmo script.
+
+O comando inicia PostgreSQL, backend Rust, worker de purge e frontend Vue pelo perfil `dev` do Compose.
+O backend aplica as migrations e o frontend inicia depois que o backend está saudável.
+A primeira execução baixa as imagens, instala as ferramentas fixadas e compila o backend.
+Os volumes locais preservam os caches de Rust e npm para as próximas execuções.
 
 A interface fica em `http://127.0.0.1:5173` e apresenta explicitamente os estados pronto e indisponível do serviço autoritativo.
 
-Interrompa com `Ctrl+C`.
+Interrompa com `Ctrl+C` para parar os quatro serviços.
+Para encerrá-los a partir de outro terminal, execute:
 
-O PostgreSQL permanece no volume local do Compose entre execuções.
+```bash
+docker compose --profile dev stop
+```
 
-O WebSocket autenticado aceita somente a origem exata configurada em `APPLICATION_ORIGIN`.
+Os dados do PostgreSQL permanecem no volume local do Compose entre execuções.
+Os comprovantes de exclusão ficam no volume `tombstones`, separado do banco.
+Execute `./scripts/dev` novamente para retomar o ambiente.
+
+O Vite atualiza a interface quando os arquivos Vue mudam.
+Após alterar o código Rust, interrompa com `Ctrl+C` e execute `./scripts/dev` novamente para recompilar o backend.
+
+Mutações HTTP e WebSockets aceitam somente a origem exata configurada em `APPLICATION_ORIGIN`.
+O cliente envia a proteção CSRF obrigatória nas mutações.
+Consulte [SECURITY.md](SECURITY.md) para os limites, headers, logging e requisitos de implantação.
 
 Em desenvolvimento, o valor padrão é `http://127.0.0.1:5173`.
 
 ## Validar
+
+O gate completo usa as ferramentas locais: `make`, Node.js 26.8.1, npm e Rustup.
+O Rustup instala o Rust 1.98.1 e os componentes fixados em `rust-toolchain.toml`.
+O perfil `dev` não é necessário para executar o gate.
 
 Instale o Chromium do Playwright uma vez no ambiente local:
 
@@ -49,6 +69,14 @@ make check
 O gate cria um banco temporário isolado para validar migrations desde zero e o remove ao terminar.
 
 Ele executa formatação, Clippy, testes Rust, limites de módulos, geração de contratos, lint, typecheck, testes Vue, build, Playwright e secret scan.
+
+Para validar checkouts simultâneos, escolha um projeto Compose e portas exclusivos:
+
+```bash
+COMPOSE_PROJECT_NAME=hogwarts-checkout-3 POSTGRES_PORT=55434 E2E_BACKEND_PORT=18083 E2E_FRONTEND_PORT=4176 make check
+```
+
+O nome do projeto isola o container e o volume do PostgreSQL; as portas evitam conflitos entre os servidores locais.
 
 Valide separadamente os SLOs de reconexão no perfil de referência:
 
@@ -94,7 +122,9 @@ A migration `0020_game_expiration.sql` registra a expiração de acesso de forma
 Cada instância verifica até 100 candidatas por segundo com `SKIP LOCKED`, e a decisão final sempre consulta `clock_timestamp()` depois do lock.
 A autenticação também aplica esse gate sob demanda.
 O processamento é idempotente, notifica as outras instâncias após o commit e não modifica o histórico oficial.
-Purge, ledger de Tombstones e política de backup pertencem aos tickets posteriores de ciclo de vida.
+O worker de purge remove os dados operacionais depois desse gate e mantém a prova opaca fora do banco.
+A operação, o inventário de armazenamento e os SLOs estão descritos em [Ciclo de vida](ops/lifecycle.md).
+A reconciliação de restore e a política de backups pertencem à próxima fatia de operação.
 
 HTTP responde `GAME_EXPIRED` sem projeção privada e apaga o cookie da Sessão.
 Recuperação preserva o erro genérico `RECOVERY_FAILED`.

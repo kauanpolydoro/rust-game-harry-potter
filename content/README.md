@@ -49,7 +49,7 @@ O Jogo 2 usa snapshot 6 e evento 7, com a cópia de Aliados persistida até o fi
 O transporte mantém o contrato público de evento 6 para os clientes atual e anterior.
 O encerramento é transmitido por Snapshot, pois pode interromper o Turno antes do mínimo de etapas aceito pelo contrato de evento anterior.
 O vínculo interno de cópia não integra os resumos HTTP e WebSocket; alvos, efeitos copiados, Escolhas e estado resultante continuam disponíveis nos campos existentes.
-A migração `0022_game_two.sql` valida a preparação cumulativa, as cópias e as transições correspondentes.
+A migração `0023_game_two.sql` valida a preparação cumulativa, as cópias e as transições correspondentes.
 O Jogo 1 conserva seu bundle, manifesto, digest, snapshot 5 e evento 6.
 Os codecs anteriores rejeitam campos exclusivos do Jogo 2.
 Os cenários de navegador dos dois Jogos exercitam vitória e derrota com 2, 3 e 4 participantes, e suas transcrições possuem goldens de eventos e Snapshots.

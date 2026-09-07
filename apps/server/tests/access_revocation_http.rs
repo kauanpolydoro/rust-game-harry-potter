@@ -34,6 +34,8 @@ async fn test_state() -> (axum::Router, PgPool) {
 fn create_room_request() -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/rooms")
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", uuid::Uuid::new_v4().to_string())
@@ -54,6 +56,8 @@ fn recover_participation_request(token: &str) -> Request<Body> {
 fn recover_participation_with_password_request(token: &str, password: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/recover")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
@@ -70,6 +74,8 @@ fn recover_participation_with_password_request(token: &str, password: &str) -> R
 fn join_room_request(room_code: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri(format!("/api/rooms/{room_code}/participants"))
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", uuid::Uuid::new_v4().to_string())
@@ -99,6 +105,8 @@ fn revoke_device_session_request(
 ) -> Request<Body> {
     Request::builder()
         .method("PUT")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri(format!(
             "/api/session/device-sessions/{session_id}/revocation"
         ))
@@ -120,6 +128,8 @@ fn protect_participant_confirmation_request(
 ) -> Request<Body> {
     Request::builder()
         .method("PUT")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/protection")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie)
@@ -155,6 +165,8 @@ fn protect_room_with_values_request(
 ) -> Request<Body> {
     Request::builder()
         .method("PUT")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/rooms/current/protection")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie)
@@ -174,6 +186,8 @@ fn protect_room_with_values_request(
 fn regenerate_own_credential_request(cookie: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/recovery-credential")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie)

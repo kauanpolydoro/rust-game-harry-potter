@@ -6,7 +6,7 @@ cd "$repository_root"
 
 docker compose up -d --wait postgres
 
-test_database="hogwarts_reconnect_profile_${RANDOM}_$$"
+test_database="hogwarts_lifecycle_profile_${RANDOM}_$$"
 cleanup_database() {
   docker compose exec -T postgres dropdb --if-exists --force --username hogwarts "$test_database" >/dev/null 2>&1 || true
 }
@@ -18,7 +18,7 @@ export TEST_DATABASE_URL="postgres://hogwarts:local-development-only@127.0.0.1:$
 cargo test \
   -p harry-potter-server \
   --test start_game_http \
-  reference_reconnect_profile_meets_replay_and_snapshot_slos \
+  lifecycle::lifecycle_profile_measures_detection_and_purge_for_one_hundred_games \
   -- \
   --exact \
   --ignored \

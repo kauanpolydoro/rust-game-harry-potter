@@ -9,6 +9,115 @@ use tower::ServiceExt;
 
 const RECOVERY_PASSWORD: &str = "a long uncommon passphrase";
 
+#[tokio::test]
+async fn recovery_attempt_ids_and_peer_rotation_do_not_reset_a_credential_budget() {
+    let (app, _) = test_state().await;
+    let token = "c".repeat(64);
+    for attempt in 0..11 {
+        let mut request =
+            recovery_request(&token, RECOVERY_PASSWORD, &uuid::Uuid::new_v4().to_string());
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [192, 0, 2, attempt],
+                12345,
+            ))));
+        let response = app.clone().oneshot(request).await.unwrap();
+        if attempt < 10 {
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                response_json(response).await["error"]["code"],
+                "RECOVERY_FAILED"
+            );
+        } else {
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(
+                response_json(response).await["error"]["code"],
+                "RECOVERY_RATE_LIMITED"
+            );
+        }
+    }
+}
+
+#[test]
+fn password_work_has_a_bounded_queue_that_survives_http_cancellation() {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let (app, _) = test_state().await;
+            // Occupy the real blocking executor, so admitted Argon2 jobs cannot finish.
+            let (release, hold_executor) = std::sync::mpsc::channel::<()>();
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                let _ = hold_executor.recv_timeout(std::time::Duration::from_secs(15));
+            });
+            ready.await.unwrap();
+            let mut requests = tokio::task::JoinSet::new();
+            for attempt in 0..13 {
+                let app = app.clone();
+                requests.spawn(async move {
+                    app.oneshot(recovery_request(
+                        &format!("{attempt:064x}"),
+                        RECOVERY_PASSWORD,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ))
+                    .await
+                    .unwrap()
+                });
+            }
+            // Four running jobs stay blocked; eight waiters time out and one is rejected immediately.
+            for _ in 0..9 {
+                let response =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), requests.join_next())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+                assert_eq!(
+                    response_json(response).await["error"]["code"],
+                    "RECOVERY_RATE_LIMITED"
+                );
+            }
+            requests.abort_all();
+            while requests.join_next().await.is_some() {}
+            // Cancelling HTTP must not release permits owned by queued/running blocking work.
+            // Room creation shares the same budget as recovery and password changes.
+            for _ in 0..13 {
+                let app = app.clone();
+                requests.spawn(async move { app.oneshot(create_room_request()).await.unwrap() });
+            }
+            while let Some(response) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), requests.join_next())
+                    .await
+                    .unwrap()
+            {
+                assert_eq!(response.unwrap().status(), StatusCode::TOO_MANY_REQUESTS);
+            }
+            let health = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/health/live")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(health.status(), StatusCode::OK);
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            tokio::task::spawn_blocking(|| ()).await.unwrap();
+            let created = app.oneshot(create_room_request()).await.unwrap();
+            assert_eq!(created.status(), StatusCode::CREATED);
+        });
+}
+
 async fn test_state() -> (axum::Router, PgPool) {
     let database_url = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must point to the integration PostgreSQL database");
@@ -27,6 +136,8 @@ async fn test_state() -> (axum::Router, PgPool) {
 fn create_room_request() -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/rooms")
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", uuid::Uuid::new_v4().to_string())
@@ -60,6 +171,8 @@ fn recovery_request_replacing(
     }
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/recover")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(payload.to_string()))

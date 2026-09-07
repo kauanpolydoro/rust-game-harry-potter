@@ -8,6 +8,8 @@ license = "MIT"
 rust-version = "1.98"
 
 [workspace.dependencies]
+aws-config = { version = "=1.12.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "=1.145.0", default-features = false, features = ["default-https-client", "rt-tokio", "rustls"] }
 argon2 = "=0.6.0"
 axum = { version = "=0.8.9", features = ["ws"] }
 blake3 = "=1.8.7"

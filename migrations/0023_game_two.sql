@@ -2105,4 +2105,4 @@ BEGIN
 END;
 $$;
 
-UPDATE application_metadata SET value = '22' WHERE key = 'schema_version';
+UPDATE application_metadata SET value = '23' WHERE key = 'schema_version';

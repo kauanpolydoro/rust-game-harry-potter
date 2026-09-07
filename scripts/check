@@ -27,5 +27,6 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+cargo build --release -p harry-potter-server --example e2e_harness
 env -u NO_COLOR npm run test:e2e
 node scripts/scan-secrets.mjs

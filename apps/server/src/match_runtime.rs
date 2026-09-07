@@ -1,6 +1,6 @@
 use axum::{
-    Json, Router,
-    extract::{Path, State},
+    Router,
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::Response,
     routing::{get, post},
@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::{
     AppState,
     content_catalog::SelectedContent,
-    http_support::{ApiError, idempotency_key, no_store_json},
+    http_support::{ApiError, StrictJson, StrictPath, idempotency_key, no_store_json},
     session::{authenticated_participant, authenticated_session, session_is_active_in_transaction},
 };
 
@@ -926,7 +926,7 @@ impl EffectRoller for ChaChaEffectRoller {
 async fn start_game(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<StartGameRequest>,
+    StrictJson(request): StrictJson<StartGameRequest>,
 ) -> Result<Response, ApiError> {
     let key = idempotency_key(&headers)?;
     let authenticated = authenticated_session(&state, &headers).await?;
@@ -1092,7 +1092,7 @@ async fn lock_game_for_command(
 async fn execute_game_command(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<ExecuteGameCommandRequest>,
+    StrictJson(request): StrictJson<ExecuteGameCommandRequest>,
 ) -> Result<Response, ApiError> {
     let authenticated = authenticated_session(&state, &headers).await?;
     let participant_id = authenticated.participant_id;
@@ -1244,7 +1244,7 @@ fn decide_player_intent(
 async fn command_result(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(command_id): Path<String>,
+    StrictPath(command_id): StrictPath<String>,
 ) -> Result<Response, ApiError> {
     let participant_id = authenticated_participant(&state, &headers).await?;
     let command_id = Uuid::parse_str(&command_id).map_err(|_| ApiError::invalid_command_id())?;

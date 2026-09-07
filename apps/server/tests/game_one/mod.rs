@@ -8,7 +8,7 @@ async fn real_game_one_starts_through_http_and_persists_preparation_evidence() {
             .fetch_one(&room.database)
             .await
             .expect("published schema version");
-    assert_eq!(schema, "22");
+    assert_eq!(schema, "23");
     let projection = start_ready_game(&room, "game-one").await;
     assert_eq!(projection["snapshot"]["snapshot_version"], 5);
     assert_eq!(projection["choice"]["source_name"], "Flipendo");
@@ -168,20 +168,24 @@ pub(super) async fn play_game_one(
         };
         let cookie = &cookies
             [usize::try_from(position.as_u64().expect("responsible position") - 1).expect("index")];
-        let response = room
-            .app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/session")
-                    .header(header::COOKIE, cookie)
-                    .body(Body::empty())
-                    .expect("projection request"),
-            )
-            .await
-            .expect("participant projection");
-        assert_eq!(response.status(), StatusCode::OK);
-        projection = response_json(response).await;
+        // Accepted commands already return the actor's current projection.
+        // Fetch another player's private state only when responsibility changes.
+        if &projection["participant"]["position"] != position {
+            let response = room
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/session")
+                        .header(header::COOKIE, cookie)
+                        .body(Body::empty())
+                        .expect("projection request"),
+                )
+                .await
+                .expect("participant projection");
+            assert_eq!(response.status(), StatusCode::OK);
+            projection = response_json(response).await;
+        }
         let mut command = game_one_command(&projection, seek_victory);
         command["command_id"] = json!(uuid::Uuid::new_v4().to_string());
         command["expected_state_version"] = projection["snapshot"]["state_version"].clone();
