@@ -236,7 +236,10 @@ async fn main() {
     .await
     .expect("the E2E listener must bind");
 
-    axum::serve(listener, build_router(state))
-        .await
-        .expect("the E2E server must run");
+    axum::serve(
+        listener,
+        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("the E2E server must run");
 }

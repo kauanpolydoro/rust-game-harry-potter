@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use axum::{
     extract::{
-        Query, State, WebSocketUpgrade,
+        State, WebSocketUpgrade,
         ws::{CloseFrame, Message, WebSocket, close_code},
     },
-    http::{HeaderMap, header},
+    http::HeaderMap,
     response::Response,
 };
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     AppState,
-    http_support::ApiError,
+    http_support::{ApiError, StrictQuery},
     session::{AuthenticatedSession, authenticated_session, session_is_active},
 };
 
@@ -343,11 +343,11 @@ impl RealtimeIntervals {
 
 pub(super) async fn game_events(
     State(state): State<AppState>,
-    Query(query): Query<RealtimeQuery>,
+    StrictQuery(query): StrictQuery<RealtimeQuery>,
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    require_realtime_origin(&state, &headers)?;
+    crate::security::require_origin(&state, &headers)?;
     let mut accepts_v1 = false;
     let mut accepts_v2 = false;
     for requested in websocket.requested_protocols() {
@@ -373,21 +373,10 @@ pub(super) async fn game_events(
     Ok(websocket
         .protocols([protocol.subprotocol()])
         .max_message_size(4 * 1024)
+        .max_frame_size(4 * 1024)
         .on_upgrade(move |socket| {
             serve_game_events(socket, state, session, game_id, query, protocol)
         }))
-}
-
-fn require_realtime_origin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    let mut origins = headers.get_all(header::ORIGIN).iter();
-    let origin = origins
-        .next()
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(ApiError::origin_not_allowed)?;
-    if origins.next().is_some() || origin != state.application_origin() {
-        return Err(ApiError::origin_not_allowed());
-    }
-    Ok(())
 }
 
 async fn serve_game_events(
@@ -515,10 +504,10 @@ async fn register_connection_presence(
 
     let mut last_presence = None;
     if protocol.publishes_presence()
-        && let Err(error) =
+        && let Err(_error) =
             send_realtime_presence(socket, state, game_id, &mut last_presence, true, protocol).await
     {
-        tracing::warn!(error = %error, %game_id, %participant_id, "initial realtime presence failed");
+        tracing::warn!(%game_id, %participant_id, "initial realtime presence failed");
         close_socket(socket, close_code::ERROR, "initial presence failed").await;
         disconnect_presence(state, connection_id, game_id, participant_id).await;
         return None;
@@ -711,10 +700,10 @@ async fn synchronize_presence(
             return false;
         }
     }
-    if let Err(error) =
+    if let Err(_error) =
         send_realtime_presence(socket, state, game_id, last_presence, false, protocol).await
     {
-        tracing::warn!(error = %error, %game_id, participant_id = %session.participant_id, failure_message);
+        tracing::warn!(%game_id, participant_id = %session.participant_id, failure_message);
         close_socket(socket, close_code::ERROR, "presence synchronization failed").await;
         return false;
     }
@@ -731,14 +720,20 @@ async fn handle_client_message(
     last_client_activity: &mut tokio::time::Instant,
 ) -> RealtimeLoopAction {
     let participant_id = session.participant_id;
+    if message.as_ref().is_some_and(Result::is_ok)
+        && !state.admit_request("websocket-message", session.session_id.as_bytes(), 60)
+    {
+        close_socket(socket, close_code::POLICY, "message rate exceeded").await;
+        return RealtimeLoopAction::Stop;
+    }
     match message {
-        Some(Ok(Message::Close(frame))) => {
+        Some(Ok(Message::Close(_frame))) => {
             tracing::info!(
                 %game_id,
                 %participant_id,
-                ?frame,
                 "realtime client closed the connection"
             );
+            crate::security::acknowledge_websocket_close(socket).await;
             RealtimeLoopAction::Stop
         }
         Some(Ok(Message::Text(_) | Message::Binary(_))) => {
@@ -780,9 +775,8 @@ async fn handle_client_message(
                 }
             }
         }
-        Some(Err(error)) => {
+        Some(Err(_error)) => {
             tracing::warn!(
-                error = %error,
                 %game_id,
                 %participant_id,
                 "realtime receive failed"
@@ -815,9 +809,8 @@ async fn send_realtime_heartbeat(
     .await
     {
         Ok(Ok(())) => RealtimeLoopAction::Continue,
-        Ok(Err(error)) => {
+        Ok(Err(_error)) => {
             tracing::warn!(
-                error = %error,
                 %game_id,
                 %participant_id,
                 "realtime heartbeat send failed"
@@ -881,7 +874,7 @@ async fn synchronize_connection(
         }
     }
 
-    if let Err(error) = synchronize_socket(
+    if let Err(_error) = synchronize_socket(
         socket,
         state,
         session.participant_id,
@@ -893,7 +886,6 @@ async fn synchronize_connection(
     .await
     {
         tracing::warn!(
-            error = %error,
             %game_id,
             participant_id = %session.participant_id,
             "realtime synchronization failed"
@@ -937,7 +929,7 @@ async fn close_socket(socket: &mut WebSocket, code: u16, reason: &'static str) {
     .await;
     match result {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(error = %error, code, reason, "realtime close failed"),
+        Ok(Err(_error)) => tracing::warn!(code, reason, "realtime close failed"),
         Err(_) => tracing::warn!(code, reason, "realtime close write timed out"),
     }
 }

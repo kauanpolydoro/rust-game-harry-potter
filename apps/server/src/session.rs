@@ -148,13 +148,18 @@ pub(crate) async fn session_is_active_in_transaction(
 }
 
 fn session_token(headers: &HeaderMap) -> Result<&str, ApiError> {
-    headers
-        .get_all(header::COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|cookies| cookies.split(';'))
-        .map(str::trim)
-        .find_map(|cookie| cookie.strip_prefix("__Host-session="))
+    let mut presented = None;
+    for value in headers.get_all(header::COOKIE) {
+        let cookies = value.to_str().map_err(|_| ApiError::session_invalid())?;
+        for cookie in cookies.split(';').map(str::trim) {
+            if let Some(token) = cookie.strip_prefix("__Host-session=")
+                && presented.replace(token).is_some()
+            {
+                return Err(ApiError::session_invalid());
+            }
+        }
+    }
+    presented
         .filter(|token| {
             token.len() == SESSION_BYTES * 2 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
         })

@@ -1394,6 +1394,8 @@ fn json_request(
 ) -> Request<Body> {
     let mut request = Request::builder()
         .method(method)
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri(uri)
         .header(header::CONTENT_TYPE, "application/json");
     if let Some(cookie) = cookie {
@@ -5348,7 +5350,9 @@ async fn assert_revocation_command_order(
 }
 
 async fn wait_for_requests_blocked_by(database: &PgPool, blocker_pid: i32, minimum: i64) {
-    let observation_deadline = Instant::now() + Duration::from_secs(5);
+    // Recovery must finish real Argon2 before reaching the database fence.
+    // This synchronization deadline is separate from the measured revocation SLOs.
+    let observation_deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let waiting_requests = sqlx::query_scalar::<_, i64>(
             r"
@@ -5989,6 +5993,25 @@ struct RawWebSocket {
 }
 
 impl RawWebSocket {
+    async fn send_frame(&mut self, opcode: u8, payload: &[u8]) {
+        let mut frame = vec![0x80 | opcode];
+        if payload.len() < 126 {
+            frame.push(0x80 | u8::try_from(payload.len()).unwrap());
+        } else {
+            frame.push(0x80 | 0x7e);
+            frame.extend_from_slice(&u16::try_from(payload.len()).unwrap().to_be_bytes());
+        }
+        let mask = [1, 2, 3, 4];
+        frame.extend_from_slice(&mask);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(index, byte)| byte ^ mask[index % 4]),
+        );
+        self.stream.write_all(&frame).await.unwrap();
+    }
+
     async fn read_text(&mut self) -> String {
         loop {
             let (opcode, payload) = self.read_frame().await;
@@ -7380,15 +7403,16 @@ async fn reference_reconnect_profile_meets_replay_and_snapshot_slos() {
 
     let manifest = playable_manifest();
     let (app, _, _) = test_app(manifest.clone()).await;
-    let mut setups = JoinSet::new();
-    for _ in 0..GAME_COUNT {
-        let app = app.clone();
-        let manifest = manifest.clone();
-        setups.spawn(create_reference_recovery_game(app, manifest));
-    }
     let mut games = Vec::with_capacity(GAME_COUNT);
-    while let Some(result) = setups.join_next().await {
-        games.push(result.expect("reference game setup must finish"));
+    // Prepare distinct clients without an Argon2 burst before measuring reconnect load.
+    // All fixtures still share the production AppState and its admission limits.
+    for index in 0..GAME_COUNT {
+        let peer =
+            std::net::SocketAddr::from(([192, 0, 2, u8::try_from(index + 1).unwrap()], 12345));
+        let setup_app = app
+            .clone()
+            .layer(axum::Extension(axum::extract::ConnectInfo(peer)));
+        games.push(create_reference_recovery_game(setup_app, manifest.clone()).await);
     }
 
     let (address, server) = start_network_server(app.clone()).await;
@@ -7700,4 +7724,116 @@ async fn a_retention_renewal_committed_under_the_root_wins_over_an_old_expiratio
         assert_eq!(restored["game"]["id"], projection["game"]["id"]);
         assert_eq!(restored["snapshot"], projection["snapshot"]);
     }
+}
+
+#[path = "support/log_capture.rs"]
+mod log_capture;
+
+#[tokio::test]
+async fn websocket_payloads_and_close_reasons_are_never_commands_or_log_fields() {
+    let room = ready_room().await;
+    start_ready_game(&room, "security-websocket-logging").await;
+    let before = response_json(
+        room.app
+            .clone()
+            .oneshot(json_request(
+                "GET",
+                "/api/session",
+                &json!({}),
+                Some(&room.host_cookie),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let logs = log_capture::LogCapture::start();
+    let (address, server) = start_network_server(room.app.clone()).await;
+    for (path, protocol) in [
+        ("/api/games/current/events", "hogwarts.realtime.v2"),
+        ("/api/session/events", "hogwarts.session.v1"),
+    ] {
+        for opcode in [1, 2, 8] {
+            let (status, _, mut socket) = websocket_handshake(
+                address,
+                path,
+                Some(&room.host_cookie),
+                Some("http://127.0.0.1:5173"),
+                Some(protocol),
+            )
+            .await;
+            assert_eq!(status, 101);
+            socket.read_text().await;
+            let payload = if opcode == 8 {
+                [
+                    1000_u16.to_be_bytes().as_slice(),
+                    b"websocket-close-private-canary",
+                ]
+                .concat()
+            } else {
+                b"{\"type\":\"end_hero_actions\",\"seed\":\"websocket-payload-private-canary\",\"attack\":9999}".to_vec()
+            };
+            socket.send_frame(opcode, &payload).await;
+            let code =
+                tokio::time::timeout(std::time::Duration::from_secs(2), socket.read_close_code())
+                    .await
+                    .unwrap();
+            assert_eq!(code, if opcode == 8 { 1000 } else { 1003 });
+        }
+    }
+    let after = response_json(
+        room.app
+            .clone()
+            .oneshot(json_request(
+                "GET",
+                "/api/session",
+                &json!({}),
+                Some(&room.host_cookie),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(before, after);
+    server.abort();
+    let logs = logs.text();
+    assert!(logs.contains("realtime client closed the connection"));
+    assert!(
+        !logs.contains("private-canary"),
+        "private frames reached logs: {logs}"
+    );
+}
+
+#[tokio::test]
+async fn websocket_control_floods_are_closed_before_unbounded_presence_work() {
+    let room = ready_room().await;
+    start_ready_game(&room, "security-websocket-rate-limit").await;
+    let (address, server) = start_network_server(room.app.clone()).await;
+    for (path, protocol) in [
+        ("/api/games/current/events", "hogwarts.realtime.v2"),
+        ("/api/session/events", "hogwarts.session.v1"),
+    ] {
+        let (status, _, mut socket) = websocket_handshake(
+            address,
+            path,
+            Some(&room.host_cookie),
+            Some("http://127.0.0.1:5173"),
+            Some(protocol),
+        )
+        .await;
+        assert_eq!(status, 101);
+        socket.read_text().await;
+        for _ in 0..61 {
+            socket.send_frame(10, b"").await;
+        }
+        // Processing the bounded control budget includes real session checks.
+        // Assert the close policy without treating shared-host load as a latency SLO.
+        let code =
+            tokio::time::timeout(std::time::Duration::from_secs(10), socket.read_close_code())
+                .await
+                .unwrap();
+        assert_eq!(code, 1008);
+    }
+    server.abort();
 }

@@ -41,7 +41,9 @@ Execute `./scripts/dev` novamente para retomar o ambiente.
 O Vite atualiza a interface quando os arquivos Vue mudam.
 Após alterar o código Rust, interrompa com `Ctrl+C` e execute `./scripts/dev` novamente para recompilar o backend.
 
-O WebSocket autenticado aceita somente a origem exata configurada em `APPLICATION_ORIGIN`.
+Mutações HTTP e WebSockets aceitam somente a origem exata configurada em `APPLICATION_ORIGIN`.
+O cliente envia a proteção CSRF obrigatória nas mutações.
+Consulte [SECURITY.md](SECURITY.md) para os limites, headers, logging e requisitos de implantação.
 
 Em desenvolvimento, o valor padrão é `http://127.0.0.1:5173`.
 
@@ -66,6 +68,14 @@ make check
 O gate cria um banco temporário isolado para validar migrations desde zero e o remove ao terminar.
 
 Ele executa formatação, Clippy, testes Rust, limites de módulos, geração de contratos, lint, typecheck, testes Vue, build, Playwright e secret scan.
+
+Para validar checkouts simultâneos, escolha um projeto Compose e portas exclusivos:
+
+```bash
+COMPOSE_PROJECT_NAME=hogwarts-checkout-3 POSTGRES_PORT=55434 E2E_BACKEND_PORT=18083 E2E_FRONTEND_PORT=4176 make check
+```
+
+O nome do projeto isola o container e o volume do PostgreSQL; as portas evitam conflitos entre os servidores locais.
 
 Valide separadamente os SLOs de reconexão no perfil de referência:
 

@@ -49,10 +49,16 @@ export async function requestJson(
   }
 
   try {
+    const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
+    const method = (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      headers.set('x-csrf-protection', '1')
+    }
     const response = await fetch(input, {
       cache: 'no-store',
       credentials: 'same-origin',
       ...init,
+      headers,
       signal: controller.signal,
     })
     let body: unknown

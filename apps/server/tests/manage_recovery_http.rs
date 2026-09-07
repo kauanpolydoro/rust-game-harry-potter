@@ -31,6 +31,8 @@ async fn test_state() -> (axum::Router, PgPool) {
 fn create_room_request() -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/rooms")
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", uuid::Uuid::new_v4().to_string())
@@ -47,6 +49,8 @@ fn create_room_request() -> Request<Body> {
 fn join_room_request(room_code: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri(format!("/api/rooms/{room_code}/participants"))
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", uuid::Uuid::new_v4().to_string())
@@ -68,6 +72,8 @@ fn rotate_password_request(
 ) -> Request<Body> {
     let mut builder = Request::builder()
         .method("PUT")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/recovery-password")
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", idempotency_key);
@@ -105,6 +111,8 @@ fn recover_participation_attempt_request(
 ) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/recover")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
@@ -121,6 +129,8 @@ fn recover_participation_attempt_request(
 fn regenerate_own_credential_request(cookie: &str, idempotency_key: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/recovery-credential")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie)
@@ -137,6 +147,8 @@ fn regenerate_assisted_credential_request(
 ) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri(format!(
             "/api/rooms/current/participants/{target_position}/recovery-credential"
         ))

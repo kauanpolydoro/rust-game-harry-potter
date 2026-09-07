@@ -253,6 +253,9 @@ const participationRecoveryError = computed(() => {
   if (roomAccess.errorCode === 'RECOVERY_FAILED') {
     return 'Não foi possível recuperar a participação. Confira o link e a senha da sala.'
   }
+  if (roomAccess.errorCode === 'RECOVERY_RATE_LIMITED') {
+    return 'Muitas tentativas. Aguarde um minuto antes de tentar novamente com o mesmo link.'
+  }
   return roomAccess.errorCode
     ? 'O serviço não conseguiu confirmar a recuperação. Tente novamente com o mesmo link.'
     : null
