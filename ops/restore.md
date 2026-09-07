@@ -11,9 +11,9 @@ Mantenha esses valores estáveis entre reinícios normais e fora do backup do ba
 O worker também exige a `TOMBSTONE_HMAC_KEY` estável de 32 bytes e exatamente uma opção de armazenamento: `TOMBSTONE_BUCKET` em produção ou `TOMBSTONE_LOCAL_DIRECTORY` em desenvolvimento.
 A identidade AWS precisa ler e gravar os comprovantes e conferir a retenção descrita em [lifecycle.md](lifecycle.md).
 
-A migration 0023 registra o deployment, seu login PostgreSQL e fingerprints das chaves, sem guardar os segredos.
+A migration 0024 registra o deployment, seu login PostgreSQL e fingerprints das chaves, sem guardar os segredos.
 Um banco novo e vazio pode ser vinculado no primeiro startup.
-Um banco existente da versão 22 precisa ser adotado explicitamente na origem, antes de produzir backups utilizáveis pelo novo procedimento.
+Um banco existente anterior à versão 24 precisa ser adotado explicitamente na origem, antes de produzir backups utilizáveis pelo novo procedimento.
 Com os processos antigos parados e as variáveis da origem disponíveis, execute uma vez:
 
 ```bash

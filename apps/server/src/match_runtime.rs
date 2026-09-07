@@ -33,6 +33,8 @@ mod realtime;
 
 #[cfg(test)]
 mod game_one_tests;
+#[cfg(test)]
+mod game_two_tests;
 
 use codec::{
     command_domain_state, decode_persisted_snapshot, persisted_after_decision, persisted_event,
@@ -603,6 +605,8 @@ impl PersistedEffects {
 #[serde(deny_unknown_fields)]
 struct PersistedEffectEntity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    copied_ally_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     drawing_blocked: Option<bool>,
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -631,6 +635,12 @@ struct PersistedEffectEntity {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectOutcome {
+    AllyCopied {
+        rule_id: String,
+        card_id: String,
+        ally_id: String,
+        owner_position: u8,
+    },
     DrawingBlocked {
         rule_id: String,
         target_id: String,
@@ -1142,7 +1152,12 @@ async fn execute_game_command(
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     validate_persisted_json_size(&snapshot_json)?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
-    let (event_version, event_type, event_json) = persisted_event(decision.event)?;
+    let (event_version, event_type, event_json) =
+        if decision.state.snapshot_version() == game_domain::GAME_TWO_SNAPSHOT_VERSION {
+            codec::persisted_game_two_event(decision.event)?
+        } else {
+            persisted_event(decision.event)?
+        };
     let receipt = postgres::persist_game_command(
         &mut transaction,
         postgres::NewGameCommand {

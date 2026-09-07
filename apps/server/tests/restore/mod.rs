@@ -465,8 +465,17 @@ async fn resume_with_fresh_access(
 
 #[tokio::test]
 async fn explicit_source_adoption_upgrades_v22_without_revoking_existing_participation() {
+    assert_source_adoption_preserves_access(22).await;
+}
+
+#[tokio::test]
+async fn explicit_source_adoption_upgrades_v23_without_revoking_existing_participation() {
+    assert_source_adoption_preserves_access(23).await;
+}
+
+async fn assert_source_adoption_preserves_access(version: i64) {
     use harry_potter_server::lifecycle::adopt_existing_source;
-    let fixture = Fixture::at_version(Some(22)).await;
+    let fixture = Fixture::at_version(Some(version)).await;
     let mut tx = fixture.database.begin().await.unwrap();
     let identity = Uuid::new_v4();
     let room = Uuid::new_v4();

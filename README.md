@@ -38,7 +38,7 @@ docker compose --profile dev stop
 Os dados do PostgreSQL permanecem no volume local do Compose entre execuções.
 Os comprovantes de exclusão ficam no volume `tombstones`, separado do banco.
 Execute `./scripts/dev` novamente para retomar o ambiente.
-Volumes anteriores à migration 0023 precisam da adoção de origem descrita no [runbook de recuperação](ops/restore.md#preparar-a-origem), que preserva os acessos existentes.
+Volumes anteriores à migration 0024 precisam da adoção de origem descrita no [runbook de recuperação](ops/restore.md#preparar-a-origem), que preserva os acessos existentes.
 
 O Vite atualiza a interface quando os arquivos Vue mudam.
 Após alterar o código Rust, interrompa com `Ctrl+C` e execute `./scripts/dev` novamente para recompilar o backend.

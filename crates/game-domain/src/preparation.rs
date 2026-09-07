@@ -7,7 +7,22 @@ pub(crate) fn prepare_game_one(
     state: &mut InitialGameState,
     random: &mut dyn EffectRoller,
 ) -> Result<(), StartGameError> {
-    validate_initial_layout(state)?;
+    prepare(state, random, false)
+}
+
+pub(crate) fn prepare_game_two(
+    state: &mut InitialGameState,
+    random: &mut dyn EffectRoller,
+) -> Result<(), StartGameError> {
+    prepare(state, random, true)
+}
+
+fn prepare(
+    state: &mut InitialGameState,
+    random: &mut dyn EffectRoller,
+    game_two: bool,
+) -> Result<(), StartGameError> {
+    validate_initial_layout(state, game_two)?;
     let world = &mut state.effect_world;
     let samples = &mut state.preparation_samples;
     for zone in [
@@ -71,14 +86,14 @@ pub(crate) fn prepare_game_one(
     Ok(())
 }
 
-fn validate_initial_layout(state: &InitialGameState) -> Result<(), StartGameError> {
+fn validate_initial_layout(state: &InitialGameState, game_two: bool) -> Result<(), StartGameError> {
     let world = &state.effect_world;
     let valid_counts = [
-        (EffectZone::HogwartsDeck, 30),
-        (EffectZone::DarkArtsDeck, 10),
-        (EffectZone::VillainDeck, 3),
+        (EffectZone::HogwartsDeck, if game_two { 44 } else { 30 }),
+        (EffectZone::DarkArtsDeck, if game_two { 15 } else { 10 }),
+        (EffectZone::VillainDeck, if game_two { 6 } else { 3 }),
         (EffectZone::ActiveLocation, 1),
-        (EffectZone::LocationDeck, 1),
+        (EffectZone::LocationDeck, if game_two { 2 } else { 1 }),
         (EffectZone::Heroes, state.players.len()),
     ]
     .into_iter()
@@ -104,8 +119,18 @@ fn validate_initial_layout(state: &InitialGameState) -> Result<(), StartGameErro
             | (EffectZone::VillainDeck, EffectEntityKind::Villain) => true,
             (EffectZone::ActiveLocation | EffectZone::LocationDeck, EffectEntityKind::Location) => {
                 entity.resource(EffectResource::Control) == 0
-                    && entity.resource_limit(EffectResource::Control) == Some(4)
-                    && entity.dark_arts_count() == Some(1)
+                    && entity.resource_limit(EffectResource::Control)
+                        == Some(if game_two && entity.catalog_id() == Some("location:005") {
+                            5
+                        } else {
+                            4
+                        })
+                    && entity.dark_arts_count()
+                        == Some(if game_two && entity.catalog_id() == Some("location:005") {
+                            2
+                        } else {
+                            1
+                        })
             }
             _ => false,
         });
@@ -116,14 +141,28 @@ fn validate_initial_layout(state: &InitialGameState) -> Result<(), StartGameErro
     }
 }
 
-pub(crate) fn valid_samples(samples: &[PreparationSample], positions: &[u8], counter: u64) -> bool {
+pub(crate) fn valid_samples(
+    samples: &[PreparationSample],
+    positions: &[u8],
+    counter: u64,
+    adventure_id: &str,
+) -> bool {
     if samples.is_empty() {
         return true;
     }
+    let game_two = adventure_id == "adventure:002";
     let expected = [
-        (EffectZone::HogwartsDeck, None, 30),
-        (EffectZone::DarkArtsDeck, None, 10),
-        (EffectZone::VillainDeck, None, 3),
+        (
+            EffectZone::HogwartsDeck,
+            None,
+            if game_two { 44 } else { 30 },
+        ),
+        (
+            EffectZone::DarkArtsDeck,
+            None,
+            if game_two { 15 } else { 10 },
+        ),
+        (EffectZone::VillainDeck, None, if game_two { 6 } else { 3 }),
     ]
     .into_iter()
     .chain(

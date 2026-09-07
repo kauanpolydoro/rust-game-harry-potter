@@ -156,12 +156,13 @@ fn contains_participant_choice(effect: &Effect) -> bool {
                     .as_deref()
                     .is_some_and(contains_participant_choice)
         }
-        Effect::Repeat { effect, .. } | Effect::Reaction { effect, .. } => {
-            contains_participant_choice(effect)
-        }
+        Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. }
+        | Effect::Reaction { effect, .. } => contains_participant_choice(effect),
         Effect::Roll { outcomes, .. } => outcomes.iter().any(contains_participant_choice),
         Effect::Sequence { effects } => effects.iter().any(contains_participant_choice),
         Effect::Apply { .. }
+        | Effect::PreventExtraDrawing
         | Effect::TopDeckAcquisition { .. }
         | Effect::CardType { .. }
         | Effect::HandDamageLimit { .. }

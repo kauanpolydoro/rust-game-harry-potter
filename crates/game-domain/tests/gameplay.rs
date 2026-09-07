@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+mod game_two;
 mod reactions;
 
 use game_domain::{

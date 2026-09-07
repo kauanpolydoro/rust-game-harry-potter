@@ -1,4 +1,4 @@
-//! One-time adoption of the original database when upgrading from schema 22.
+//! One-time adoption of the original database before enabling restore reconciliation.
 use harry_potter_server::{
     AppState,
     lifecycle::{FileLedger, S3Ledger, adopt_existing_source},

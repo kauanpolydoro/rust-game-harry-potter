@@ -13,4 +13,4 @@ CREATE TABLE runtime_deployment (
     CONSTRAINT deployment_fingerprint_format CHECK (credential_fingerprint ~ '^[0-9a-f]{64}$')
 );
 
-UPDATE application_metadata SET value = '23' WHERE key = 'schema_version';
+UPDATE application_metadata SET value = '24' WHERE key = 'schema_version';

@@ -28,12 +28,23 @@ fn prepared_game(
     Vec<StoredRoomParticipant>,
     ValidatedGameRules,
 ) {
-    let manifest = crate::game_one_manifest();
+    prepared_adventure(count, crate::game_one_manifest(), "adventure:001")
+}
+
+pub(super) fn prepared_adventure(
+    count: usize,
+    manifest: game_content::ContentManifest,
+    adventure: &str,
+) -> (
+    game_domain::InitialGameState,
+    Vec<StoredRoomParticipant>,
+    ValidatedGameRules,
+) {
     let digest = manifest.digest.clone();
     let version = manifest.ruleset_version.clone();
     let catalog = ContentCatalog::new(vec![manifest]);
     let content = catalog
-        .selection("adventure:001", &digest, &version)
+        .selection(adventure, &digest, &version)
         .expect("selection");
     let rules = ValidatedGameRules::new(catalog.effect_rules(&digest).expect("compiled rules"))
         .expect("validated rules");

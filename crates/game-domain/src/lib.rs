@@ -25,6 +25,7 @@ pub use effects::{
 };
 
 pub const SNAPSHOT_VERSION: u16 = 5;
+pub const GAME_TWO_SNAPSHOT_VERSION: u16 = 6;
 const TERMINAL_SNAPSHOT_VERSION: u16 = 4;
 const HERO_ACTION_SNAPSHOT_VERSION: u16 = 3;
 const PARTICIPANT_CHOICE_SNAPSHOT_VERSION: u16 = 2;
@@ -393,6 +394,20 @@ impl<'rules> GameEngine<'rules> {
     ) -> Result<InitialGameState, StartGameError> {
         let mut state = initialize_game(input)?;
         preparation::prepare_game_one(&mut state, roller)?;
+        settle_initial_turn(state, self.rules.effect_rules(), roller)
+    }
+
+    /// Prepares the cumulative Game 2 decks and resolves its opening turn.
+    ///
+    /// # Errors
+    /// Returns an error for invalid lobby, inventory, or entropy.
+    pub fn start_game_two(
+        &self,
+        input: StartGameInput<'_>,
+        roller: &mut dyn EffectRoller,
+    ) -> Result<InitialGameState, StartGameError> {
+        let mut state = initialize_game(input)?;
+        preparation::prepare_game_two(&mut state, roller)?;
         settle_initial_turn(state, self.rules.effect_rules(), roller)
     }
 
@@ -1149,7 +1164,11 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
     }
 
     Ok(InitialGameState {
-        snapshot_version: SNAPSHOT_VERSION,
+        snapshot_version: if input.content.manifest_version >= 5 {
+            GAME_TWO_SNAPSHOT_VERSION
+        } else {
+            SNAPSHOT_VERSION
+        },
         state_version: INITIAL_STATE_VERSION,
         sequence: INITIAL_SEQUENCE,
         status: GameStatus::InProgress,
@@ -1560,6 +1579,7 @@ pub fn restore_game_state(
             &input.preparation_samples,
             &participant_positions,
             input.prng_counter,
+            input.adventure_id,
         )
     {
         return Err(GameStateRestoreError::InvalidControlState);
@@ -1569,7 +1589,11 @@ pub fn restore_game_state(
     players.sort_by_key(InitialPlayer::position);
 
     Ok(InitialGameState {
-        snapshot_version: SNAPSHOT_VERSION,
+        snapshot_version: if input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION {
+            GAME_TWO_SNAPSHOT_VERSION
+        } else {
+            SNAPSHOT_VERSION
+        },
         state_version: input.state_version,
         sequence: input.sequence,
         status: input.status,
@@ -1601,7 +1625,8 @@ pub fn restore_game_state(
 fn validate_restore_metadata(
     input: &GameStateRestoreInput<'_>,
 ) -> Result<(), GameStateRestoreError> {
-    let supported_snapshot = input.snapshot_version == SNAPSHOT_VERSION
+    let supported_snapshot = input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION
+        || input.snapshot_version == SNAPSHOT_VERSION
         || input.snapshot_version == TERMINAL_SNAPSHOT_VERSION
         || input.snapshot_version == HERO_ACTION_SNAPSHOT_VERSION
         || input.snapshot_version == PARTICIPANT_CHOICE_SNAPSHOT_VERSION
@@ -2483,16 +2508,20 @@ fn legal_playable_cards(
                     Some(actor_position),
                 )
                 .ok()?;
-            let target_slots =
-                effects::atomic_manual_target_slots(&effect_world, actor_position, rule)?
-                    .into_iter()
-                    .map(|slot| LegalTargetSlot {
-                        selector_id: slot.selector_id,
-                        min: slot.min,
-                        max: slot.max,
-                        target_ids: slot.target_ids,
-                    })
-                    .collect();
+            let target_slots = effects::atomic_manual_target_slots(
+                &effect_world,
+                actor_position,
+                rule,
+                effect_rules,
+            )?
+            .into_iter()
+            .map(|slot| LegalTargetSlot {
+                selector_id: slot.selector_id,
+                min: slot.min,
+                max: slot.max,
+                target_ids: slot.target_ids,
+            })
+            .collect();
             Some(LegalPlayableCard {
                 card_id: card.id().to_owned(),
                 target_slots,

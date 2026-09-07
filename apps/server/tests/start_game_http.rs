@@ -22,6 +22,7 @@ use tokio::{
 use tower::ServiceExt;
 
 mod game_one;
+mod game_two;
 mod lifecycle;
 mod restore;
 
@@ -1618,7 +1619,10 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
             &room.host_cookie,
             &unique_key(key_prefix),
             &room.manifest,
-            "adventure:001",
+            room.manifest
+                .game_setups
+                .first()
+                .map_or("adventure:001", |setup| setup.adventure_id.as_str()),
         ))
         .await
         .expect("game start must receive a response");

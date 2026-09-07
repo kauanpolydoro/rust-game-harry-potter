@@ -32,7 +32,7 @@ pub(crate) struct GameProjectionResponse {
 #[derive(Serialize)]
 pub(super) struct GameSummary {
     pub(super) id: String,
-    status: String,
+    pub(super) status: String,
     adventure: AdventureSummary,
     expires_at: String,
 }
@@ -402,7 +402,7 @@ fn effect_resolution_summary(state: &InitialGameState) -> EffectResolutionSummar
         outcomes: state
             .last_effects()
             .iter()
-            .map(effect_outcome_summary)
+            .filter_map(effect_outcome_summary)
             .collect(),
     }
 }
@@ -802,8 +802,9 @@ fn choice_summary(
     }
 }
 
-fn effect_outcome_summary(outcome: &EffectOutcome) -> EffectOutcomeSummary {
-    match outcome {
+fn effect_outcome_summary(outcome: &EffectOutcome) -> Option<EffectOutcomeSummary> {
+    Some(match outcome {
+        EffectOutcome::AllyCopied { .. } => return None,
         EffectOutcome::DrawingBlocked {
             rule_id,
             target_id,
@@ -889,7 +890,7 @@ fn effect_outcome_summary(outcome: &EffectOutcome) -> EffectOutcomeSummary {
                 EffectGameOutcome::Won => "won",
             },
         },
-    }
+    })
 }
 
 fn effect_zone_name(zone: EffectZone) -> &'static str {
