@@ -68,7 +68,8 @@ O corpo guarda somente versão e instantes de expiração, detecção e verifica
 O campo `completed_at_ms` é o instante da verificação durável; a confirmação externa e a remoção final da fila podem ocorrer depois em caso de retry.
 A gravação S3 usa criptografia SSE-S3 e renova a retenção antes da remoção da raiz.
 Perda de resposta após uma gravação durável é segura: o próximo worker publica a mesma prova.
-O ledger fornece a informação necessária à futura reconciliação de restore, que está fora desta issue.
+O ledger fornece a informação necessária à reconciliação de restore.
+Após reconciliar os dados restaurados, execute `lifecycle-worker --audit-restore` para detectar jogos que ainda constem no ledger, conforme o [runbook de restore](runbooks.md).
 
 ## Inventário de cópias
 
@@ -92,7 +93,7 @@ Se houver um coletor legado identificável, ele precisa ser inventariado e limpo
 
 ## Métricas e resposta operacional
 
-O worker emite JSON `lifecycle metrics` a cada lote, sem labels por Partida.
+O worker emite métricas JSON EMF a cada lote, sem labels por Partida, pelo subscriber sanitizado descrito em [observability.md](observability.md).
 A janela de observações concluídas é de 14 dias, com limpeza automática.
 `pending`, `stages`, `failed_attempts`, `orphan_jobs`, `undetected`, `oldest_pending_seconds` e `overdue` mostram trabalho incompleto.
 Partidas expiradas pela API mas ainda sem trabalho na fila continuam visíveis.

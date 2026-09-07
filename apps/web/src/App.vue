@@ -10,6 +10,7 @@ import type {
   StartGameRequest,
 } from './contracts/identity-access.generated'
 import { takeRecoveryToken } from './recoveryCredential'
+import { startJourney } from './telemetry'
 import { useAccessProtectionStore } from './stores/accessProtection'
 import { type Availability, useHealthStore } from './stores/health'
 import { useGameCommandStore } from './stores/gameCommand'
@@ -35,6 +36,7 @@ const recoveryManagement = useRecoveryManagementStore()
 const securitySync = useSecuritySyncStore()
 const accessInvalidationReason = ref<AccessInvalidationReason | null>(null)
 const recoveryToken = ref(takeRecoveryToken())
+const finishRecoveryJourney = recoveryToken.value ? startJourney('recovery') : () => {}
 const entryMode = ref<'create' | 'join' | 'recover'>(
   recoveryToken.value ? 'recover' : 'create',
 )
@@ -436,6 +438,7 @@ async function recoverParticipation(): Promise<void> {
       : {}),
   })
   if (recovered) {
+    finishRecoveryJourney('success')
     recoveryToken.value = null
     recoveryPassword.value = ''
     passwordVisible.value = false
@@ -453,6 +456,7 @@ async function recoverParticipation(): Promise<void> {
 }
 
 async function leaveParticipationRecovery(): Promise<void> {
+  finishRecoveryJourney('abandoned')
   roomAccess.dismissParticipationRecovery()
   recoveryToken.value = null
   recoveryPassword.value = ''

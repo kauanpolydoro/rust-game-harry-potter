@@ -221,6 +221,73 @@ async fn lost_ledger_ack_keeps_the_root_and_a_fresh_worker_resumes_idempotently(
 }
 
 #[tokio::test]
+async fn restore_audit_reports_roots_with_external_tombstones_without_mutating_them() {
+    let logs = log_capture::LogCapture::start();
+    let fixture = Fixture::new().await;
+    std::fs::create_dir_all(&fixture.ledger_dir).unwrap();
+    let clean = fixture.worker().audit_restore().await.unwrap();
+    assert_eq!(clean.checked, 1);
+    assert_eq!(clean.resurrected, 0);
+    fixture.expire().await;
+    let ledger = InterruptedLedger::new(&fixture);
+    ledger.lose_ack.store(true, Ordering::SeqCst);
+    let interrupted = LifecycleWorker::new(fixture.room.database.clone(), ledger, [7; 32]);
+    assert_eq!(interrupted.tick().await, Err(PurgeError::Ledger));
+    // This is the forbidden post-reconciliation state: a durable tombstone
+    // exists in the independent ledger while its operational root is present.
+    let audit = fixture.worker().audit_restore().await.unwrap();
+    assert_eq!(audit.checked, 1);
+    assert_eq!(audit.resurrected, 1);
+    assert_eq!(fixture.worker().metrics().await.unwrap().pending, 1);
+    assert!(
+        logs.text()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .any(|event| event["metric"] == "p0_restore_resurrection")
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn lifecycle_exports_live_measurements_and_heartbeat_without_job_identifiers() {
+    use tracing::instrument::WithSubscriber;
+    let fixture = Fixture::new().await;
+    let logs = log_capture::LogCapture::default();
+    let writer = logs.clone();
+    let subscriber = harry_potter_server::tracing_subscriber(
+        move || writer.clone(),
+        tracing_subscriber::EnvFilter::new("off"),
+    );
+    async {
+        fixture.worker().tick().await.unwrap();
+        fixture.worker().metrics().await.unwrap();
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let output = logs.text();
+    assert!(!output.contains(&fixture.room.room_code));
+    let events: Vec<Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for name in [
+        "worker_heartbeat",
+        "lifecycle_pending",
+        "lifecycle_undetected",
+        "lifecycle_orphan_jobs",
+        "lifecycle_purge_max_seconds",
+        "lifecycle_detection_p95_seconds",
+        "lifecycle_measurements",
+    ] {
+        assert!(
+            events.iter().any(|event| event["metric"] == name),
+            "missing {name} even with diagnostic logs disabled"
+        );
+    }
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
 async fn verifier_blocks_completion_for_an_orphan_after_root_removal_and_process_loss() {
     let fixture = Fixture::new().await;
     let identity: Uuid = sqlx::query_scalar("SELECT id FROM guest_identities LIMIT 1")

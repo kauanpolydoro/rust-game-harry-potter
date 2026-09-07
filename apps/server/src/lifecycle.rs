@@ -12,6 +12,11 @@ pub use ledger::{FileLedger, S3Ledger};
 /// External stores must acknowledge durable writes and tolerate duplicate calls.
 /// Neither keys nor bodies may contain operational identifiers or credentials.
 pub trait TombstoneLedger: Send + Sync {
+    /// Reads the independent deletion proof. Unsupported readers fail closed.
+    fn contains(&self, _key: &str) -> impl Future<Output = Result<bool, PurgeError>> + Send {
+        async { Err(PurgeError::Ledger) }
+    }
+
     /// Stores with native TTL may keep the default; local stores expire proofs here.
     fn maintain(&self, _now_ms: i64) -> impl Future<Output = Result<(), PurgeError>> + Send {
         async { Ok(()) }
@@ -79,13 +84,107 @@ pub struct LifecycleMetrics {
     pub stages: serde_json::Value,
 }
 
+impl LifecycleMetrics {
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "CloudWatch represents aggregated counts as floating-point samples"
+    )]
+    fn observe(&self) {
+        for (metric, value) in [
+            ("lifecycle_pending", self.pending as f64),
+            ("lifecycle_completed", self.completed as f64),
+            ("lifecycle_failed_attempts", self.failed_attempts as f64),
+            (
+                "lifecycle_detection_p95_seconds",
+                self.detection_p95_seconds,
+            ),
+            ("lifecycle_purge_p95_seconds", self.purge_p95_seconds),
+            ("lifecycle_purge_max_seconds", self.purge_max_seconds),
+            (
+                "lifecycle_oldest_pending_seconds",
+                self.oldest_pending_seconds,
+            ),
+            ("lifecycle_undetected", self.undetected as f64),
+            ("lifecycle_overdue", self.overdue as f64),
+            ("lifecycle_orphan_jobs", self.orphan_jobs as f64),
+        ] {
+            crate::telemetry::observe(metric, "lifecycle", "success", value);
+        }
+        for (stage, operation) in [
+            ("tombstone", "lifecycle_tombstone"),
+            ("detach", "lifecycle_detach"),
+            ("purge", "lifecycle_purge"),
+            ("verify", "lifecycle_verify"),
+            ("complete", "lifecycle_complete"),
+        ] {
+            crate::telemetry::observe(
+                "lifecycle_stage_pending",
+                operation,
+                "success",
+                self.stages
+                    .get(stage)
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0),
+            );
+        }
+    }
+}
+
 pub struct LifecycleWorker<L> {
     database: PgPool,
     ledger: L,
     key: [u8; 32],
 }
 
+#[derive(Debug, Default, Serialize)]
+pub struct RestoreAudit {
+    pub checked: u64,
+    pub resurrected: u64,
+}
+
 impl<L: TombstoneLedger> LifecycleWorker<L> {
+    /// Checks the post-reconciliation restore against the independent ledger.
+    /// Run against an isolated database with writes and user traffic disabled.
+    /// This probe never changes roots, jobs, proofs or retention.
+    ///
+    /// # Errors
+    /// Fails closed when the database or any external proof cannot be read.
+    pub async fn audit_restore(&self) -> Result<RestoreAudit, PurgeError> {
+        let timer = crate::telemetry::Timer::new("restore_audit_seconds", "restore")
+            .with_counter("restore_audits");
+        let result = self.restore_report().await;
+        timer.finish(match &result {
+            Ok(report) if report.resurrected > 0 => "violation",
+            Ok(_) => "success",
+            Err(_) => "error",
+        });
+        result
+    }
+
+    async fn restore_report(&self) -> Result<RestoreAudit, PurgeError> {
+        let mut report = RestoreAudit::default();
+        let mut cursor = None;
+        loop {
+            let roots = postgres::roots_after(&self.database, cursor).await?;
+            if roots.is_empty() {
+                return Ok(report);
+            }
+            for game_id in roots {
+                if self.ledger.contains(&self.opaque_key(game_id)).await? {
+                    report.resurrected += 1;
+                    crate::telemetry::observe(
+                        "p0_restore_resurrection",
+                        "integrity",
+                        "violation",
+                        1.0,
+                    );
+                }
+                report.checked += 1;
+                cursor = Some(game_id);
+            }
+        }
+    }
+
     #[must_use]
     pub fn new(database: PgPool, ledger: L, key: [u8; 32]) -> Self {
         Self {
@@ -100,6 +199,21 @@ impl<L: TombstoneLedger> LifecycleWorker<L> {
     /// # Errors
     /// Returns a sanitized failure; failed jobs remain durable and retryable.
     pub async fn tick(&self) -> Result<usize, PurgeError> {
+        let timer = crate::telemetry::Timer::new("lifecycle_batch_seconds", "lifecycle")
+            .with_counter("lifecycle_batches");
+        let result = self.process_batch().await;
+        timer.finish(match result {
+            Ok(_) => "success",
+            Err(PurgeError::Database) => "database_error",
+            Err(PurgeError::Ledger) => "ledger_error",
+            Err(PurgeError::Orphans) => "orphans",
+            Err(PurgeError::Timeout) => "timeout",
+        });
+        crate::telemetry::observe("worker_heartbeat", "lifecycle", "success", 1.0);
+        result
+    }
+
+    async fn process_batch(&self) -> Result<usize, PurgeError> {
         postgres::enqueue(&self.database).await?;
         let now_ms: i64 =
             sqlx::query_scalar("SELECT (extract(epoch FROM clock_timestamp()) * 1000)::BIGINT")
@@ -130,7 +244,17 @@ impl<L: TombstoneLedger> LifecycleWorker<L> {
     /// # Errors
     /// Returns a sanitized database failure.
     pub async fn metrics(&self) -> Result<LifecycleMetrics, PurgeError> {
-        postgres::metrics(&self.database).await.map_err(Into::into)
+        let result = postgres::metrics(&self.database).await.map_err(Into::into);
+        crate::telemetry::observe(
+            "lifecycle_measurements",
+            "lifecycle",
+            if result.is_ok() { "success" } else { "error" },
+            1.0,
+        );
+        if let Ok(metrics) = &result {
+            metrics.observe();
+        }
+        result
     }
 
     fn opaque_key(&self, game_id: Uuid) -> String {

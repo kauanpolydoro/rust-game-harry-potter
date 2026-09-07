@@ -1071,9 +1071,11 @@ async fn lock_game_for_command(
         .await?
         .ok_or_else(ApiError::game_action_not_allowed)?;
     if crate::game_expiration::expire_locked_game(transaction, stored.id).await? {
+        crate::telemetry::access_ended();
         return Err(ApiError::game_expired());
     }
     if !session_is_active_in_transaction(transaction, authenticated).await? {
+        crate::telemetry::access_ended();
         return Err(ApiError::session_invalid());
     }
     Ok(stored)
@@ -1084,32 +1086,61 @@ async fn execute_game_command(
     headers: HeaderMap,
     StrictJson(request): StrictJson<ExecuteGameCommandRequest>,
 ) -> Result<Response, ApiError> {
-    let authenticated = authenticated_session(&state, &headers).await?;
-    let participant_id = authenticated.participant_id;
     let command_id =
         Uuid::parse_str(request.command_id()).map_err(|_| ApiError::invalid_command_id())?;
+    crate::telemetry::COMMAND_TRACE
+        .scope(
+            state.command_trace(command_id),
+            process_game_command(state, headers, request, command_id),
+        )
+        .await
+}
+
+async fn process_game_command(
+    state: AppState,
+    headers: HeaderMap,
+    request: ExecuteGameCommandRequest,
+    command_id: Uuid,
+) -> Result<Response, ApiError> {
+    let authenticated = authenticated_session(&state, &headers).await?;
+    let participant_id = authenticated.participant_id;
     let payload_digest = command_payload_digest(&request)?;
     let expected_state_version = request.expected_state_version();
     let command_type = request.command_type();
-    let mut transaction = state
-        .database
-        .begin()
-        .await
-        .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let stored = match lock_game_for_command(&mut transaction, authenticated).await {
+    let mut connection =
+        crate::telemetry::measure("pool_wait_seconds", "command", state.database.acquire())
+            .await
+            .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    let mut transaction = crate::telemetry::measure(
+        "sql_seconds",
+        "command",
+        sqlx::Acquire::begin(&mut connection),
+    )
+    .await
+    .map_err(|error| ApiError::internal_with("match application operation", error))?;
+    let stored = match crate::telemetry::measure(
+        "lock_seconds",
+        "command",
+        lock_game_for_command(&mut transaction, authenticated),
+    )
+    .await
+    {
         Ok(stored) => stored,
         Err(error) => {
             // The gate may have revoked access; commit those effects even though
             // the command itself is rejected, before returning the error.
-            transaction
-                .commit()
+            crate::telemetry::commit(transaction, "command")
                 .await
                 .map_err(|error| ApiError::internal_with("commit game access gate", error))?;
             return Err(error);
         }
     };
-    if let Some(receipt) =
-        postgres::command_receipt_in(&mut transaction, stored.id, command_id).await?
+    if let Some(receipt) = crate::telemetry::measure(
+        "sql_seconds",
+        "command",
+        postgres::command_receipt_in(&mut transaction, stored.id, command_id),
+    )
+    .await?
     {
         transaction
             .rollback()
@@ -1120,22 +1151,16 @@ async fn execute_game_command(
         {
             return Err(ApiError::idempotency_conflict());
         }
-        let projection = projection_for_participant(&state, participant_id)
-            .await?
-            .ok_or_else(ApiError::internal)?;
-        return Ok(no_store_json(
-            StatusCode::OK,
-            ExecuteGameCommandResponse {
-                receipt: receipt_response(receipt)?,
-                projection,
-            },
-        ));
+        crate::telemetry::durable_acceptance();
+        return command_response(&state, participant_id, receipt).await;
     }
 
     let persisted = decode_persisted_snapshot(&stored.snapshot_json)?;
     verify_persisted_snapshot(&stored, &persisted)?;
     let current = command_domain_state(&persisted)?;
-    let decision = decide_player_intent(&state, &stored, &current, &request)?;
+    let decision = crate::telemetry::measure_sync("rule_seconds", "command", || {
+        decide_player_intent(&state, &stored, &current, &request)
+    })?;
 
     let next_snapshot = persisted_after_decision(&persisted, &decision.state);
     let snapshot_json = serde_json::to_string(&next_snapshot)
@@ -1143,41 +1168,55 @@ async fn execute_game_command(
     validate_persisted_json_size(&snapshot_json)?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
     let (event_version, event_type, event_json) = persisted_event(decision.event)?;
-    let receipt = postgres::persist_game_command(
-        &mut transaction,
-        postgres::NewGameCommand {
-            game_id: stored.id,
-            actor_participant_id: participant_id,
-            command_id,
-            expected_state_version,
-            command_type: command_type_name(command_type),
-            payload_digest: &payload_digest,
-            state: &decision.state,
-            snapshot_version: next_snapshot.snapshot_version,
-            state_digest: &state_digest,
-            snapshot_json: &snapshot_json,
-            event_version,
-            event_type,
-            event_json: &event_json,
-        },
+    let receipt = crate::telemetry::measure(
+        "sql_seconds",
+        "command",
+        postgres::persist_game_command(
+            &mut transaction,
+            postgres::NewGameCommand {
+                game_id: stored.id,
+                actor_participant_id: participant_id,
+                command_id,
+                expected_state_version,
+                command_type: command_type_name(command_type),
+                payload_digest: &payload_digest,
+                state: &decision.state,
+                snapshot_version: next_snapshot.snapshot_version,
+                state_digest: &state_digest,
+                snapshot_json: &snapshot_json,
+                event_version,
+                event_type,
+                event_json: &event_json,
+            },
+        ),
     )
     .await?;
-    transaction
-        .commit()
+    crate::telemetry::commit(transaction, "command")
         .await
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     state.signal_game_synchronization(stored.id);
 
-    let projection = projection_for_participant(&state, participant_id)
+    command_response(&state, participant_id, receipt).await
+}
+
+async fn command_response(
+    state: &AppState,
+    participant_id: Uuid,
+    receipt: StoredCommandReceipt,
+) -> Result<Response, ApiError> {
+    let preparation = crate::telemetry::Timer::new("response_prepare_seconds", "command");
+    let projection = projection_for_participant(state, participant_id)
         .await?
         .ok_or_else(ApiError::internal)?;
-    Ok(no_store_json(
+    let response = no_store_json(
         StatusCode::OK,
         ExecuteGameCommandResponse {
             receipt: receipt_response(receipt)?,
             projection,
         },
-    ))
+    );
+    preparation.finish("success");
+    Ok(response)
 }
 
 fn decide_player_intent(

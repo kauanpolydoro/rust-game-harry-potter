@@ -5,15 +5,22 @@ use harry_potter_server::{
     lifecycle::{FileLedger, LifecycleWorker, S3Ledger, TombstoneLedger},
 };
 use sqlx::postgres::PgPoolOptions;
+use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // AWS/SQL wire debugging can expose identifiers and credentials. Production
-    // only emits this binary's closed, anonymous operational events.
-    tracing_subscriber::fmt()
-        .with_env_filter("lifecycle_worker=info")
-        .json()
-        .init();
+async fn main() -> std::process::ExitCode {
+    harry_potter_server::tracing_subscriber(io::stdout, EnvFilter::new("info")).init();
+    std::panic::set_hook(Box::new(|_| tracing::error!("process panicked")));
+    if run_application().await.is_ok() {
+        std::process::ExitCode::SUCCESS
+    } else {
+        tracing::error!("process terminated after an operational failure");
+        std::process::ExitCode::FAILURE
+    }
+}
+
+async fn run_application() -> Result<(), Box<dyn Error>> {
+    let audit_restore = audit_requested()?;
     let value = env::var("TOMBSTONE_HMAC_KEY")?;
     let key: [u8; 32] = value
         .as_bytes()
@@ -42,9 +49,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect(&env::var("DATABASE_URL")?)
         .await?;
     let state = AppState::new(database.clone()).with_migration_database(migrations);
-    initialize(&state)
-        .await
-        .map_err(|_| io::Error::other("worker initialization failed"))?;
+    if !audit_restore {
+        initialize(&state)
+            .await
+            .map_err(|_| io::Error::other("worker initialization failed"))?;
+    }
     match (
         env::var("TOMBSTONE_BUCKET"),
         env::var("TOMBSTONE_LOCAL_DIRECTORY"),
@@ -60,15 +69,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await;
             let ledger = S3Ledger::new(aws_sdk_s3::Client::new(&config), bucket);
             ledger.validate_retention().await?;
-            run(LifecycleWorker::new(database, ledger, key)).await;
+            execute(LifecycleWorker::new(database, ledger, key), audit_restore).await?;
         }
         (Err(_), Ok(directory)) => {
-            run(LifecycleWorker::new(
-                database,
-                FileLedger::new(directory.into()),
-                key,
-            ))
-            .await;
+            execute(
+                LifecycleWorker::new(database, FileLedger::new(directory.into()), key),
+                audit_restore,
+            )
+            .await?;
         }
         _ => {
             return Err(io::Error::other(
@@ -81,6 +89,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn audit_requested() -> Result<bool, io::Error> {
+    let arguments: Vec<_> = env::args().skip(1).collect();
+    match arguments.as_slice() {
+        [] => Ok(false),
+        [argument] if argument == "--audit-restore" => Ok(true),
+        _ => Err(io::Error::other(
+            "usage: lifecycle-worker [--audit-restore]",
+        )),
+    }
+}
+
+async fn execute<L: TombstoneLedger>(
+    worker: LifecycleWorker<L>,
+    audit_restore: bool,
+) -> Result<(), Box<dyn Error>> {
+    if audit_restore {
+        let report = worker.audit_restore().await?;
+        if report.resurrected > 0 {
+            return Err(io::Error::other(
+                "restore audit failed: external tombstones conflict with operational roots",
+            )
+            .into());
+        }
+    } else {
+        run(worker).await;
+    }
+    Ok(())
+}
+
 async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -90,20 +127,14 @@ async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>) {
         tokio::select! {
             () = &mut shutdown => return,
             _ = interval.tick() => {
-                if let Err(error) = worker.tick().await { tracing::warn!(%error, "purge batch failed; retry scheduled"); }
+                if let Err(_error) = worker.tick().await { tracing::warn!("purge batch failed; retry scheduled"); }
                 match worker.metrics().await {
                     Ok(metrics) => {
-                        tracing::info!(pending = metrics.pending, completed = metrics.completed,
-                            failed_attempts = metrics.failed_attempts, orphan_jobs = metrics.orphan_jobs, stages = %metrics.stages, undetected = metrics.undetected,
-                            detection_p95_seconds = metrics.detection_p95_seconds,
-                            purge_p95_seconds = metrics.purge_p95_seconds, purge_max_seconds = metrics.purge_max_seconds,
-                            oldest_pending_seconds = metrics.oldest_pending_seconds, overdue = metrics.overdue,
-                            "lifecycle metrics");
                         if metrics.overdue > 0 || metrics.purge_max_seconds >= 86400.0 || metrics.detection_p95_seconds > 300.0 || metrics.purge_p95_seconds > 3600.0 {
                             tracing::error!("lifecycle SLO breached");
                         }
                     }
-                    Err(error) => tracing::error!(%error, "lifecycle measurement unavailable"),
+                    Err(_error) => tracing::error!("lifecycle measurement unavailable"),
                 }
             }
         }

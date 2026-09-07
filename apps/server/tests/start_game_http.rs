@@ -23,6 +23,7 @@ use tower::ServiceExt;
 
 mod game_one;
 mod lifecycle;
+mod observability;
 
 struct ReadyRoom {
     app: axum::Router,
@@ -6849,6 +6850,7 @@ async fn a_revoked_session_closes_its_existing_websocket_before_delivering_an_ev
 
 #[tokio::test]
 async fn device_session_revocation_closes_the_target_websocket_within_two_seconds() {
+    let logs = log_capture::LogCapture::start();
     let room = ready_room().await;
     start_ready_game(&room, "realtime-device-session-revocation").await;
     let second_host_cookie = additional_session_for_participant(&room, "host").await;
@@ -6897,6 +6899,32 @@ async fn device_session_revocation_closes_the_target_websocket_within_two_second
         .expect("the revoked device connection must close within the p95 target");
     assert_eq!(close_code, 1008);
     assert!(committed_at.elapsed() <= Duration::from_secs(2));
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    target_socket.send_frame(8, &1008_u16.to_be_bytes()).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if logs.text().lines().any(|line| {
+                let sample: Value = serde_json::from_str(line).unwrap();
+                sample["metric"] == "access_end_socket_closures" && sample["outcome"] == "success"
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the remote close acknowledgement must be observed");
+    let tracking: String = sqlx::query_scalar("SHOW track_commit_timestamp")
+        .fetch_one(&room.database)
+        .await
+        .unwrap();
+    if tracking == "on" {
+        assert!(logs.text().lines().any(|line| {
+            let sample: Value = serde_json::from_str(line).unwrap();
+            sample["metric"] == "access_end_to_close_upper_bound_seconds"
+                && sample["value"].as_f64().unwrap() >= 0.04
+        }));
+    }
     server.abort();
 }
 

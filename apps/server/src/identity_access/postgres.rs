@@ -1525,7 +1525,13 @@ pub(super) async fn persist_room_join(
     .await
     .map_err(|error| ApiError::internal_with("identity access PostgreSQL operation", error))?;
 
-    insert_recovery_credential(transaction, room_join.participant_id, recovery_token_hmac).await?;
+    insert_recovery_credential(
+        transaction,
+        room_join.participant_id,
+        recovery_token_hmac,
+        false,
+    )
+    .await?;
 
     sqlx::query(
         r"
@@ -1671,6 +1677,7 @@ pub(super) async fn persist_room_creation(
         transaction,
         room_creation.participant_id,
         recovery_token_hmac,
+        false,
     )
     .await?;
 
@@ -1715,6 +1722,7 @@ pub(super) async fn insert_recovery_credential(
     transaction: &mut Transaction<'_, Postgres>,
     participant_id: Uuid,
     token_hmac: &str,
+    host_assisted: bool,
 ) -> Result<(), ApiError> {
     sqlx::query(
         r"
@@ -1725,7 +1733,8 @@ pub(super) async fn insert_recovery_credential(
             recovery_password_hash,
             recovery_epoch,
             password_generation,
-            recovery_generation
+            recovery_generation,
+            host_assisted
         )
         SELECT
             $1,
@@ -1734,7 +1743,8 @@ pub(super) async fn insert_recovery_credential(
             rooms.recovery_password_hash,
             rooms.recovery_epoch,
             rooms.password_generation,
-            participants.recovery_generation
+            participants.recovery_generation,
+            $4
         FROM participants
         JOIN rooms ON rooms.id = participants.room_id
         WHERE participants.id = $2
@@ -1743,6 +1753,7 @@ pub(super) async fn insert_recovery_credential(
     .bind(Uuid::new_v4())
     .bind(participant_id)
     .bind(token_hmac)
+    .bind(host_assisted)
     .execute(&mut **transaction)
     .await
     .map(|_| ())
@@ -1758,6 +1769,7 @@ pub(super) async fn load_recovery_candidate(
         r"
         SELECT
             recovery_credentials.id AS credential_id,
+            recovery_credentials.host_assisted,
             rooms.id AS room_id,
             participants.id AS participant_id,
             participants.guest_identity_id,
@@ -1848,6 +1860,7 @@ pub(super) async fn lock_recovery_candidate(
         r"
         SELECT
             recovery_credentials.id AS credential_id,
+            recovery_credentials.host_assisted,
             rooms.id AS room_id,
             participants.id AS participant_id,
             participants.guest_identity_id,
@@ -2051,6 +2064,7 @@ pub(super) async fn consume_recovery_credential(
         transaction,
         candidate.participant_id,
         session.successor_token_hmac,
+        false,
     )
     .await?;
 

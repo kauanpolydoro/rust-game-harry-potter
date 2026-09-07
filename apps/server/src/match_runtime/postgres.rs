@@ -651,6 +651,27 @@ pub(super) async fn game_events_for_participant(
     .map_err(|error| ApiError::internal_with("match persistence operation", error))
 }
 
+pub(super) async fn event_commit_ages(
+    database: &PgPool,
+    game_id: Uuid,
+    after_sequence: i64,
+    through_sequence: i64,
+) -> Result<Vec<(Option<f64>, Uuid)>, sqlx::Error> {
+    sqlx::query_as(
+        r"SELECT CASE WHEN current_setting('track_commit_timestamp') = 'on'
+             THEN EXTRACT(EPOCH FROM (clock_timestamp() - pg_xact_commit_timestamp(xmin)))::float8
+             ELSE NULL END, command_id
+           FROM game_events
+          WHERE game_id = $1 AND sequence > $2 AND sequence <= $3
+          ORDER BY sequence LIMIT 100",
+    )
+    .bind(game_id)
+    .bind(after_sequence)
+    .bind(through_sequence)
+    .fetch_all(database)
+    .await
+}
+
 pub(super) async fn game_cursor_for_participant(
     database: &PgPool,
     participant_id: Uuid,

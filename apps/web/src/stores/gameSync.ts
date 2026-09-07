@@ -12,6 +12,7 @@ import {
   type RealtimePresenceMessage,
 } from '../contracts/identity-access.generated'
 import { useRoomAccessStore } from './roomAccess'
+import { startJourney } from '../telemetry'
 
 const realtimeSubprotocol = 'hogwarts.realtime.v2'
 const baseReconnectDelayMilliseconds = 500
@@ -118,6 +119,7 @@ class GameSyncConnection {
   private synchronizationTimer: ReturnType<typeof setTimeout> | null = null
   private forceSnapshotOnRetry = false
   private listeningForBrowserState = false
+  private finishJourney: ReturnType<typeof startJourney> | null = null
 
   constructor(private readonly callbacks: ConnectionCallbacks) {}
 
@@ -136,10 +138,13 @@ class GameSyncConnection {
     this.clearReconnectTimer()
     this.closeCurrentSocket()
     if (changingGame) {
+      this.finishJourney?.('abandoned')
+      this.finishJourney = null
       this.reconnectAttempt = 0
       this.forceSnapshotOnRetry = false
     }
     this.activeGameId = request.gameId
+    this.finishJourney ??= startJourney('reconnect')
     this.attachBrowserStateListeners()
     if (!this.isOnline()) {
       this.callbacks.updateStatus('failed')
@@ -199,11 +204,14 @@ class GameSyncConnection {
       this.clearSynchronizationTimer()
       this.callbacks.discardAnimations()
       if (event.code === 1008 || event.code === 4001) {
+        this.finishJourney?.('error')
+        this.finishJourney = null
         this.callbacks.updateStatus('failed')
         this.callbacks.invalidateSession(event.code === 4001)
         return
       }
       this.callbacks.revalidateSession()
+      this.finishJourney ??= startJourney('reconnect')
       this.callbacks.updateStatus('reconnecting')
       this.scheduleReconnect(generation)
     }
@@ -213,6 +221,7 @@ class GameSyncConnection {
     if (!this.activeGameId) {
       return
     }
+    this.finishJourney ??= startJourney('reconnect')
     this.forceSnapshotOnRetry ||= forceSnapshot
     this.callbacks.discardAnimations()
     this.closeCurrentSocket()
@@ -221,6 +230,8 @@ class GameSyncConnection {
   }
 
   disconnect(): void {
+    this.finishJourney?.('abandoned')
+    this.finishJourney = null
     this.closeCurrentSocket()
     this.clearReconnectTimer()
     this.clearStabilityTimer()
@@ -231,12 +242,14 @@ class GameSyncConnection {
     this.detachBrowserStateListeners()
   }
 
-  markSynchronized(): void {
+  markSynchronized(mode: 'replay' | 'snapshot' = 'replay'): void {
     const socket = this.socket
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return
     }
     this.callbacks.updateStatus('connected')
+    this.finishJourney?.('success', mode)
+    this.finishJourney = null
     this.clearSynchronizationTimer()
     this.clearStabilityTimer()
     const generation = this.generation
@@ -510,7 +523,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       digest.value = message.projection.snapshot.digest
       snapshotVersion.value = message.projection.snapshot.snapshot_version
       roomAccess.replaceGameProjection(message.projection)
-      connection.markSynchronized()
+      connection.markSynchronized('snapshot')
       return
     }
     if (isRealtimeSynchronizedMessage(message)) {

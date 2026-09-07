@@ -342,6 +342,7 @@ struct StoredParticipant {
 
 #[derive(FromRow)]
 struct StoredRecoveryCandidate {
+    host_assisted: Option<bool>,
     credential_id: Uuid,
     room_id: Uuid,
     participant_id: Uuid,
@@ -1540,6 +1541,7 @@ async fn commit_recovery_credential_regeneration(
         &mut transaction,
         participant.participant_id,
         &recovery_token_hmac,
+        command.delivery == "host_assisted",
     )
     .await?;
     let event = postgres::append_recovery_credential_security_event(
@@ -1722,24 +1724,31 @@ async fn recover_participation(
 ) -> Result<Response, ApiError> {
     let recovery = authenticate_recovery_request(&state, request).await?;
 
-    let mut transaction = state
-        .database
-        .begin()
-        .await
-        .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
-    if let Some(game_id) =
-        postgres::lock_game_access_root(&mut transaction, recovery.candidate.participant_id).await?
-        && crate::game_expiration::expire_locked_game(&mut transaction, game_id).await?
-    {
-        transaction
-            .commit()
+    let mut connection =
+        crate::telemetry::measure("pool_wait_seconds", "recovery", state.database.acquire())
+            .await
+            .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
+    let mut transaction = crate::telemetry::measure(
+        "sql_seconds",
+        "recovery",
+        sqlx::Acquire::begin(&mut connection),
+    )
+    .await
+    .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
+    let Some(locked) = crate::telemetry::measure(
+        "lock_seconds",
+        "recovery",
+        lock_recovery_access(&mut transaction, &recovery),
+    )
+    .await?
+    else {
+        crate::telemetry::commit(transaction, "recovery")
             .await
             .map_err(|error| ApiError::internal_with("commit recovery expiration gate", error))?;
         return Err(ApiError::recovery_failed());
-    }
-    let locked = lock_authenticated_recovery(&mut transaction, &recovery).await?;
+    };
 
-    let successor_recovery_token = state.idempotent_recovery_token(
+    let successor_token = state.idempotent_recovery_token(
         "recover_participation",
         &recovery.attempt_id.to_string(),
         locked.participant_id,
@@ -1789,7 +1798,7 @@ async fn recover_participation(
             },
             |session| session.slot,
         );
-        let successor_token_hmac = state.recovery_token_hmac(&successor_recovery_token);
+        let successor_token_hmac = state.recovery_token_hmac(&successor_token);
         postgres::consume_recovery_credential(
             &mut transaction,
             &locked,
@@ -1805,19 +1814,55 @@ async fn recover_participation(
         )
         .await?
     };
-    transaction
-        .commit()
+    crate::telemetry::commit(transaction, "recovery")
         .await
         .map_err(|error| ApiError::internal_with("participant recovery transaction", error))?;
+    complete_recovery(&state, &locked, &recovery, successor_token, session_max_age).await
+}
+
+async fn complete_recovery(
+    state: &AppState,
+    locked: &StoredRecoveryCandidate,
+    recovery: &AuthenticatedRecovery,
+    successor_token: String,
+    session_max_age: i64,
+) -> Result<Response, ApiError> {
+    if locked.status == "active" {
+        crate::telemetry::observe(
+            "recovery_completions",
+            "recovery",
+            match locked.host_assisted {
+                Some(true) => "host_assisted",
+                Some(false) => "self_service",
+                None => "unavailable",
+            },
+            1.0,
+        );
+    }
     if let Some(game_id) = locked.game_id {
         state.signal_game_synchronization(game_id);
     }
 
     let mut response =
-        recovered_participation_response(&state, locked.participant_id, successor_recovery_token)
-            .await?;
+        recovered_participation_response(state, locked.participant_id, successor_token).await?;
     set_session_cookie(&mut response, &recovery.session_token, session_max_age);
     Ok(response)
+}
+
+async fn lock_recovery_access(
+    transaction: &mut Transaction<'_, Postgres>,
+    recovery: &AuthenticatedRecovery,
+) -> Result<Option<StoredRecoveryCandidate>, ApiError> {
+    if let Some(game_id) =
+        postgres::lock_game_access_root(transaction, recovery.candidate.participant_id).await?
+        && crate::game_expiration::expire_locked_game(transaction, game_id).await?
+    {
+        crate::telemetry::access_ended();
+        return Ok(None);
+    }
+    lock_authenticated_recovery(transaction, recovery)
+        .await
+        .map(Some)
 }
 
 async fn lock_authenticated_recovery(

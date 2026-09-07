@@ -110,6 +110,7 @@ pub(super) fn verify_persisted_snapshot(
         && persisted.versions.sampling == game.sampling_algorithm
         && i64::try_from(persisted.prng.counter).ok() == Some(game.prng_counter);
     if !metadata_matches {
+        crate::telemetry::observe("p0_state_divergence", "integrity", "violation", 1.0);
         return Err(ApiError::internal());
     }
     Ok(())
@@ -209,6 +210,12 @@ pub(super) fn command_domain_state(
 }
 
 pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSnapshot, ApiError> {
+    decode_snapshot_record(serialized).inspect_err(|_| {
+        crate::telemetry::observe("p0_state_divergence", "integrity", "violation", 1.0);
+    })
+}
+
+fn decode_snapshot_record(serialized: &str) -> Result<PersistedSnapshot, ApiError> {
     validate_persisted_json_size(serialized)?;
     let snapshot: PersistedSnapshot = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
@@ -225,6 +232,12 @@ pub(super) fn decode_persisted_snapshot(serialized: &str) -> Result<PersistedSna
 }
 
 pub(super) fn decode_persisted_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
+    decode_event_record(serialized).inspect_err(|_| {
+        crate::telemetry::observe("p0_state_divergence", "integrity", "violation", 1.0);
+    })
+}
+
+fn decode_event_record(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
     validate_persisted_json_size(serialized)?;
     let header: PersistedEventHeader = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;

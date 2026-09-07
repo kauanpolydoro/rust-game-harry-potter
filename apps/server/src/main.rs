@@ -7,9 +7,19 @@ use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 const INITIALIZATION_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> std::process::ExitCode {
     initialize_tracing();
 
+    std::panic::set_hook(Box::new(|_| tracing::error!("process panicked")));
+    if run_application().await.is_ok() {
+        std::process::ExitCode::SUCCESS
+    } else {
+        tracing::error!("process terminated after an operational failure");
+        std::process::ExitCode::FAILURE
+    }
+}
+
+async fn run_application() -> Result<(), Box<dyn Error>> {
     let database_url = env::var("DATABASE_URL")?;
     let session_token_key = session_token_key()?;
     let bind_address = env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
@@ -42,6 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         state = state.with_application_origin(origin);
     }
     let initialization = tokio::spawn(initialize_until_ready(state.clone()));
+    let runtime_observer = tokio::spawn(harry_potter_server::observe_runtime(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(bind_address).await?;
     tracing::info!(address = %bind_address, "HTTP server listening");
@@ -58,6 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await;
 
     initialization.abort();
+    runtime_observer.abort();
     result?;
     Ok(())
 }
