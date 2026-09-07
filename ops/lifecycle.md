@@ -1,7 +1,7 @@
 # Purge operacional e Tombstones
 
 A issue #32 acrescenta `lifecycle` ao monólito e o executável `lifecycle-worker`.
-`make dev` inicia o servidor, o cliente e o worker.
+`./scripts/dev` ou `make dev` inicia PostgreSQL, servidor, cliente e worker pelo Docker Compose.
 O CI remoto continua desativado.
 
 ## Execução e armazenamento externo
@@ -26,7 +26,9 @@ O TTL do S3 torna os objetos elegíveis para remoção após 14 dias; a remoçã
 
 Em desenvolvimento, `TOMBSTONE_LOCAL_DIRECTORY` substitui `TOMBSTONE_BUCKET`.
 Configure exatamente uma dessas duas opções.
-`make dev` usa por padrão `~/.local/share/batalha-de-hogwarts/tombstones`, separado do volume PostgreSQL.
+O perfil `dev` monta o volume `tombstones` em `/tombstones`, separado do volume PostgreSQL.
+O worker inicia depois que o servidor está saudável e usa a mesma imagem Rust e os mesmos caches de compilação.
+Fora do Compose, informe um diretório persistente em `TOMBSTONE_LOCAL_DIRECTORY`.
 O adapter local usa publicação atômica, `fsync` do arquivo e do diretório e valida o conteúdo em retries.
 Ele mantém comprovantes incompletos e remove os pares concluídos após a janela de 14 dias durante a manutenção do worker.
 Esse adapter é destinado a desenvolvimento e testes, não ao deploy AWS.
@@ -113,6 +115,8 @@ Nenhum SLO pode garantir remoção durante uma indisponibilidade externa superio
 `make check` executa os testes PostgreSQL/HTTP/WebSocket, incluindo purge integral, concorrência, perda de ACK, cancelamento de processo, armazenamento esquecido e órfão após remoção da raiz.
 Os testes de ledger exercitam persistência local e o adapter S3 contra um endpoint HTTP controlado, com assinatura, criptografia, retenção e falhas de armazenamento.
 Esse teste de contrato não substitui um smoke test no bucket AWS antes do deploy.
+Um smoke manual da integração com Compose criou e iniciou uma Partida por HTTP em um projeto Docker isolado, antecipou sua expiração e confirmou a exclusão operacional pelo worker.
+Também verificou a invalidação da Sessão, os dois comprovantes opacos no volume separado, o encerramento do worker com código zero e a persistência dos comprovantes após reiniciá-lo.
 
 ```bash
 make check-lifecycle-profile
