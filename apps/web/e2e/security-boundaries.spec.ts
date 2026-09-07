@@ -37,7 +37,7 @@ test('a modified browser cannot bypass CSRF, strict schemas or server session id
     method: 'OPTIONS', headers: { Origin: 'http://localhost:9999', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'x-csrf-protection' },
   })
   expect(preflight.headers()['access-control-allow-origin']).toBeUndefined()
-  const anonymous = await browser.newContext()
+  const anonymous = await browser.newContext({ ignoreHTTPSErrors: true })
   try {
     const response = await anonymous.request.put(`${origin}/api/session/readiness`, {
       headers: { Origin: origin, 'x-csrf-protection': '1' }, data: { ready: true },
@@ -84,7 +84,7 @@ test('recovery tells the player when to retry after the real credential budget i
   await page.getByRole('button', { name: 'Criar sala privada' }).click()
   const link = page.getByLabel('Link de recuperação')
   await expect(link).toBeVisible()
-  const recoveryContext = await browser.newContext()
+  const recoveryContext = await browser.newContext({ ignoreHTTPSErrors: true })
   try {
     const recovery = await recoveryContext.newPage()
     await recovery.goto(await link.inputValue())
