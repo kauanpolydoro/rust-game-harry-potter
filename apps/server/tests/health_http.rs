@@ -6,10 +6,57 @@ use harry_potter_server::{AppState, build_router, initialize};
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
+#[tokio::test]
+async fn readiness_probe_timeout_does_not_replace_the_api_database_queue_budget() {
+    static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+    let database = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&std::env::var("TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    MIGRATOR.run(&database).await.unwrap();
+    let state = AppState::new(database.clone());
+    state.mark_started();
+    let app = build_router(state);
+    let occupied_connection = database.acquire().await.unwrap();
+    let request = app.clone().oneshot(
+        Request::builder()
+            .uri("/api/session")
+            .body(Body::empty())
+            .unwrap(),
+    );
+    tokio::pin!(request);
+    tokio::select! {
+        biased;
+        response = &mut request => panic!("API prematurely inherited probe timeout: {}", response.unwrap().status()),
+        response = app.oneshot(Request::builder().uri("/health/ready").body(Body::empty()).unwrap()) => {
+            assert_eq!(response.unwrap().status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
+    drop(occupied_connection);
+    assert_eq!(request.await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    database.close().await;
+}
+
 fn unavailable_database() -> sqlx::PgPool {
     PgPoolOptions::new()
         .connect_lazy("postgres://health:health@127.0.0.1:1/health")
         .expect("the test database URL must be syntactically valid")
+}
+
+#[tokio::test]
+async fn application_traffic_is_rejected_before_startup_even_without_a_load_balancer() {
+    let response = build_router(AppState::new(unavailable_database()))
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]

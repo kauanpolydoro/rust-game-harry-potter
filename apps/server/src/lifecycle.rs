@@ -7,11 +7,22 @@ use uuid::Uuid;
 
 mod ledger;
 mod postgres;
+pub(crate) mod recovery;
 pub use ledger::{FileLedger, S3Ledger};
+pub use recovery::{RestoreError, RestoredAccess, adopt_existing_source, reconcile_restore};
 
 /// External stores must acknowledge durable writes and tolerate duplicate calls.
 /// Neither keys nor bodies may contain operational identifiers or credentials.
 pub trait TombstoneLedger: Send + Sync {
+    /// Absence is valid only after a successful read from the expected ledger.
+    /// Write-only adapters deliberately fail closed during restoration.
+    fn lookup(
+        &self,
+        _key: &str,
+    ) -> impl Future<Output = Result<Option<PurgeProof>, PurgeError>> + Send {
+        async { Err(PurgeError::Ledger) }
+    }
+
     /// Stores with native TTL may keep the default; local stores expire proofs here.
     fn maintain(&self, _now_ms: i64) -> impl Future<Output = Result<(), PurgeError>> + Send {
         async { Ok(()) }
@@ -100,6 +111,7 @@ impl<L: TombstoneLedger> LifecycleWorker<L> {
     /// # Errors
     /// Returns a sanitized failure; failed jobs remain durable and retryable.
     pub async fn tick(&self) -> Result<usize, PurgeError> {
+        recovery::record_ledger_witness(&self.database, &self.ledger, &self.key).await?;
         postgres::enqueue(&self.database).await?;
         let now_ms: i64 =
             sqlx::query_scalar("SELECT (extract(epoch FROM clock_timestamp()) * 1000)::BIGINT")

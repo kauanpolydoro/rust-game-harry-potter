@@ -38,6 +38,7 @@ docker compose --profile dev stop
 Os dados do PostgreSQL permanecem no volume local do Compose entre execuções.
 Os comprovantes de exclusão ficam no volume `tombstones`, separado do banco.
 Execute `./scripts/dev` novamente para retomar o ambiente.
+Volumes anteriores à migration 0024 precisam da adoção de origem descrita no [runbook de recuperação](ops/restore.md#preparar-a-origem), que preserva os acessos existentes.
 
 O Vite atualiza a interface quando os arquivos Vue mudam.
 Após alterar o código Rust, interrompa com `Ctrl+C` e execute `./scripts/dev` novamente para recompilar o backend.
@@ -92,9 +93,10 @@ Esse perfil usa 100 partidas, 400 WebSockets, 20 Comandos por segundo, RTT simul
 
 - `GET /health/startup` abre somente depois das migrations.
 
-- `GET /health/ready` abre somente depois do startup e de uma consulta bem-sucedida ao PostgreSQL.
+- `GET /health/ready` abre somente depois do startup e da confirmação do deployment e de suas credenciais no PostgreSQL.
 
 Readiness tem timeout de um segundo e não mascara falhas de banco como disponibilidade.
+As rotas `/api/*` também exigem esse gate persistente, impedindo tráfego de um restore ainda não reconciliado.
 
 ## Estrutura
 
@@ -124,7 +126,7 @@ A autenticação também aplica esse gate sob demanda.
 O processamento é idempotente, notifica as outras instâncias após o commit e não modifica o histórico oficial.
 O worker de purge remove os dados operacionais depois desse gate e mantém a prova opaca fora do banco.
 A operação, o inventário de armazenamento e os SLOs estão descritos em [Ciclo de vida](ops/lifecycle.md).
-A reconciliação de restore e a política de backups pertencem à próxima fatia de operação.
+A reconciliação de restore, a janela máxima de sete dias e o exercício `make check-restore-profile` estão descritos em [Recuperação de desastre](ops/restore.md).
 
 HTTP responde `GAME_EXPIRED` sem projeção privada e apaga o cookie da Sessão.
 Recuperação preserva o erro genérico `RECOVERY_FAILED`.

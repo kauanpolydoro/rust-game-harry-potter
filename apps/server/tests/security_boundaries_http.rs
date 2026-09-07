@@ -63,7 +63,7 @@ async fn database_errors_cannot_copy_private_rows_into_http_responses_or_logs() 
 async fn http_logs_never_contain_paths_queries_headers_or_rejected_payloads() {
     let output = log_capture::LogCapture::start();
     async {
-        let app = app();
+        let app = app().await;
         for (method, uri, payload) in [
             ("GET", "/unknown/path-canary?secret=query-canary", ""),
             ("method-canary", "/api/rooms/path-canary", ""),
@@ -117,7 +117,7 @@ const ORIGIN: &str = "http://127.0.0.1:5173";
 
 #[tokio::test]
 async fn recovery_rate_limit_cannot_be_reset_with_forwarding_headers_or_new_attempts() {
-    let app = app();
+    let app = app().await;
     for attempt in 0..61 {
         let response = app
             .clone()
@@ -173,6 +173,7 @@ async fn rejected_payloads_have_bounded_redacted_errors_and_security_headers() {
         ),
     ] {
         let response = app()
+            .await
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -213,12 +214,14 @@ async fn rejected_payloads_have_bounded_redacted_errors_and_security_headers() {
     }
 }
 
-fn app() -> axum::Router {
-    build_router(AppState::new(
-        PgPoolOptions::new()
-            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
-            .unwrap(),
-    ))
+async fn app() -> axum::Router {
+    let database = PgPoolOptions::new()
+        .connect(&std::env::var("TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let state = AppState::new(database);
+    initialize(&state).await.unwrap();
+    build_router(state)
 }
 
 #[tokio::test]
@@ -233,6 +236,7 @@ async fn same_origin_requests_still_require_explicit_csrf_protection() {
             request = request.header("x-csrf-protection", value);
         }
         let response = app()
+            .await
             .oneshot(request.body(Body::from("{}")).unwrap())
             .await
             .unwrap();
@@ -245,7 +249,7 @@ async fn same_origin_requests_still_require_explicit_csrf_protection() {
 
 #[tokio::test]
 async fn every_mutation_rejects_missing_foreign_null_and_duplicate_origins_before_processing() {
-    let app = app();
+    let app = app().await;
     for (method, path) in [
         ("POST", "/api/rooms"),
         ("POST", "/api/rooms/ABCDEFGH/participants"),

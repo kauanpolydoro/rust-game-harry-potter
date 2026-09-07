@@ -23,7 +23,7 @@ pub(super) async fn verify_password(
         .await
 }
 
-pub(super) async fn hash_password(state: &AppState, password: String) -> Result<String, ApiError> {
+pub(crate) async fn hash_password(state: &AppState, password: String) -> Result<String, ApiError> {
     state
         .password_work
         .run(move || {
