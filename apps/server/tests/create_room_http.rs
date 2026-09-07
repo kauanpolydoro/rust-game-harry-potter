@@ -35,6 +35,8 @@ fn room_creation_request(
 ) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/rooms")
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", idempotency_key)
@@ -473,4 +475,37 @@ async fn reusing_an_idempotency_key_for_another_payload_is_rejected() {
         .expect("the conflict body must be readable");
     let body: Value = serde_json::from_slice(&body).expect("the conflict body must be JSON");
     assert_eq!(body["error"]["code"], "IDEMPOTENCY_KEY_REUSED");
+}
+
+#[tokio::test]
+async fn ambiguous_session_cookies_do_not_select_an_attacker_controlled_identity() {
+    let app = build_router(test_state().await);
+    let created = app
+        .clone()
+        .oneshot(room_creation_request(
+            &unique_key(),
+            "Minerva",
+            "a long uncommon passphrase",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let cookie = session_cookie(&created);
+    for cookies in [
+        format!("{cookie}; {cookie}"),
+        format!("{cookie}; __Host-session={}", "a".repeat(64)),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header(header::COOKIE, cookies)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 }

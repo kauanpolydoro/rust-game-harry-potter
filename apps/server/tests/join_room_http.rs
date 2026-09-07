@@ -30,6 +30,8 @@ fn unique_key(_prefix: &str) -> String {
 fn create_room_request(idempotency_key: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/rooms")
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", idempotency_key)
@@ -51,6 +53,8 @@ fn join_room_request(
 ) -> Request<Body> {
     Request::builder()
         .method("POST")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri(format!("/api/rooms/{room_code}/participants"))
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", idempotency_key)
@@ -67,6 +71,8 @@ fn join_room_request(
 fn select_hero_request(session_cookie: &str, hero_id: &str) -> Request<Body> {
     Request::builder()
         .method("PUT")
+        .header("origin", "http://127.0.0.1:5173")
+        .header("x-csrf-protection", "1")
         .uri("/api/session/hero")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, session_cookie)

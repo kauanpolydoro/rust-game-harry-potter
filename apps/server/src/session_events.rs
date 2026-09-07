@@ -3,10 +3,10 @@ use std::time::Duration;
 use axum::{
     Router,
     extract::{
-        Query, State, WebSocketUpgrade,
+        State, WebSocketUpgrade,
         ws::{CloseFrame, Message, WebSocket, close_code},
     },
-    http::{HeaderMap, header},
+    http::HeaderMap,
     response::Response,
     routing::get,
 };
@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    http_support::ApiError,
+    http_support::{ApiError, StrictQuery},
     session::{AuthenticatedSession, authenticated_session, session_is_active},
 };
 
@@ -148,11 +148,11 @@ pub(crate) fn router() -> Router<AppState> {
 
 async fn session_events(
     State(state): State<AppState>,
-    Query(query): Query<SessionEventsQuery>,
+    StrictQuery(query): StrictQuery<SessionEventsQuery>,
     headers: HeaderMap,
     websocket: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    require_origin(&state, &headers)?;
+    crate::security::require_origin(&state, &headers)?;
     if !websocket
         .requested_protocols()
         .any(|protocol| protocol.as_bytes() == SESSION_EVENTS_SUBPROTOCOL.as_bytes())
@@ -168,21 +168,10 @@ async fn session_events(
     Ok(websocket
         .protocols([SESSION_EVENTS_SUBPROTOCOL])
         .max_message_size(1024)
+        .max_frame_size(1024)
         .on_upgrade(move |socket| {
             serve_session_events(socket, state, session, position.room_id, requested_cursor)
         }))
-}
-
-fn require_origin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    let mut origins = headers.get_all(header::ORIGIN).iter();
-    let origin = origins
-        .next()
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(ApiError::origin_not_allowed)?;
-    if origins.next().is_some() || origin != state.application_origin() {
-        return Err(ApiError::origin_not_allowed());
-    }
-    Ok(())
 }
 
 async fn serve_session_events(
@@ -296,7 +285,7 @@ async fn session_event_loop(
     loop {
         let synchronize = tokio::select! {
             message = socket.recv() => {
-                if !handle_client_message(socket, message).await {
+                if !handle_client_message(socket, message, state, session).await {
                     return;
                 }
                 false
@@ -392,9 +381,21 @@ fn session_event_interval(
 async fn handle_client_message(
     socket: &mut WebSocket,
     message: Option<Result<Message, axum::Error>>,
+    state: &AppState,
+    session: AuthenticatedSession,
 ) -> bool {
+    if message.as_ref().is_some_and(Result::is_ok)
+        && !state.admit_request("websocket-message", session.session_id.as_bytes(), 60)
+    {
+        close_socket(socket, close_code::POLICY, "message rate exceeded").await;
+        return false;
+    }
     match message {
-        Some(Ok(Message::Close(_)) | Err(_)) | None => false,
+        Some(Ok(Message::Close(_))) => {
+            crate::security::acknowledge_websocket_close(socket).await;
+            false
+        }
+        Some(Err(_)) | None => false,
         Some(Ok(Message::Text(_) | Message::Binary(_))) => {
             close_socket(
                 socket,
@@ -404,7 +405,19 @@ async fn handle_client_message(
             .await;
             false
         }
-        Some(Ok(Message::Ping(_) | Message::Pong(_))) => true,
+        Some(Ok(Message::Ping(_) | Message::Pong(_))) => {
+            if let Ok(true) = session_is_active(state, session).await {
+                true
+            } else {
+                close_socket(
+                    socket,
+                    crate::session::inactive_session_close_code(state, session).await,
+                    "access ended",
+                )
+                .await;
+                false
+            }
+        }
     }
 }
 

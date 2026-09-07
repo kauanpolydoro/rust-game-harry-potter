@@ -428,8 +428,16 @@ async fn lifecycle_profile_measures_detection_and_purge_for_one_hundred_games() 
                 continue;
             }
             let room = &fixture.room;
+            // Match the reconnect profile: distinct clients share the production
+            // state and its admission limits while preparing independent games.
+            let peer = std::net::SocketAddr::from((
+                [192, 0, 2, u8::try_from(batch * 4 + offset + 1).unwrap()],
+                12345,
+            ));
             let (app, database, state, manifest) = (
-                room.app.clone(),
+                room.app
+                    .clone()
+                    .layer(axum::Extension(axum::extract::ConnectInfo(peer))),
                 room.database.clone(),
                 room.state.clone(),
                 room.manifest.clone(),

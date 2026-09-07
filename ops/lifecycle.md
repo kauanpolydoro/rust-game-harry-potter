@@ -123,7 +123,8 @@ make check-lifecycle-profile
 ```
 
 O perfil cria 100 Partidas por HTTP com eventos oficiais persistidos, expira todas e usa dois workers concorrentes.
+A preparação representa clientes distintos e conserva os limites de admissão do estado de aplicação compartilhado.
 Ele publica os percentis medidos e exige detecção p95 de até cinco minutos, purge p95 de até uma hora e máximo de 24 horas.
-Na execução local de 07/09/2026 com PostgreSQL 18.6, as 100 Partidas concluíram sem falhas ou órfãos: detecção p95 de 1,332 s, purge p95 de 18,454 s e máximo de 19,264 s.
+Na execução local de 07/09/2026 com PostgreSQL 18.6, as 100 Partidas concluíram sem falhas ou órfãos: detecção p95 de 1,174 s, purge p95 de 21,798 s e máximo de 22,552 s.
 O perfil mede o ambiente local; não constitui uma medição de produção.
 Backups, WAL/MVCC e reconciliação antes de readiness após restore continuam sob a política e os tickets próprios de recuperação de desastre.

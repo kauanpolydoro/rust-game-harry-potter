@@ -2,6 +2,7 @@ use std::{env, error::Error, io, net::SocketAddr, time::Duration};
 
 use harry_potter_server::{AppState, build_router, initialize};
 use sqlx::postgres::PgPoolOptions;
+use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 
 const INITIALIZATION_RETRY_DELAY: Duration = Duration::from_secs(2);
 
@@ -46,12 +47,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::info!(address = %bind_address, "HTTP server listening");
 
     let shutdown_state = state.clone();
-    let result = axum::serve(listener, build_router(state))
-        .with_graceful_shutdown(async move {
-            shutdown_signal().await;
-            shutdown_state.begin_shutdown();
-        })
-        .await;
+    let result = axum::serve(
+        listener,
+        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        shutdown_state.begin_shutdown();
+    })
+    .await;
 
     initialization.abort();
     result?;
@@ -70,10 +74,8 @@ fn session_token_key() -> Result<[u8; 32], Box<dyn Error>> {
 }
 
 fn initialize_tracing() {
-    tracing_subscriber::fmt()
-        .with_env_filter("harry_potter_server=info")
-        .json()
-        .init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    harry_potter_server::tracing_subscriber(io::stdout, filter).init();
 }
 
 async fn initialize_until_ready(state: AppState) {
@@ -93,8 +95,8 @@ async fn initialize_until_ready(state: AppState) {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        if let Err(error) = tokio::signal::ctrl_c().await {
-            tracing::error!(error = %error, "failed to install Ctrl+C signal handler");
+        if let Err(_error) = tokio::signal::ctrl_c().await {
+            tracing::error!("failed to install Ctrl+C signal handler");
             std::future::pending::<()>().await;
         }
     };
@@ -105,8 +107,8 @@ async fn shutdown_signal() {
             Ok(mut signal) => {
                 signal.recv().await;
             }
-            Err(error) => {
-                tracing::error!(error = %error, "failed to install SIGTERM signal handler");
+            Err(_error) => {
+                tracing::error!("failed to install SIGTERM signal handler");
                 std::future::pending::<()>().await;
             }
         }

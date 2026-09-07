@@ -28,10 +28,10 @@ impl Write for CapturedLog {
 async fn telemetry_records_registered_routes_without_identifiable_paths_bodies_or_credentials() {
     let capture = CapturedLog::default();
     let writer = capture.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .json()
-        .finish();
+    let subscriber = harry_potter_server::tracing_subscriber(
+        move || writer.clone(),
+        tracing_subscriber::EnvFilter::new("trace"),
+    );
     let database = PgPoolOptions::new()
         .acquire_timeout(Duration::from_millis(50))
         .connect_lazy("postgres://unavailable:unavailable@127.0.0.1:1/unavailable")
@@ -56,6 +56,8 @@ async fn telemetry_records_registered_routes_without_identifiable_paths_bodies_o
                     .method("POST")
                     .uri("/api/rooms/PRIVATE-ROOM/participants")
                     .header("content-type", "application/json")
+                    .header("origin", "http://127.0.0.1:5173")
+                    .header("x-csrf-protection", "1")
                     .header("idempotency-key", "PRIVATE-IDEMPOTENCY")
                     .body(Body::from(
                         r#"{"display_name":"PRIVATE-NAME","hero_id":"hermione"}"#,

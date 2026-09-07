@@ -27,7 +27,7 @@
     "@vue/compiler-dom": "3.5.42",
     "@vue/compiler-sfc": "3.5.42",
     "jsdom": "30.0.1",
-    "oxlint": "1.81.0",
+    "oxlint": "1.82.0",
     "oxlint-tsgolint": "7.0.2001",
     "vite": "8.2.2",
     "vitest": "5.0.0",

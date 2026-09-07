@@ -2,10 +2,56 @@ use std::fmt::Display;
 
 use axum::{
     Json,
+    extract::{FromRequest, FromRequestParts, Request},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
+
+pub(crate) struct StrictJson<T>(pub(crate) T);
+
+impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for StrictJson<T> {
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        Json::<T>::from_request(request, state)
+            .await
+            .map(|Json(value)| Self(value))
+            .map_err(|error| ApiError::invalid_request(error.status()))
+    }
+}
+
+pub(crate) struct StrictQuery<T>(pub(crate) T);
+
+pub(crate) struct StrictPath<T>(pub(crate) T);
+
+impl<S: Send + Sync, T: DeserializeOwned + Send> FromRequestParts<S> for StrictPath<T> {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        axum::extract::Path::<T>::from_request_parts(parts, state)
+            .await
+            .map(|axum::extract::Path(value)| Self(value))
+            .map_err(|error| ApiError::invalid_request(error.status()))
+    }
+}
+
+impl<S: Send + Sync, T: DeserializeOwned> FromRequestParts<S> for StrictQuery<T> {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        axum::extract::Query::<T>::from_request_parts(parts, state)
+            .await
+            .map(|axum::extract::Query(value)| Self(value))
+            .map_err(|error| ApiError::invalid_request(error.status()))
+    }
+}
 
 #[derive(Serialize)]
 struct ErrorEnvelope {
@@ -35,6 +81,14 @@ pub(crate) struct ApiError {
 
 #[derive(Serialize)]
 enum ErrorCode {
+    #[serde(rename = "RATE_LIMITED")]
+    RateLimited,
+    #[serde(rename = "RECOVERY_RATE_LIMITED")]
+    RecoveryRateLimited,
+    #[serde(rename = "INVALID_REQUEST")]
+    InvalidRequest,
+    #[serde(rename = "CSRF_REQUIRED")]
+    CsrfRequired,
     #[serde(rename = "IDEMPOTENCY_KEY_REQUIRED")]
     IdempotencyKeyRequired,
     #[serde(rename = "INVALID_IDEMPOTENCY_KEY")]
@@ -124,6 +178,14 @@ enum RetryPolicy {
 
 #[derive(Serialize)]
 enum MessageKey {
+    #[serde(rename = "request.rate_limited")]
+    RateLimited,
+    #[serde(rename = "participant.recovery.rate_limited")]
+    RecoveryRateLimited,
+    #[serde(rename = "request.invalid")]
+    InvalidRequest,
+    #[serde(rename = "request.csrf.required")]
+    CsrfRequired,
     #[serde(rename = "request.idempotency_key.required")]
     IdempotencyKeyRequired,
     #[serde(rename = "request.idempotency_key.invalid")]
@@ -193,6 +255,44 @@ enum MessageKey {
 }
 
 impl ApiError {
+    pub(crate) const fn rate_limited(recovery: bool) -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            if recovery {
+                ErrorCode::RecoveryRateLimited
+            } else {
+                ErrorCode::RateLimited
+            },
+            ErrorCategory::Validation,
+            RetryPolicy::SafeToRetry,
+            if recovery {
+                MessageKey::RecoveryRateLimited
+            } else {
+                MessageKey::RateLimited
+            },
+        )
+    }
+
+    pub(crate) const fn invalid_request(status: StatusCode) -> Self {
+        Self::new(
+            status,
+            ErrorCode::InvalidRequest,
+            ErrorCategory::Validation,
+            RetryPolicy::AfterCorrection,
+            MessageKey::InvalidRequest,
+        )
+    }
+
+    pub(crate) const fn csrf_required() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            ErrorCode::CsrfRequired,
+            ErrorCategory::Authorization,
+            RetryPolicy::AfterCorrection,
+            MessageKey::CsrfRequired,
+        )
+    }
+
     const fn new(
         status: StatusCode,
         code: ErrorCode,
@@ -359,16 +459,6 @@ impl ApiError {
         )
     }
 
-    pub(crate) const fn recovery_unavailable() -> Self {
-        Self::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::Internal,
-            ErrorCategory::Internal,
-            RetryPolicy::SafeToRetry,
-            MessageKey::Internal,
-        )
-    }
-
     pub(crate) const fn not_room_host() -> Self {
         Self::new(
             StatusCode::FORBIDDEN,
@@ -523,6 +613,7 @@ impl ApiError {
     }
 
     pub(crate) fn internal_with(operation: &'static str, _error: impl Display) -> Self {
+        // Database/transport errors may embed a row, frame, credential or payload.
         tracing::error!(operation, "internal operation failed");
         Self::internal()
     }
@@ -559,6 +650,11 @@ impl IntoResponse for ApiError {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        if self.status == StatusCode::TOO_MANY_REQUESTS {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("60"));
+        }
         if game_expired {
             response.headers_mut().insert(
                 header::SET_COOKIE,
