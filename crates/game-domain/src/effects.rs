@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+mod game_two;
 mod reactions;
 pub(crate) use reactions::can_acquire_on_deck;
 
@@ -101,6 +102,9 @@ pub struct EffectTargetBinding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectEligibility {
+    CardType {
+        card_type: EffectCardType,
+    },
     ResourceAtLeast {
         resource: EffectResource,
         amount: u16,
@@ -109,6 +113,7 @@ pub enum EffectEligibility {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectCondition {
+    DrawingAllowed,
     HasEligibleTarget {
         target: EffectSelector,
     },
@@ -121,6 +126,8 @@ pub enum EffectCondition {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOperation {
+    DiscardVoluntarily,
+    CopyPlayedAlly,
     GainAttackPerAllyPlayed {
         amount: u8,
     },
@@ -164,6 +171,11 @@ pub enum EffectGameOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectDefinition {
+    ForEachTarget {
+        target: EffectSelector,
+        effect: Box<Self>,
+    },
+    PreventExtraDrawing,
     TopDeckAcquisition {
         card_type: EffectCardType,
     },
@@ -278,6 +290,7 @@ pub struct EffectEntity {
     resource_limits: BTreeMap<EffectResource, u16>,
     dark_arts_count: Option<u8>,
     drawing_blocked: bool,
+    copied_ally_id: Option<String>,
 }
 
 impl EffectEntity {
@@ -295,6 +308,7 @@ impl EffectEntity {
             resource_limits: BTreeMap::new(),
             dark_arts_count: None,
             drawing_blocked: false,
+            copied_ally_id: None,
         }
     }
 
@@ -329,6 +343,7 @@ impl EffectEntity {
             resource_limits: BTreeMap::new(),
             dark_arts_count: None,
             drawing_blocked: false,
+            copied_ally_id: None,
         }
     }
 
@@ -352,6 +367,7 @@ impl EffectEntity {
             resource_limits: BTreeMap::from([(EffectResource::Control, control_limit)]),
             dark_arts_count: Some(dark_arts_count),
             drawing_blocked: false,
+            copied_ally_id: None,
         }
     }
 
@@ -374,6 +390,7 @@ impl EffectEntity {
             resource_limits: BTreeMap::new(),
             dark_arts_count: None,
             drawing_blocked: false,
+            copied_ally_id: None,
         }
     }
 
@@ -408,6 +425,12 @@ impl EffectEntity {
     #[must_use]
     pub const fn with_influence_cost(mut self, influence_cost: u16) -> Self {
         self.influence_cost = Some(influence_cost);
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_health(mut self, maximum: u16) -> Self {
+        self.resource_limits.insert(EffectResource::Health, maximum);
         self
     }
 
@@ -480,6 +503,17 @@ impl EffectEntity {
     #[must_use]
     pub const fn drawing_blocked(&self) -> bool {
         self.drawing_blocked
+    }
+
+    #[must_use]
+    pub fn copied_ally_id(&self) -> Option<&str> {
+        self.copied_ally_id.as_deref()
+    }
+
+    #[must_use]
+    pub fn with_copied_ally_id(mut self, id: Option<String>) -> Self {
+        self.copied_ally_id = id;
+        self
     }
 
     #[must_use]
@@ -754,6 +788,7 @@ impl EffectWorld {
             .ok_or(EffectExecutionError::InvalidDefinition)?;
         let mut entity = source.remove(index);
         let current_owner = entity.owner_position;
+        let current_copy = entity.copied_ally_id.clone();
         if !owner_transition_is_valid(
             entity.kind,
             expected_from,
@@ -764,9 +799,13 @@ impl EffectWorld {
             source.insert(index, entity);
             return Err(EffectExecutionError::InvalidDefinition);
         }
+        if to != EffectZone::HeroPlayArea {
+            entity.copied_ally_id = None;
+        }
         entity.owner_position = destination_owner;
         if !entity_is_valid_in_zone(&entity, to) {
             entity.owner_position = current_owner;
+            entity.copied_ally_id = current_copy;
             source.insert(index, entity);
             return Err(EffectExecutionError::InvalidDefinition);
         }
@@ -866,6 +905,18 @@ impl EffectWorld {
         Ok(revealed)
     }
 
+    fn valid_copied_ally(&self, card: &EffectEntity) -> bool {
+        card.copied_ally_id.as_deref().is_none_or(|id| {
+            self.entity(id).is_some_and(|(zone, ally)| {
+                zone == EffectZone::HeroPlayArea
+                    && card.id != id
+                    && ally.owner_position == card.owner_position
+                    && ally.copied_ally_id.is_none()
+                    && ally.effect_rule_id.is_some()
+            })
+        })
+    }
+
     pub(crate) fn is_valid_for_positions(&self, positions: &[u8]) -> bool {
         let mut ids = self.entity_ids().collect::<Vec<_>>();
         ids.sort_unstable();
@@ -888,6 +939,7 @@ impl EffectWorld {
                             .is_some_and(|limit| *value > limit)
                     })
                     || !entity_is_valid_in_zone(entity, zone)
+                    || !self.valid_copied_ally(entity)
             })
         {
             return false;
@@ -944,6 +996,15 @@ fn valid_dark_arts_entity(entity: &EffectEntity, zone: EffectZone) -> bool {
 }
 
 fn entity_is_valid_in_zone(entity: &EffectEntity, zone: EffectZone) -> bool {
+    if entity.copied_ally_id.is_some()
+        && (zone != EffectZone::HeroPlayArea
+            || !matches!(
+                entity.kind,
+                EffectEntityKind::StarterCard | EffectEntityKind::HogwartsCard
+            ))
+    {
+        return false;
+    }
     if entity.drawing_blocked && entity.kind != EffectEntityKind::Hero {
         return false;
     }
@@ -1019,29 +1080,37 @@ fn entity_is_valid_in_zone(entity: &EffectEntity, zone: EffectZone) -> bool {
                     .is_some_and(|limit| limit > 0)
                 && entity.dark_arts_count.is_some_and(|count| count > 0)
         }
-        EffectEntityKind::Villain => {
-            matches!(
-                zone,
-                EffectZone::VillainDeck | EffectZone::ActiveVillains | EffectZone::VillainDiscard
-            ) && entity.owner_position.is_none()
-                && entity
-                    .catalog_id
-                    .as_deref()
-                    .is_some_and(|id| !id.is_empty())
-                && entity
-                    .effect_rule_id
-                    .as_deref()
-                    .is_some_and(|id| !id.is_empty())
-                && entity.influence_cost.is_none()
-                && entity.resources.contains_key(&EffectResource::Health)
-                && entity
-                    .reward_rule_id
-                    .as_deref()
-                    .is_none_or(|id| !id.is_empty())
-                && entity.resource_limits.is_empty()
-                && entity.dark_arts_count.is_none()
-        }
+        EffectEntityKind::Villain => valid_villain_entity(entity, zone),
     }
+}
+
+fn valid_villain_entity(entity: &EffectEntity, zone: EffectZone) -> bool {
+    matches!(
+        zone,
+        EffectZone::VillainDeck | EffectZone::ActiveVillains | EffectZone::VillainDiscard
+    ) && entity.owner_position.is_none()
+        && entity
+            .catalog_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+        && entity
+            .effect_rule_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+        && entity.influence_cost.is_none()
+        && entity.resources.contains_key(&EffectResource::Health)
+        && entity
+            .reward_rule_id
+            .as_deref()
+            .is_none_or(|id| !id.is_empty())
+        && (entity.resource_limits.is_empty()
+            || (entity.resource_limits.len() == 1
+                && entity
+                    .resource_limit(EffectResource::Health)
+                    .is_some_and(|maximum| {
+                        maximum > 0 && entity.resource(EffectResource::Health) <= maximum
+                    })))
+        && entity.dark_arts_count.is_none()
 }
 
 fn owner_transition_is_valid(
@@ -1096,6 +1165,12 @@ pub enum EffectNoOpReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOutcome {
+    AllyCopied {
+        rule_id: String,
+        card_id: String,
+        ally_id: String,
+        owner_position: u8,
+    },
     DrawingBlocked {
         rule_id: String,
         target_id: String,
@@ -1261,6 +1336,7 @@ impl EffectCursor {
 
 impl EffectExecutor<'_> {
     fn run(mut self) -> Result<EffectResolution, EffectExecutionError> {
+        self.enqueue_copied_effects(0)?;
         self.enqueue_reactions(0)?;
         self.enqueue_defeated_villains(self.actor_position)?;
         while let Some(queued) = self.queue.pop_front() {
@@ -1306,6 +1382,7 @@ impl EffectExecutor<'_> {
                 } => self.execute_stun_choice(&cursor, responsible_position)?,
             };
             self.enqueue_defeated_villains(actor_position)?;
+            self.enqueue_copied_effects(outcome_start)?;
             self.enqueue_reactions(outcome_start)?;
             self.ensure_outcome_limit()?;
             if let Some(stop) = stop {
@@ -1379,7 +1456,8 @@ impl EffectExecutor<'_> {
         effect: EffectDefinition,
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
         match effect {
-            EffectDefinition::Reaction { .. }
+            EffectDefinition::PreventExtraDrawing
+            | EffectDefinition::Reaction { .. }
             | EffectDefinition::HandDamageLimit { .. }
             | EffectDefinition::TopDeckAcquisition { .. }
             | EffectDefinition::CardType { .. } => Ok(None),
@@ -1413,11 +1491,12 @@ impl EffectExecutor<'_> {
                 if !condition_is_valid(&condition) {
                     return Err(EffectExecutionError::InvalidDefinition);
                 }
-                let selected = if condition_is_true(self.world, actor_position, &condition) {
-                    Some(EffectPathSegment::ConditionThen)
-                } else {
-                    otherwise.map(|_| EffectPathSegment::ConditionOtherwise)
-                };
+                let selected =
+                    if condition_is_true(self.world, actor_position, &condition, self.rules) {
+                        Some(EffectPathSegment::ConditionThen)
+                    } else {
+                        otherwise.map(|_| EffectPathSegment::ConditionOtherwise)
+                    };
                 if let Some(selected) = selected {
                     self.queue.push_front(QueuedEffect::Definition {
                         cursor: cursor.child(selected),
@@ -1432,6 +1511,9 @@ impl EffectExecutor<'_> {
                     reason: EffectNoOpReason::Explicit,
                 });
                 Ok(None)
+            }
+            EffectDefinition::ForEachTarget { target, .. } => {
+                self.execute_for_each_target(&cursor, actor_position, &target)
             }
             EffectDefinition::Repeat { times, effect: _ } => {
                 if times == 0 {
@@ -1484,7 +1566,7 @@ impl EffectExecutor<'_> {
         if !selector_is_valid(target) || !operation_is_valid_for_zone(operation, target.zone) {
             return Err(EffectExecutionError::InvalidDefinition);
         }
-        let candidates = eligible_entity_ids(self.world, actor_position, target);
+        let candidates = eligible_entity_ids(self.world, actor_position, target, self.rules);
         let uses_manual_bindings = self
             .rules
             .iter()
@@ -1790,7 +1872,11 @@ fn effect_at_cursor<'a>(
                 },
                 EffectPathSegment::ConditionOtherwise,
             ) => otherwise,
-            (EffectDefinition::Repeat { effect, .. }, EffectPathSegment::RepeatEffect) => effect,
+            (
+                EffectDefinition::Repeat { effect, .. }
+                | EffectDefinition::ForEachTarget { effect, .. },
+                EffectPathSegment::RepeatEffect,
+            ) => effect,
             (EffectDefinition::Roll { outcomes, .. }, EffectPathSegment::RollOutcome(index)) => {
                 outcomes.get(usize::from(*index))?
             }
@@ -1924,7 +2010,8 @@ pub(crate) fn resume_effects(
             });
         }
         (PendingEffectChoiceKind::Target, EffectDefinition::Apply { target, operation }) => {
-            let candidates = eligible_entity_ids(&next_world, pending.responsible_position, target);
+            let candidates =
+                eligible_entity_ids(&next_world, pending.responsible_position, target, rules);
             if candidates != pending.options {
                 return Err(EffectExecutionError::InvalidChoice);
             }
@@ -2175,9 +2262,22 @@ fn execute_effects_with_targets(
     let mut queue = rules
         .iter()
         .filter(|rule| selection.matches(rule))
-        .map(|rule| QueuedEffect::Definition {
-            cursor: EffectCursor::root(&rule.id),
-            actor_position,
+        .flat_map(|rule| {
+            let count = if rule.trigger == EffectTrigger::DarkArts
+                && rule.effect == EffectDefinition::RevealDarkArts
+            {
+                world
+                    .entities_in(EffectZone::ActiveLocation)
+                    .first()
+                    .and_then(EffectEntity::dark_arts_count)
+                    .unwrap_or(1)
+            } else {
+                1
+            };
+            (0..count).map(move |_| QueuedEffect::Definition {
+                cursor: EffectCursor::root(&rule.id),
+                actor_position,
+            })
         })
         .collect::<VecDeque<_>>();
     let mut next_world = world.clone();
@@ -2298,6 +2398,14 @@ pub(crate) fn apply_effect_outcomes(
 ) -> Result<(), EffectExecutionError> {
     for outcome in outcomes {
         match outcome {
+            EffectOutcome::AllyCopied {
+                rule_id,
+                card_id,
+                ally_id,
+                owner_position,
+            } => {
+                game_two::record_copy(world, rule_id, card_id, ally_id, *owner_position)?;
+            }
             EffectOutcome::DrawingBlocked {
                 target_id,
                 target_position,
@@ -2410,7 +2518,8 @@ impl EffectOutcome {
     #[must_use]
     pub fn rule_id(&self) -> &str {
         match self {
-            Self::DrawingBlocked { rule_id, .. }
+            Self::AllyCopied { rule_id, .. }
+            | Self::DrawingBlocked { rule_id, .. }
             | Self::RandomSampled { rule_id, .. }
             | Self::DieRolled { rule_id, .. }
             | Self::Moved { rule_id, .. }
@@ -2423,6 +2532,18 @@ impl EffectOutcome {
     fn is_valid(&self) -> bool {
         let valid_id = |value: &str| !value.is_empty() && value.len() <= MAX_CHOICE_VALUE_LENGTH;
         match self {
+            Self::AllyCopied {
+                rule_id,
+                card_id,
+                ally_id,
+                owner_position,
+            } => {
+                valid_id(rule_id)
+                    && valid_id(card_id)
+                    && valid_id(ally_id)
+                    && card_id != ally_id
+                    && (1..=4).contains(owner_position)
+            }
             Self::DrawingBlocked {
                 rule_id,
                 target_id,
@@ -2595,11 +2716,21 @@ fn selector_is_valid(selector: &EffectSelector) -> bool {
                 EffectEligibility::ResourceAtLeast { resource, amount } => {
                     *amount > 0 && selector.zone.supports_resource(*resource)
                 }
+                EffectEligibility::CardType { .. } => matches!(
+                    selector.zone,
+                    EffectZone::HeroHand
+                        | EffectZone::HeroDrawPile
+                        | EffectZone::HeroDiscardPile
+                        | EffectZone::HeroPlayArea
+                        | EffectZone::HogwartsDeck
+                        | EffectZone::Market
+                ),
             })
 }
 
 fn condition_is_valid(condition: &EffectCondition) -> bool {
     match condition {
+        EffectCondition::DrawingAllowed => true,
         EffectCondition::HasEligibleTarget { target } => selector_is_valid(target),
         EffectCondition::ResourceAtLeast {
             target,
@@ -2611,11 +2742,14 @@ fn condition_is_valid(condition: &EffectCondition) -> bool {
 
 fn operation_is_valid_for_zone(operation: &EffectOperation, zone: EffectZone) -> bool {
     match operation {
+        EffectOperation::CopyPlayedAlly => zone == EffectZone::HeroPlayArea,
         EffectOperation::PreventDrawing => zone == EffectZone::Heroes,
         EffectOperation::Draw { amount } | EffectOperation::GainAttackPerAllyPlayed { amount } => {
             (1..=16).contains(amount) && zone == EffectZone::Heroes
         }
-        EffectOperation::Discard => zone == EffectZone::HeroHand,
+        EffectOperation::Discard | EffectOperation::DiscardVoluntarily => {
+            zone == EffectZone::HeroHand
+        }
         EffectOperation::ModifyResource { resource, amount } => {
             *amount != 0
                 && zone.supports_resource(*resource)
@@ -2646,6 +2780,7 @@ pub(crate) fn eligible_entity_ids(
     world: &EffectWorld,
     actor_position: u8,
     selector: &EffectSelector,
+    rules: &[EffectRule],
 ) -> Vec<String> {
     world
         .entities_in(selector.zone)
@@ -2661,6 +2796,9 @@ pub(crate) fn eligible_entity_ids(
                 .all(|eligibility| match eligibility {
                     EffectEligibility::ResourceAtLeast { resource, amount } => {
                         entity.resource(*resource) >= *amount
+                    }
+                    EffectEligibility::CardType { card_type } => {
+                        reactions::card_type(entity, rules) == Some(*card_type)
                     }
                 })
         })
@@ -2680,6 +2818,7 @@ pub(crate) fn atomic_manual_target_slots(
     world: &EffectWorld,
     actor_position: u8,
     rule: &EffectRule,
+    rules: &[EffectRule],
 ) -> Option<Vec<AtomicTargetSlot>> {
     if rule.trigger != EffectTrigger::Manual
         || rule.id.is_empty()
@@ -2691,7 +2830,7 @@ pub(crate) fn atomic_manual_target_slots(
         return None;
     }
     let mut slots = Vec::new();
-    collect_atomic_target_slots(world, actor_position, &rule.effect, &mut slots)?;
+    collect_atomic_target_slots(world, actor_position, &rule.effect, &mut slots, rules)?;
     Some(slots)
 }
 
@@ -2700,13 +2839,14 @@ fn collect_atomic_target_slots(
     actor_position: u8,
     definition: &EffectDefinition,
     slots: &mut Vec<AtomicTargetSlot>,
+    rules: &[EffectRule],
 ) -> Option<bool> {
     match definition {
         EffectDefinition::Apply { target, operation } => {
             if !selector_is_valid(target) || !operation_is_valid_for_zone(operation, target.zone) {
                 return None;
             }
-            let target_ids = eligible_entity_ids(world, actor_position, target);
+            let target_ids = eligible_entity_ids(world, actor_position, target, rules);
             if target.max == 0 || target_ids.len() < usize::from(target.min) {
                 return Some(true);
             }
@@ -2731,7 +2871,9 @@ fn collect_atomic_target_slots(
                 Some(true)
             }
         }
-        EffectDefinition::Choice { .. } | EffectDefinition::Terminal { .. } => Some(false),
+        EffectDefinition::ForEachTarget { .. }
+        | EffectDefinition::Choice { .. }
+        | EffectDefinition::Terminal { .. } => Some(false),
         EffectDefinition::Condition {
             condition,
             then,
@@ -2740,20 +2882,22 @@ fn collect_atomic_target_slots(
             if !condition_is_valid(condition) {
                 return None;
             }
-            let then_continues = collect_atomic_target_slots(world, actor_position, then, slots)?;
+            let then_continues =
+                collect_atomic_target_slots(world, actor_position, then, slots, rules)?;
             let otherwise_continues = otherwise.as_deref().map_or(Some(true), |otherwise| {
-                collect_atomic_target_slots(world, actor_position, otherwise, slots)
+                collect_atomic_target_slots(world, actor_position, otherwise, slots, rules)
             })?;
             Some(then_continues || otherwise_continues)
         }
-        EffectDefinition::NoOp
+        EffectDefinition::PreventExtraDrawing
+        | EffectDefinition::NoOp
         | EffectDefinition::TopDeckAcquisition { .. }
         | EffectDefinition::CardType { .. }
         | EffectDefinition::RevealDarkArts
         | EffectDefinition::HandDamageLimit { .. }
         | EffectDefinition::Reaction { .. } => Some(true),
         EffectDefinition::Repeat { times, effect } => (*times > 0)
-            .then(|| collect_atomic_target_slots(world, actor_position, effect, slots))?,
+            .then(|| collect_atomic_target_slots(world, actor_position, effect, slots, rules))?,
         EffectDefinition::Roll { die, outcomes } => {
             if outcomes.len() != usize::from(die.sides()) {
                 return None;
@@ -2761,7 +2905,7 @@ fn collect_atomic_target_slots(
             let mut any_continues = false;
             for outcome in outcomes {
                 any_continues |=
-                    collect_atomic_target_slots(world, actor_position, outcome, slots)?;
+                    collect_atomic_target_slots(world, actor_position, outcome, slots, rules)?;
             }
             Some(any_continues)
         }
@@ -2774,24 +2918,37 @@ fn collect_atomic_target_slots(
                 if !can_continue {
                     break;
                 }
-                can_continue = collect_atomic_target_slots(world, actor_position, effect, slots)?;
+                can_continue =
+                    collect_atomic_target_slots(world, actor_position, effect, slots, rules)?;
             }
             Some(can_continue)
         }
     }
 }
 
-fn condition_is_true(world: &EffectWorld, actor_position: u8, condition: &EffectCondition) -> bool {
+fn condition_is_true(
+    world: &EffectWorld,
+    actor_position: u8,
+    condition: &EffectCondition,
+    rules: &[EffectRule],
+) -> bool {
     match condition {
+        EffectCondition::DrawingAllowed => {
+            !reactions::drawing_prevented(world, rules)
+                && world.entities_in(EffectZone::Heroes).iter().any(|hero| {
+                    hero.owner_position == Some(actor_position) && !hero.drawing_blocked
+                })
+        }
         EffectCondition::HasEligibleTarget { target } => {
-            eligible_entity_ids(world, actor_position, target).len() >= usize::from(target.min)
+            eligible_entity_ids(world, actor_position, target, rules).len()
+                >= usize::from(target.min)
         }
         EffectCondition::ResourceAtLeast {
             target,
             resource,
             amount,
         } => {
-            let candidates = eligible_entity_ids(world, actor_position, target);
+            let candidates = eligible_entity_ids(world, actor_position, target, rules);
             candidates.len() >= usize::from(target.min)
                 && candidates.into_iter().any(|entity_id| {
                     world
@@ -2845,15 +3002,17 @@ fn refill_shuffled_pile(
 fn draw_cards(
     world: &mut EffectWorld,
     entity_id: &str,
-    rule_id: &str,
+    source: EffectSource<'_>,
     amount: u8,
     outcomes: &mut Vec<EffectOutcome>,
     roller: &mut dyn EffectRoller,
     rolls_consumed: &mut u64,
 ) -> Result<Option<u8>, EffectExecutionError> {
-    if world
-        .entity(entity_id)
-        .is_some_and(|(_, entity)| entity.drawing_blocked)
+    let rule_id = source.rule_id;
+    if reactions::drawing_prevented(world, source.rules)
+        || world
+            .entity(entity_id)
+            .is_some_and(|(_, entity)| entity.drawing_blocked)
     {
         outcomes.push(EffectOutcome::NoOp {
             rule_id: rule_id.to_owned(),
@@ -2911,6 +3070,16 @@ fn apply_operation(
 ) -> Result<Option<u8>, EffectExecutionError> {
     let rule_id = source.rule_id;
     match operation {
+        EffectOperation::DiscardVoluntarily => move_entity(
+            world,
+            entity_id,
+            "system:voluntary-discard",
+            EffectZone::HeroDiscardPile,
+            outcomes,
+        ),
+        EffectOperation::CopyPlayedAlly => {
+            game_two::copy_played_ally(world, entity_id, source, outcomes)
+        }
         EffectOperation::GainAttackPerAllyPlayed { amount } => {
             let owner = world
                 .entity(entity_id)
@@ -2958,7 +3127,7 @@ fn apply_operation(
         EffectOperation::Draw { amount } => draw_cards(
             world,
             entity_id,
-            rule_id,
+            source,
             *amount,
             outcomes,
             roller,

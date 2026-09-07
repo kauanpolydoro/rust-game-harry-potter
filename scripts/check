@@ -14,7 +14,9 @@ cleanup_database() {
 trap cleanup_database EXIT INT TERM
 
 docker compose exec -T postgres createdb --username hogwarts "$test_database"
-export TEST_DATABASE_URL="postgres://hogwarts:local-development-only@127.0.0.1:55432/$test_database"
+postgres_address="$(docker compose port postgres 5432)"
+postgres_port="${postgres_address##*:}"
+export TEST_DATABASE_URL="postgres://hogwarts:local-development-only@127.0.0.1:$postgres_port/$test_database"
 
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings

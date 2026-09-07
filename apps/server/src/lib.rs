@@ -33,7 +33,7 @@ mod match_runtime;
 mod session;
 mod session_events;
 
-pub use content_catalog::game_one_manifest;
+pub use content_catalog::{game_one_manifest, game_two_manifest};
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
@@ -120,7 +120,10 @@ impl AppState {
             "../../../content/bundles/base-en-candidate-2026-09-02.json"
         ))
         .expect("the checked-in candidate content bundle must remain structurally valid");
-        Self::with_content_manifests(database, vec![game_one_manifest(), manifest])
+        Self::with_content_manifests(
+            database,
+            vec![game_one_manifest(), game_two_manifest(), manifest],
+        )
     }
 
     #[must_use]

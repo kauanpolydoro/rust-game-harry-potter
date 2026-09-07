@@ -59,6 +59,11 @@ pub struct ResourceCost {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    PreventExtraDrawing,
+    ForEachTarget {
+        target: Selector,
+        effect: Box<Self>,
+    },
     TopDeckAcquisition {
         card_type: CardType,
     },
@@ -141,6 +146,7 @@ pub enum EffectChoiceAudience {
 #[serde(rename_all = "snake_case")]
 pub enum StructuralRule {
     GameOneSetup,
+    GameTwoSetup,
     GameOnePrecedence,
     NoHeroAbility,
     NoLocationEffect,
@@ -159,6 +165,7 @@ impl EffectChoiceAudience {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Condition {
+    DrawingAllowed,
     HasEligibleTarget {
         target: Selector,
     },
@@ -201,6 +208,7 @@ pub enum TargetOwner {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Eligibility {
+    CardType { card_type: CardType },
     ResourceAtLeast { resource: Resource, amount: u16 },
 }
 
@@ -227,6 +235,8 @@ pub enum Zone {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    DiscardVoluntarily,
+    CopyPlayedAlly,
     GainAttackPerAllyPlayed { amount: u8 },
     Discard,
     PreventDrawing,

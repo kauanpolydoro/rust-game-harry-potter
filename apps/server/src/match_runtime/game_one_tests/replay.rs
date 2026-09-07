@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::super::{ChaChaEffectRoller, ExecuteGameCommandRequest, codec};
-use super::prepared_game;
+use super::{prepared_adventure, prepared_game};
 
 #[derive(Deserialize, Serialize)]
 struct Scenario {
@@ -33,11 +33,20 @@ struct Step {
 
 #[test]
 fn game_one_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
-    let update = std::env::var_os("UPDATE_GAME_ONE_GOLDENS").is_some();
+    replay_adventure("one");
+}
+
+#[test]
+fn game_two_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
+    replay_adventure("two");
+}
+
+fn replay_adventure(game: &str) {
+    let update = std::env::var_os(format!("UPDATE_GAME_{}_GOLDENS", game.to_uppercase())).is_some();
     for count in [2, 3, 4] {
         for outcome in ["lost", "won"] {
             let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join(format!("tests/fixtures/game-one/{count}-{outcome}.json"));
+                .join(format!("tests/fixtures/game-{game}/{count}-{outcome}.json"));
             let bytes = std::fs::read(&path).expect("committed browser transcript");
             let mut scenario: Scenario = serde_json::from_slice(&bytes).expect("scenario");
             assert_eq!(
@@ -45,7 +54,7 @@ fn game_one_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
                 (count, outcome)
             );
             assert_eq!(scenario.seed_byte, 7);
-            replay_scenario(&mut scenario, update);
+            replay_scenario(&mut scenario, update, game);
             if update {
                 std::fs::write(
                     path,
@@ -60,8 +69,28 @@ fn game_one_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
     }
 }
 
-fn replay_scenario(scenario: &mut Scenario, update: bool) {
-    let (mut state, participants, rules) = prepared_game(scenario.players);
+type EventEncoder = fn(
+    game_domain::GameEvent,
+) -> Result<(u16, &'static str, String), crate::http_support::ApiError>;
+
+fn event_encoder(game: &str) -> EventEncoder {
+    if game == "two" {
+        codec::persisted_game_two_event
+    } else {
+        codec::persisted_event
+    }
+}
+
+fn replay_scenario(scenario: &mut Scenario, update: bool, game: &str) {
+    let (mut state, participants, rules) = if game == "one" {
+        prepared_game(scenario.players)
+    } else {
+        prepared_adventure(
+            scenario.players,
+            crate::game_two_manifest(),
+            "adventure:002",
+        )
+    };
     let mut persisted = codec::persisted_snapshot(&state, &participants);
     let opening = serde_json::to_string(&persisted).expect("opening");
     check_digest(
@@ -108,12 +137,9 @@ fn replay_scenario(scenario: &mut Scenario, update: bool) {
             apply_game_event(&state, &decision.event).expect("event replay"),
             decision.state
         );
-        let (_, _, event) = codec::persisted_event(decision.event)
-            .ok()
-            .expect("canonical event");
-        let (_, _, repeated_event) = codec::persisted_event(repeated.event)
-            .ok()
-            .expect("repeated event");
+        let encode = event_encoder(game);
+        let (_, _, event) = encode(decision.event).ok().expect("canonical event");
+        let (_, _, repeated_event) = encode(repeated.event).ok().expect("repeated event");
         assert_eq!(
             event.as_bytes(),
             repeated_event.as_bytes(),

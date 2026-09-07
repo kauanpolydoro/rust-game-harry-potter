@@ -220,6 +220,7 @@ async fn main() {
         vec![
             executable_fixture_manifest(),
             harry_potter_server::game_one_manifest(),
+            harry_potter_server::game_two_manifest(),
         ],
     )
     .with_game_seed_source(|| Ok([7; 32]))

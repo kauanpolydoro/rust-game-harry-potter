@@ -51,7 +51,7 @@ export default defineConfig({
         RUST_LOG: 'harry_potter_server=info',
       },
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 300_000,
       url: `${backendOrigin}/health/live`,
     },
     {

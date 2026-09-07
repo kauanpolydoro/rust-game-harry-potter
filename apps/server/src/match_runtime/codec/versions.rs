@@ -50,3 +50,28 @@ fn has_game_one_fields(value: &Value) -> bool {
         _ => false,
     }
 }
+
+pub(super) fn reject_game_two_fields(serialized: &str) -> Result<(), ApiError> {
+    fn contains(value: &Value) -> bool {
+        match value {
+            Value::Array(items) => items.iter().any(contains),
+            Value::Object(fields) => {
+                fields.contains_key("copied_ally_id")
+                    || fields
+                        .get("type")
+                        .is_some_and(|value| value == "ally_copied")
+                    || fields
+                        .get("rule_id")
+                        .is_some_and(|value| value == "system:voluntary-discard")
+                    || fields.values().any(contains)
+            }
+            _ => false,
+        }
+    }
+    let value: Value = serde_json::from_str(serialized).map_err(|_| ApiError::internal())?;
+    if contains(&value) {
+        Err(ApiError::internal())
+    } else {
+        Ok(())
+    }
+}
