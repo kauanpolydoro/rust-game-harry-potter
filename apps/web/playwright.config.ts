@@ -47,7 +47,7 @@ export default defineConfig({
         BIND_ADDRESS: `127.0.0.1:${backendPort}`,
         DATABASE_URL:
           process.env.TEST_DATABASE_URL ??
-          'postgres://hogwarts:local-development-only@127.0.0.1:55432/hogwarts',
+          `postgres://hogwarts:local-development-only@127.0.0.1:${localPort('POSTGRES_PORT', 55_432)}/hogwarts`,
         RUST_LOG: 'harry_potter_server=info',
       },
       reuseExistingServer: false,
@@ -60,6 +60,7 @@ export default defineConfig({
       cwd: import.meta.dirname,
       env: {
         BACKEND_PROXY_TARGET: backendOrigin,
+        APPLICATION_ORIGIN: frontendOrigin,
       },
       reuseExistingServer: false,
       timeout: 30_000,

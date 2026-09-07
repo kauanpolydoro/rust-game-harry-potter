@@ -3,35 +3,36 @@ use argon2::{
     password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 
-use crate::http_support::ApiError;
+use crate::{AppState, http_support::ApiError};
 
 pub(super) async fn verify_password(
+    state: &AppState,
     password: String,
     stored_hash: String,
 ) -> Result<bool, ApiError> {
-    tokio::task::spawn_blocking(move || {
-        let parsed = PasswordHash::new(&stored_hash).map_err(|_| ())?;
-        Ok::<_, ()>(
-            Argon2::default()
-                .verify_password(password.as_bytes(), &parsed)
-                .is_ok(),
-        )
-    })
-    .await
-    .map_err(|error| ApiError::internal_with("identity access application operation", error))?
-    .map_err(|()| ApiError::internal())
+    state
+        .password_work
+        .run(move || {
+            let parsed = PasswordHash::new(&stored_hash).map_err(|_| ())?;
+            Ok::<_, ()>(
+                Argon2::default()
+                    .verify_password(password.as_bytes(), &parsed)
+                    .is_ok(),
+            )
+        })
+        .await
 }
 
-pub(super) async fn hash_password(password: String) -> Result<String, ApiError> {
-    tokio::task::spawn_blocking(move || {
-        Argon2::default()
-            .hash_password(password.as_bytes())
-            .map(|hash| hash.to_string())
-            .map_err(|_| ())
-    })
-    .await
-    .map_err(|error| ApiError::internal_with("identity access application operation", error))?
-    .map_err(|()| ApiError::internal())
+pub(super) async fn hash_password(state: &AppState, password: String) -> Result<String, ApiError> {
+    state
+        .password_work
+        .run(move || {
+            Argon2::default()
+                .hash_password(password.as_bytes())
+                .map(|hash| hash.to_string())
+                .map_err(|_| ())
+        })
+        .await
 }
 
 pub(super) fn validate_display_name(display_name: &str) -> Result<&str, ApiError> {

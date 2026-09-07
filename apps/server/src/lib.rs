@@ -10,7 +10,7 @@ use std::{error::Error, fmt, fmt::Write as _};
 
 use axum::{
     Json, Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, MatchedPath, Request, State},
     http::{HeaderValue, StatusCode},
     middleware::{self, Next},
     response::Response,
@@ -20,7 +20,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
 use sha2::Sha256;
 use sqlx::{PgPool, migrate::Migrator, postgres::PgListener};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, watch};
+use tokio::sync::{broadcast, watch};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -30,14 +30,16 @@ mod game_expiration;
 mod http_support;
 mod identity_access;
 mod match_runtime;
+mod security;
 mod session;
 mod session_events;
+mod telemetry;
 
 pub use content_catalog::game_one_manifest;
+pub use telemetry::tracing_subscriber;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
-const MAX_CONCURRENT_RECOVERY_PASSWORD_CHECKS: usize = 4;
 const SESSION_REVOCATION_NOTIFICATION_CHANNEL: &str = "hogwarts_session_revoked";
 
 tokio::task_local! {
@@ -60,7 +62,8 @@ pub struct AppState {
     game_expiration_worker: Arc<OnceLock<AbortOnDrop>>,
     session_token_key: Arc<[u8; 32]>,
     recovery_token_key: Arc<[u8; 32]>,
-    recovery_password_checks: Arc<Semaphore>,
+    password_work: Arc<security::PasswordWork>,
+    rate_limits: Arc<security::RateLimits>,
     shutdown: watch::Sender<bool>,
 }
 
@@ -159,9 +162,8 @@ impl AppState {
             game_expiration_worker: Arc::new(OnceLock::new()),
             session_token_key: Arc::new(session_token_key),
             recovery_token_key: Arc::new(recovery_token_key),
-            recovery_password_checks: Arc::new(Semaphore::new(
-                MAX_CONCURRENT_RECOVERY_PASSWORD_CHECKS,
-            )),
+            password_work: Arc::default(),
+            rate_limits: Arc::default(),
             shutdown,
         }
     }
@@ -280,8 +282,8 @@ impl AppState {
                                     tracing::warn!("ignored malformed session revocation notification");
                                 }
                             }
-                            Err(error) => {
-                                tracing::warn!(error = %error, "session revocation listener failed");
+                            Err(_error) => {
+                                tracing::warn!("session revocation listener failed");
                                 tokio::time::sleep(Duration::from_secs(1)).await;
                             }
                         }
@@ -308,8 +310,8 @@ impl AppState {
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            if let Err(error) = game_expiration::expire_due_games(&database).await {
-                                tracing::warn!(%error, "game expiration scan failed");
+                            if let Err(_error) = game_expiration::expire_due_games(&database).await {
+                                tracing::warn!("game expiration scan failed");
                             }
                         }
                         changed = shutdown.changed() => {
@@ -400,11 +402,12 @@ impl AppState {
         ))
     }
 
-    fn try_recovery_password_check(&self) -> Option<OwnedSemaphorePermit> {
-        self.recovery_password_checks
-            .clone()
-            .try_acquire_owned()
-            .ok()
+    fn admit_request(&self, class: &str, subject: &[u8], limit: u32) -> bool {
+        let key = hmac_sha256(
+            self.session_token_key.as_ref(),
+            &[b"rate-limit-v1", class.as_bytes(), subject],
+        );
+        self.rate_limits.admit(key, limit)
     }
 
     fn subscribe_to_shutdown(&self) -> watch::Receiver<bool> {
@@ -452,19 +455,38 @@ pub fn build_router(state: AppState) -> Router {
         .merge(current_session::router())
         .merge(match_runtime::router())
         .merge(session_events::router())
-        .with_state(state)
+        .layer(DefaultBodyLimit::max(16 * 1024))
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(
+            state,
+            security::protect_request,
+        ))
         .layer(middleware::from_fn(correlate_request))
+        .layer(middleware::from_fn(security::response_headers))
 }
 
 async fn correlate_request(request: Request, next: Next) -> Response {
     let correlation_id = Uuid::new_v4();
-    let method = request.method().clone();
-    let path = request.uri().path().to_owned();
+    let method = match request.method().as_str() {
+        "GET" => "GET",
+        "HEAD" => "HEAD",
+        "POST" => "POST",
+        "PUT" => "PUT",
+        "PATCH" => "PATCH",
+        "DELETE" => "DELETE",
+        "OPTIONS" => "OPTIONS",
+        _ => "OTHER",
+    };
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or("unmatched", MatchedPath::as_str)
+        .to_owned();
     let span = tracing::info_span!(
         "http_request",
         correlation_id = %correlation_id,
         %method,
-        %path
+        %route
     );
     REQUEST_CORRELATION_ID
         .scope(correlation_id, async move {

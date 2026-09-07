@@ -744,8 +744,8 @@ describe('application shell', () => {
       }),
     )
     expect(
-      (request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers,
-    ).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }))
+      new Headers((request.mock.calls[1]?.[1] as RequestInit | undefined)?.headers).get('Idempotency-Key'),
+    ).toEqual(expect.any(String))
 
     await fireEvent.click(screen.getByRole('button', { name: 'Copiar link' }))
     await screen.findByText('Link individual copiado.')
@@ -1653,9 +1653,8 @@ describe('application shell', () => {
         method: 'POST',
       }),
     )
-    expect((gameCall?.[1] as RequestInit | undefined)?.headers).toEqual(
-      expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
-    )
+    expect(new Headers((gameCall?.[1] as RequestInit | undefined)?.headers).get('Idempotency-Key'))
+      .toEqual(expect.any(String))
   })
 
   it('lets the responsible participant select and submit a simple pending choice', async () => {

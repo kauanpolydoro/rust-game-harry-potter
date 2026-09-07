@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -13,7 +13,7 @@ use uuid::{Uuid, Variant};
 use crate::{
     AppState,
     content_catalog::ContentManifestOption,
-    http_support::{ApiError, idempotency_key, no_store_json},
+    http_support::{ApiError, StrictJson, StrictPath, idempotency_key, no_store_json},
     match_runtime,
     session::{
         AuthenticatedSession, authenticated_participant, authenticated_session, presented_session,
@@ -557,11 +557,14 @@ struct StoredLobby {
 async fn create_room(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<CreateRoomRequest>,
+    StrictJson(request): StrictJson<CreateRoomRequest>,
 ) -> Result<Response, ApiError> {
     let idempotency_key = idempotency_key(&headers)?;
     let display_name = validate_display_name(&request.display_name)?;
     validate_password(&request.recovery_password)?;
+    if !state.admit_request("room-creation-key", idempotency_key.as_bytes(), 10) {
+        return Err(ApiError::rate_limited(false));
+    }
 
     if let Some(stored) = postgres::load_room_creation(&state.database, &idempotency_key).await? {
         return replay_room_creation(
@@ -575,7 +578,7 @@ async fn create_room(
     }
     require_session_grant_key(&idempotency_key)?;
 
-    let password_hash = hash_password(request.recovery_password.clone()).await?;
+    let password_hash = hash_password(&state, request.recovery_password.clone()).await?;
     let mut transaction =
         state.database.begin().await.map_err(|error| {
             ApiError::internal_with("identity access application operation", error)
@@ -637,7 +640,7 @@ async fn create_room(
 
 async fn find_room(
     State(state): State<AppState>,
-    Path(room_code): Path<String>,
+    StrictPath(room_code): StrictPath<String>,
 ) -> Result<Response, ApiError> {
     let normalized_code = room_code.to_ascii_uppercase();
     let room = postgres::find_open_room(&state.database, &normalized_code)
@@ -661,9 +664,9 @@ async fn find_room(
 
 async fn join_room(
     State(state): State<AppState>,
-    Path(room_code): Path<String>,
+    StrictPath(room_code): StrictPath<String>,
     headers: HeaderMap,
-    Json(request): Json<JoinRoomRequest>,
+    StrictJson(request): StrictJson<JoinRoomRequest>,
 ) -> Result<Response, ApiError> {
     let idempotency_key = idempotency_key(&headers)?;
     let normalized_code = room_code.to_ascii_uppercase();
@@ -786,9 +789,9 @@ fn parse_device_session_id(session_id: &str) -> Result<Uuid, ApiError> {
 
 async fn revoke_device_session(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    StrictPath(session_id): StrictPath<String>,
     headers: HeaderMap,
-    Json(_request): Json<RevokeDeviceSessionRequest>,
+    StrictJson(_request): StrictJson<RevokeDeviceSessionRequest>,
 ) -> Result<Response, ApiError> {
     let key = idempotency_key(&headers)?;
     require_session_grant_key(&key)?;
@@ -951,7 +954,7 @@ fn device_session_revocation_response(
 async fn protect_participant(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<ProtectParticipantRequest>,
+    StrictJson(request): StrictJson<ProtectParticipantRequest>,
 ) -> Result<Response, ApiError> {
     if !request.protection_confirmed {
         return Err(ApiError::protection_confirmation_required());
@@ -1089,7 +1092,7 @@ fn participant_protection_response(event: StoredParticipantProtectionEvent) -> R
 async fn protect_room(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<ProtectRoomRequest>,
+    StrictJson(request): StrictJson<ProtectRoomRequest>,
 ) -> Result<Response, ApiError> {
     if !request.protection_confirmed {
         return Err(ApiError::protection_confirmation_required());
@@ -1202,17 +1205,22 @@ async fn authenticate_recovery_password_change(
     if observed.role != "host" {
         return Err(ApiError::not_room_host());
     }
+    if !state.admit_request("recovery-room", observed.room_id.as_bytes(), 20) {
+        return Err(ApiError::rate_limited(true));
+    }
     if current_password.is_empty() || current_password.chars().count() > 128 {
         return Err(ApiError::recovery_confirmation_failed());
     }
-    let password_check_permit = state
-        .try_recovery_password_check()
-        .ok_or_else(ApiError::recovery_unavailable)?;
-    if !verify_password(current_password, observed.recovery_password_hash.clone()).await? {
+    if !verify_password(
+        state,
+        current_password,
+        observed.recovery_password_hash.clone(),
+    )
+    .await?
+    {
         return Err(ApiError::recovery_confirmation_failed());
     }
-    let new_password_hash = hash_password(new_password).await?;
-    drop(password_check_permit);
+    let new_password_hash = hash_password(state, new_password).await?;
     Ok((observed, new_password_hash))
 }
 
@@ -1281,7 +1289,7 @@ fn room_protection_response(event: StoredRoomProtectionEvent) -> Response {
 async fn rotate_recovery_password(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<RotateRecoveryPasswordRequest>,
+    StrictJson(request): StrictJson<RotateRecoveryPasswordRequest>,
 ) -> Result<Response, ApiError> {
     let key = idempotency_key(&headers)?;
     require_session_grant_key(&key)?;
@@ -1404,16 +1412,16 @@ fn recovery_password_rotation_response(event: StoredSecurityEvent) -> Response {
 async fn regenerate_own_recovery_credential(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(_request): Json<RegenerateOwnRecoveryCredentialRequest>,
+    StrictJson(_request): StrictJson<RegenerateOwnRecoveryCredentialRequest>,
 ) -> Result<Response, ApiError> {
     regenerate_recovery_credential(state, headers, None, true).await
 }
 
 async fn regenerate_assisted_recovery_credential(
     State(state): State<AppState>,
-    Path(position): Path<i16>,
+    StrictPath(position): StrictPath<i16>,
     headers: HeaderMap,
-    Json(request): Json<RegenerateAssistedRecoveryCredentialRequest>,
+    StrictJson(request): StrictJson<RegenerateAssistedRecoveryCredentialRequest>,
 ) -> Result<Response, ApiError> {
     regenerate_recovery_credential(
         state,
@@ -1710,7 +1718,7 @@ fn recovery_credential_regeneration_response(
 
 async fn recover_participation(
     State(state): State<AppState>,
-    Json(request): Json<RecoverParticipationRequest>,
+    StrictJson(request): StrictJson<RecoverParticipationRequest>,
 ) -> Result<Response, ApiError> {
     let recovery = authenticate_recovery_request(&state, request).await?;
 
@@ -1856,9 +1864,6 @@ async fn authenticate_recovery_request(
     state: &AppState,
     request: RecoverParticipationRequest,
 ) -> Result<AuthenticatedRecovery, ApiError> {
-    let password_check_permit = state
-        .try_recovery_password_check()
-        .ok_or_else(ApiError::recovery_unavailable)?;
     let token_is_well_formed = request.token.len() == RECOVERY_TOKEN_LENGTH
         && request.token.bytes().all(|byte| byte.is_ascii_hexdigit());
     let token_for_hmac = if token_is_well_formed {
@@ -1867,6 +1872,9 @@ async fn authenticate_recovery_request(
         "malformed-recovery-token"
     };
     let token_hmac = state.recovery_token_hmac(token_for_hmac);
+    if !state.admit_request("recovery-credential", token_hmac.as_bytes(), 10) {
+        return Err(ApiError::rate_limited(true));
+    }
     let recovery_attempt_id = Uuid::parse_str(&request.attempt_id)
         .ok()
         .filter(|attempt_id| {
@@ -1886,20 +1894,26 @@ async fn authenticate_recovery_request(
     let candidate =
         postgres::load_recovery_candidate(&state.database, &token_hmac, recovery_attempt_id)
             .await?;
+    if let Some(candidate) = &candidate
+        && !state.admit_request("recovery-room", candidate.room_id.as_bytes(), 20)
+    {
+        return Err(ApiError::rate_limited(true));
+    }
     let password_is_bounded =
         !request.password.is_empty() && request.password.chars().count() <= 128;
-    let password_matches = if let Some(candidate) =
-        candidate.as_ref().filter(|_| password_is_bounded)
-    {
-        verify_password(
-            request.password.clone(),
-            candidate.recovery_password_hash.clone(),
-        )
-        .await?
-    } else {
-        let _timing_equalizer = hash_password("invalid participant recovery".to_owned()).await?;
-        false
-    };
+    let password_matches =
+        if let Some(candidate) = candidate.as_ref().filter(|_| password_is_bounded) {
+            verify_password(
+                state,
+                request.password.clone(),
+                candidate.recovery_password_hash.clone(),
+            )
+            .await?
+        } else {
+            let _timing_equalizer =
+                hash_password(state, "invalid participant recovery".to_owned()).await?;
+            false
+        };
     let Some(candidate) = candidate.filter(|_| {
         token_is_well_formed
             && recovery_attempt_id.is_some()
@@ -1911,7 +1925,6 @@ async fn authenticate_recovery_request(
     let recovery_attempt_id = recovery_attempt_id.expect("the candidate requires a valid attempt");
     let replace_session_id = replace_session_id.expect("the candidate requires a valid choice");
     let session_token = state.recovered_session_token(&request.token, candidate.participant_id);
-    drop(password_check_permit);
     Ok(AuthenticatedRecovery {
         candidate,
         token_hmac,
@@ -1973,7 +1986,7 @@ pub(crate) async fn lobby_for_participant(
 async fn select_hero(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<SelectHeroRequest>,
+    StrictJson(request): StrictJson<SelectHeroRequest>,
 ) -> Result<Response, ApiError> {
     let hero = parse_hero(&request.hero_id)?;
     let authenticated = authenticated_session(&state, &headers).await?;
@@ -2014,7 +2027,7 @@ async fn select_hero(
 async fn set_readiness(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<SetReadinessRequest>,
+    StrictJson(request): StrictJson<SetReadinessRequest>,
 ) -> Result<Response, ApiError> {
     let authenticated = authenticated_session(&state, &headers).await?;
     let participant_id = authenticated.participant_id;
@@ -2205,7 +2218,8 @@ async fn replay_room_creation(
     display_name: &str,
     password: String,
 ) -> Result<Response, ApiError> {
-    let password_matches = verify_password(password, stored.recovery_password_hash.clone()).await?;
+    let password_matches =
+        verify_password(state, password, stored.recovery_password_hash.clone()).await?;
 
     if stored.display_name != display_name || !password_matches {
         return Err(ApiError::idempotency_conflict());
