@@ -1,7 +1,18 @@
 # Bundles de conteúdo
 
+O arquivo `bundles/game-one-en-v1.json` contém o Jogo 1 jogável, com 45 registros e 93 cartas físicas no catálogo.
+As [regras funcionais v1](game-one-rules-v1.md) documentam quantidades, efeitos, cartas exclusivas de cada Herói, fontes e decisões da adaptação.
+Cartas de Heróis ausentes permanecem fora da Partida.
+
+Esse bundle usa schema 3 e produz manifesto 4.
+O servidor inspeciona a AST validada, compila cada regra, valida o conjunto no motor e fornece separadamente a confiança na fonte versionada da adaptação.
+Somente então importa e publica o manifesto jogável.
+Regras sem proveniência própria ou sem suporte de execução impedem sua publicação como jogável.
+A preparação deve conservar o inventário exato e incluir uma única regra automática de revelação de Artes das Trevas.
+
 O arquivo `bundles/base-en-candidate-2026-09-02.json` é o catálogo candidato em inglês para o jogo-base.
 Ele fecha o inventário declarado em 171 registros e 252 cartas físicas.
+Seu schema 2 e manifesto 3 permanecem preservados; construções introduzidas pelo Jogo 1 não são aceitas nesse schema anterior.
 Promoções e expansões ficam fora deste escopo.
 
 Cada registro usa um ID de catálogo opaco e independente do idioma.
@@ -21,3 +32,12 @@ Antes de calcular o digest BLAKE3, ele ordena as coleções sem ordem semântica
 O catálogo candidato permanece intencionalmente não jogável.
 Custos, efeitos, recompensas, habilidades, setup e precedência ainda aparecem como lacunas quando não possuem fonte validada ou regra explícita de adaptação.
 Essas lacunas são publicadas no manifesto sem inferir regras ausentes.
+
+O snapshot 5 preserva a ordem de todas as pilhas, os sorteios da preparação e os bloqueios de compra ainda ativos.
+Seu histórico admite o encerramento anterior, Artes das Trevas, Vilões e ações do Herói.
+O evento 6 registra os novos efeitos e os sorteios de cada reembaralhamento de fim de Turno.
+A migração `0021_game_one.sql` valida essas formas e suas transições no PostgreSQL, sem reescrever snapshots, eventos ou manifestos anteriores.
+Os codecs anteriores continuam disponíveis para leitura e rejeitam campos com semântica exclusiva do Jogo 1.
+
+Aplicações de teste podem substituir a fonte de seed na construção de `AppState` para reproduzir uma Partida pelo caminho HTTP real.
+A aplicação de produção usa a entropia do sistema operacional e não recebe uma seed em requisições.

@@ -28,7 +28,7 @@ function projection(stateVersion = 1): GameProjectionResponse {
     },
     legal_actions: ['end_hero_actions', 'play_card', 'assign_attack', 'acquire_card'],
     legal_intentions: {
-      acquire_cards: [{ card_id: 'card:market-one', cost: 3 }],
+      acquire_cards: [{ card_id: 'card:market-one', cost: 3, destinations: ['discard_pile'] }],
       assign_attack: [{ max_amount: 2, villain_id: 'villain:one' }],
       end_hero_actions: true,
       play_cards: [

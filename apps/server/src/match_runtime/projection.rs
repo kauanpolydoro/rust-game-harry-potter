@@ -7,8 +7,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::{
-    StoredRoomParticipant, codec::command_domain_state, codec::decode_persisted_snapshot,
-    codec::game_phase_name, codec::verify_persisted_snapshot, hero_name, postgres,
+    AcquisitionDestination, StoredRoomParticipant, codec::command_domain_state,
+    codec::decode_persisted_snapshot, codec::game_phase_name, codec::verify_persisted_snapshot,
+    hero_name, postgres,
 };
 use crate::{AppState, http_support::ApiError};
 
@@ -60,6 +61,12 @@ struct ChoiceSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     cause: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    source_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instruction: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    option_labels: Vec<ChoiceOptionLabel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     responsible_position: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<&'static str>,
@@ -72,6 +79,12 @@ struct ChoiceSummary {
 }
 
 #[derive(Serialize)]
+struct ChoiceOptionLabel {
+    option_id: String,
+    label: String,
+}
+
+#[derive(Serialize)]
 struct EffectResolutionSummary {
     status: &'static str,
     outcomes: Vec<EffectOutcomeSummary>,
@@ -80,6 +93,16 @@ struct EffectResolutionSummary {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum EffectOutcomeSummary {
+    DrawingBlocked {
+        rule_id: String,
+        target_id: String,
+        target_position: u8,
+    },
+    RandomSampled {
+        rule_id: String,
+        upper_exclusive: u32,
+        result: u32,
+    },
     DieRolled {
         rule_id: String,
         die: &'static str,
@@ -139,6 +162,8 @@ struct GameParticipant {
     hero: GameHero,
     resources: GameResources,
     stunned: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drawing_blocked: Option<bool>,
     hand_count: usize,
 }
 
@@ -193,10 +218,13 @@ struct LegalAttackSummary {
 struct LegalAcquisitionSummary {
     card_id: String,
     cost: u16,
+    destinations: Vec<AcquisitionDestination>,
 }
 
 #[derive(Serialize)]
 struct TableSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revealed_dark_arts: Option<CardSummary>,
     hand: Vec<CardSummary>,
     play_area: Vec<CardSummary>,
     draw_pile_count: usize,
@@ -216,6 +244,8 @@ struct CardSummary {
     instance_id: String,
     catalog_id: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -223,6 +253,8 @@ struct MarketCardSummary {
     instance_id: String,
     catalog_id: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     cost: u16,
     affordable: bool,
 }
@@ -232,6 +264,10 @@ struct VillainSummary {
     instance_id: String,
     catalog_id: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reward_description: Option<String>,
     health: u16,
     attackable: bool,
     max_attack: u16,
@@ -300,6 +336,7 @@ pub(crate) async fn projection_for_participant(
         &game.manifest_digest,
     )?;
 
+    let choice = choice_summary(&domain_state, &state.content, &game.manifest_digest);
     Ok(Some(GameProjectionResponse {
         game: GameSummary {
             id: game.id.to_string(),
@@ -339,7 +376,7 @@ pub(crate) async fn projection_for_participant(
         legal_actions,
         legal_intentions: legal_intentions_summary,
         table,
-        choice: choice_summary(&domain_state),
+        choice,
         queued_phases: domain_state
             .queued_phases()
             .iter()
@@ -447,6 +484,12 @@ fn legal_intentions_summary(
             .map(|acquisition| LegalAcquisitionSummary {
                 card_id: acquisition.card_id.clone(),
                 cost: acquisition.cost,
+                destinations: acquisition
+                    .destinations
+                    .iter()
+                    .copied()
+                    .map(AcquisitionDestination::from_domain)
+                    .collect(),
             })
             .collect(),
     }
@@ -514,6 +557,7 @@ fn table_summary(
                 instance_id: card.instance_id,
                 catalog_id: card.catalog_id,
                 name: card.name,
+                description: card.description,
                 cost,
                 affordable: intentions
                     .acquisitions
@@ -526,23 +570,7 @@ fn table_summary(
         .effect_world()
         .entities_in(EffectZone::ActiveVillains)
         .iter()
-        .map(|entity| {
-            let catalog_id = entity.catalog_id().ok_or_else(ApiError::internal)?;
-            let legal = intentions
-                .attack_targets
-                .iter()
-                .find(|target| target.villain_id == entity.id());
-            Ok(VillainSummary {
-                instance_id: entity.id().to_owned(),
-                catalog_id: catalog_id.to_owned(),
-                name: content
-                    .entity_name(manifest_digest, catalog_id)
-                    .unwrap_or_else(|| catalog_id.to_owned()),
-                health: entity.resource(EffectResource::Health),
-                attackable: legal.is_some(),
-                max_attack: legal.map_or(0, |target| target.max_amount),
-            })
-        })
+        .map(|entity| villain_summary(entity, intentions, content, manifest_digest))
         .collect::<Result<Vec<_>, ApiError>>()?;
     let owned_count = |zone| {
         state
@@ -554,6 +582,11 @@ fn table_summary(
     };
 
     Ok(TableSummary {
+        revealed_dark_arts: state
+            .effect_world()
+            .entities_in(EffectZone::DarkArtsDiscard)
+            .last()
+            .and_then(|entity| card_summary(entity, content, manifest_digest)),
         hand: cards_in(EffectZone::HeroHand),
         play_area: cards_in(EffectZone::HeroPlayArea),
         draw_pile_count: owned_count(EffectZone::HeroDrawPile),
@@ -581,6 +614,39 @@ fn table_summary(
             .effect_world()
             .entities_in(EffectZone::VillainDiscard)
             .len(),
+    })
+}
+
+fn villain_summary(
+    entity: &game_domain::EffectEntity,
+    intentions: &LegalGameIntentions,
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> Result<VillainSummary, ApiError> {
+    let catalog_id = entity.catalog_id().ok_or_else(ApiError::internal)?;
+    let legal = intentions
+        .attack_targets
+        .iter()
+        .find(|target| target.villain_id == entity.id());
+    Ok(VillainSummary {
+        instance_id: entity.id().to_owned(),
+        catalog_id: catalog_id.to_owned(),
+        name: content
+            .entity_name(manifest_digest, catalog_id)
+            .unwrap_or_else(|| catalog_id.to_owned()),
+        health: entity.resource(EffectResource::Health),
+        attackable: legal.is_some(),
+        max_attack: legal.map_or(0, |target| target.max_amount),
+        description: content.entity_description(
+            manifest_digest,
+            catalog_id,
+            game_content::FunctionalField::Effect,
+        ),
+        reward_description: content.entity_description(
+            manifest_digest,
+            catalog_id,
+            game_content::FunctionalField::Reward,
+        ),
     })
 }
 
@@ -623,6 +689,11 @@ fn card_summary(
         name: content
             .entity_name(manifest_digest, catalog_id)
             .unwrap_or_else(|| catalog_id.to_owned()),
+        description: content.entity_description(
+            manifest_digest,
+            catalog_id,
+            game_content::FunctionalField::Effect,
+        ),
     })
 }
 
@@ -648,6 +719,13 @@ fn game_participant(
             influence: hero_resource(state, stored.position, EffectResource::Influence)?,
         },
         stunned: health == 0,
+        drawing_blocked: state
+            .effect_world()
+            .entities_in(EffectZone::Heroes)
+            .iter()
+            .find(|hero| hero.owner_position() == Some(position))
+            .filter(|hero| hero.drawing_blocked())
+            .map(|_| true),
         hand_count: state
             .effect_world()
             .entities_in(EffectZone::HeroHand)
@@ -670,12 +748,19 @@ fn hero_resource(
         .ok_or_else(ApiError::internal)
 }
 
-fn choice_summary(state: &InitialGameState) -> ChoiceSummary {
+fn choice_summary(
+    state: &InitialGameState,
+    content: &crate::content_catalog::ContentCatalog,
+    manifest_digest: &str,
+) -> ChoiceSummary {
     let Some(choice) = state.pending_choice() else {
         return ChoiceSummary {
             status: "none",
             id: None,
             cause: None,
+            source_name: None,
+            instruction: None,
+            option_labels: Vec::new(),
             responsible_position: None,
             kind: None,
             options: Vec::new(),
@@ -687,6 +772,24 @@ fn choice_summary(state: &InitialGameState) -> ChoiceSummary {
         status: "pending",
         id: Some(choice.id.clone()),
         cause: Some(choice.cause.clone()),
+        source_name: content.rule_name(manifest_digest, &choice.cause),
+        instruction: if choice.kind == PendingEffectChoiceKind::Target {
+            content.choice_instruction(manifest_digest, &choice.continuation.choice_cursor)
+        } else {
+            None
+        },
+        option_labels: if choice.kind == PendingEffectChoiceKind::Effect
+            && content.rule_name(manifest_digest, &choice.cause).is_some()
+        {
+            content
+                .choice_option_labels(manifest_digest, &choice.continuation.choice_cursor)
+                .into_iter()
+                .filter(|(id, _)| choice.options.contains(id))
+                .map(|(option_id, label)| ChoiceOptionLabel { option_id, label })
+                .collect()
+        } else {
+            Vec::new()
+        },
         responsible_position: Some(choice.responsible_position),
         kind: Some(match choice.kind {
             PendingEffectChoiceKind::Effect => "effect",
@@ -701,6 +804,24 @@ fn choice_summary(state: &InitialGameState) -> ChoiceSummary {
 
 fn effect_outcome_summary(outcome: &EffectOutcome) -> EffectOutcomeSummary {
     match outcome {
+        EffectOutcome::DrawingBlocked {
+            rule_id,
+            target_id,
+            target_position,
+        } => EffectOutcomeSummary::DrawingBlocked {
+            rule_id: rule_id.clone(),
+            target_id: target_id.clone(),
+            target_position: *target_position,
+        },
+        EffectOutcome::RandomSampled {
+            rule_id,
+            upper_exclusive,
+            result,
+        } => EffectOutcomeSummary::RandomSampled {
+            rule_id: rule_id.clone(),
+            upper_exclusive: *upper_exclusive,
+            result: *result,
+        },
         EffectOutcome::DieRolled {
             rule_id,
             die,
@@ -730,6 +851,7 @@ fn effect_outcome_summary(outcome: &EffectOutcome) -> EffectOutcomeSummary {
         EffectOutcome::NoOp { rule_id, reason } => EffectOutcomeSummary::NoOp {
             rule_id: rule_id.clone(),
             reason: match reason {
+                EffectNoOpReason::DrawingBlocked => "drawing_blocked",
                 EffectNoOpReason::Explicit => "explicit",
                 EffectNoOpReason::NoEligibleTarget => "no_eligible_target",
                 EffectNoOpReason::ZeroCardinality => "zero_cardinality",

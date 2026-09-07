@@ -254,7 +254,7 @@ const playedCardProjection = {
   ...heroActionProjection,
   legal_actions: ['end_hero_actions', 'assign_attack', 'acquire_card'],
   legal_intentions: {
-    acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
+    acquire_cards: [{ card_id: 'instance:market', cost: 2, destinations: ['discard_pile'] }],
     assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
     end_hero_actions: true,
     play_cards: [],
@@ -829,7 +829,7 @@ test('a player replays a missed event and falls back to Snapshot within recovery
         }),
       )
       .toEqual({
-        eventVersion: 5,
+        eventVersion: 6,
         phases: ['end_turn', 'dark_arts', 'villains'],
         type: 'turn_completed',
       })

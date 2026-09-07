@@ -51,6 +51,21 @@ fn bundle_value() -> serde_json::Value {
     serde_json::from_slice(&complete_bundle()).expect("fixture should parse")
 }
 
+#[test]
+fn legacy_content_schema_cannot_silently_adopt_game_one_nodes() {
+    let mut bundle = bundle_value();
+    bundle["rules"] = json!([{"id":"rule:draw", "trigger":"manual", "order":0, "effect":{
+        "type":"sequence", "effects":[{"type":"apply",
+            "target":{"zone":"heroes","owner":"actor","cardinality":{"min":1,"max":1}},
+            "operation":{"type":"draw","amount":1}
+        }]
+    }}]);
+    assert!(
+        import_value(&bundle).is_err(),
+        "Game 1 nodes require schema 3"
+    );
+}
+
 fn playable_bundle_without_setup() -> serde_json::Value {
     let mut bundle = bundle_value();
     bundle["sources"][0]["kind"] = json!("validated");
@@ -141,11 +156,18 @@ fn contains_participant_choice(effect: &Effect) -> bool {
                     .as_deref()
                     .is_some_and(contains_participant_choice)
         }
-        Effect::Repeat { effect, .. } => contains_participant_choice(effect),
+        Effect::Repeat { effect, .. } | Effect::Reaction { effect, .. } => {
+            contains_participant_choice(effect)
+        }
         Effect::Roll { outcomes, .. } => outcomes.iter().any(contains_participant_choice),
         Effect::Sequence { effects } => effects.iter().any(contains_participant_choice),
         Effect::Apply { .. }
+        | Effect::TopDeckAcquisition { .. }
+        | Effect::CardType { .. }
+        | Effect::HandDamageLimit { .. }
         | Effect::NoOp
+        | Effect::RevealDarkArts
+        | Effect::Structural { .. }
         | Effect::Reference { .. }
         | Effect::Terminal { .. } => false,
     }

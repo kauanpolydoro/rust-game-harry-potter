@@ -419,6 +419,7 @@ function heroActionGameProjectionResponse() {
       hand: [
         {
           catalog_id: 'fixture:starter-card',
+          description: 'Cada Herói compra 1 carta.',
           instance_id: 'instance:starter',
           name: 'Lumos',
         },
@@ -459,7 +460,7 @@ function playedCardGameProjectionResponse() {
     ...projection,
     legal_actions: ['end_hero_actions', 'assign_attack', 'acquire_card'],
     legal_intentions: {
-      acquire_cards: [{ card_id: 'instance:market', cost: 2 }],
+      acquire_cards: [{ card_id: 'instance:market', cost: 2, destinations: ['discard_pile'] }],
       assign_attack: [{ max_amount: 2, villain_id: 'instance:villain' }],
       end_hero_actions: true,
       play_cards: [],
@@ -565,6 +566,48 @@ function guestJoinResponse() {
 }
 
 describe('application shell', () => {
+  it('explains Game 1 choices, the revealed Dark Arts and blocked card draws', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const initial = pendingChoiceProjectionResponse()
+    const projection = {
+      ...initial,
+      turn: { ...initial.turn, phase: 'dark_arts' },
+      choice: {
+        ...initial.choice,
+        kind: 'effect',
+        source_name: 'Reparo',
+        options: ['option:1', 'option:2'],
+        option_labels: [
+          { option_id: 'option:1', label: 'Você recebe 2 de Influência.' },
+          { option_id: 'option:2', label: 'Você compra 1 carta.' },
+        ],
+      },
+      participant: { ...initial.participant, drawing_blocked: true },
+      participants: initial.participants.map((player) => ({ ...player, drawing_blocked: true })),
+      table: {
+        ...initial.table,
+        revealed_dark_arts: {
+          catalog_id: 'dark-arts:004', instance_id: 'instance:petrification', name: 'Petrification',
+          description: 'Cada Herói perde 1 de Vida. Cada Herói não pode comprar cartas extras até o fim deste turno.',
+        },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) =>
+      Promise.resolve(new Response(JSON.stringify(String(input) === '/health/ready' ? { status: 'ready' } : projection), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })),
+    ))
+    render(App, { global: { plugins: [createPinia()] } })
+    const choice = await screen.findByRole('region', { name: 'Escolha oficial pendente' })
+    expect(within(choice).getByText('Reparo')).toBeVisible()
+    expect(within(choice).getByRole('radio', { name: 'Você recebe 2 de Influência.' })).toBeVisible()
+    expect(within(choice).getByRole('radio', { name: 'Você compra 1 carta.' })).toBeVisible()
+    const darkArts = screen.getByRole('region', { name: 'Arte das Trevas revelada' })
+    expect(within(darkArts).getByText('Petrification')).toBeVisible()
+    expect(within(darkArts).getByText(projection.table.revealed_dark_arts.description)).toBeVisible()
+    expect(within(screen.getByRole('region', { name: 'Sua mesa' })).getByText('Compra de cartas extras bloqueada até o fim deste turno')).toBeVisible()
+  })
+
   beforeEach(() => {
     SynchronizedWebSocket.instances = []
     vi.stubGlobal('WebSocket', SynchronizedWebSocket)
@@ -2897,6 +2940,7 @@ describe('application shell', () => {
     render(App, { global: { plugins: [createPinia()] } })
 
     const hand = await screen.findByRole('region', { name: 'Sua mão' })
+    expect(within(hand).getByText('Cada Herói compra 1 carta.')).toBeVisible()
     await fireEvent.click(within(hand).getByRole('radio', { name: 'Minerva - Harry' }))
     void fireEvent.click(within(hand).getByRole('button', { name: 'Jogar Lumos' }))
 
@@ -2911,10 +2955,12 @@ describe('application shell', () => {
       type: 'play_card',
     })
 
+    const acquiredOnDeck = playedCardGameProjectionResponse()
+    acquiredOnDeck.legal_intentions.acquire_cards[0]!.destinations.push('draw_pile')
     acceptPlay(
       new Response(
         JSON.stringify({
-          projection: playedCardGameProjectionResponse(),
+          projection: acquiredOnDeck,
           receipt: {
             accepted_sequence: 2,
             accepted_state_version: 3,
@@ -2935,6 +2981,7 @@ describe('application shell', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Atacar Draco com 2' }))
     await screen.findByText('Ação não aceita')
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Destino de Nimbus 2000' }), { target: { value: 'draw_pile' } })
     await fireEvent.click(
       screen.getByRole('button', { name: 'Adquirir Nimbus 2000 por 2 de Influência' }),
     )
@@ -2949,6 +2996,7 @@ describe('application shell', () => {
       card_id: 'instance:market',
       expected_state_version: 3,
       type: 'acquire_card',
+      destination: 'draw_pile',
     })
   })
 

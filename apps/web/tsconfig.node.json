@@ -9,5 +9,5 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["e2e/**/*.ts", "playwright.config.ts", "vite.config.ts", "vitest.config.ts"]
+  "include": ["e2e/**/*.ts", "src/contracts/identity-access.generated.ts", "playwright.config.ts", "vite.config.ts", "vitest.config.ts"]
 }

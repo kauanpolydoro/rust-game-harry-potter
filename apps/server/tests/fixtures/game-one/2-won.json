@@ -1,0 +1,3430 @@
+{
+  "players": 2,
+  "seed_byte": 7,
+  "outcome": "won",
+  "opening_digest": "blake3:0ab3efa88a9b59a7cd9924650dc9cbe9a1549d226d54391230f079462cd20ce8",
+  "checkpoints": {
+    "dark_arts": {
+      "decision_point": {
+        "responsible_position": 1,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 8
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 58
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000035",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 9,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "instance:00000051",
+              "target_position": 1,
+              "to": "hero_discard_pile",
+              "type": "moved"
+            },
+            {
+              "after": 8,
+              "before": 9,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-villain-001",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 1,
+        "phase": "hero_actions"
+      }
+    },
+    "end_turn": {
+      "decision_point": {
+        "responsible_position": 2,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "drawing_blocked": true,
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 7,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "drawing_blocked": true,
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 9
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 58
+      },
+      "sequence": 9,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000040",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 7,
+              "before": 8,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-004",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            },
+            {
+              "after": 9,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-004",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "rule_id": "rule:g1-dark-004",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "drawing_blocked"
+            },
+            {
+              "rule_id": "rule:g1-dark-004",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "drawing_blocked"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 2,
+        "phase": "hero_actions"
+      }
+    },
+    "hero_actions": {
+      "decision_point": {
+        "responsible_position": 1,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 8
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 58
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000035",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 9,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "instance:00000051",
+              "target_position": 1,
+              "to": "hero_discard_pile",
+              "type": "moved"
+            },
+            {
+              "after": 8,
+              "before": 9,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-villain-001",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 1,
+        "phase": "hero_actions"
+      }
+    },
+    "location_advance": {
+      "decision_point": {
+        "choice": {
+          "cause": "rule:g1-dark-002",
+          "continuation": {
+            "choice_cursor": {
+              "path": [
+                {
+                  "index": 1,
+                  "type": "sequence_effect"
+                }
+              ],
+              "rule_id": "rule:g1-dark-002"
+            },
+            "queue": [],
+            "steps_completed": 4
+          },
+          "id": "choice:target:3",
+          "kind": "target",
+          "max": 1,
+          "min": 1,
+          "options": [
+            "instance:00000060",
+            "instance:00000051",
+            "instance:00000009",
+            "instance:00000047",
+            "instance:00000046"
+          ],
+          "responsible_position": 1
+        },
+        "type": "effect_choice"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 4,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 4
+          },
+          "zone": "location_discard",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 115
+      },
+      "sequence": 91,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "result": 4,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 10
+            },
+            {
+              "result": 3,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 9
+            },
+            {
+              "result": 4,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 8
+            },
+            {
+              "result": 4,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 7
+            },
+            {
+              "result": 5,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 6
+            },
+            {
+              "result": 3,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 5
+            },
+            {
+              "result": 3,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 4
+            },
+            {
+              "result": 1,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 3
+            },
+            {
+              "result": 1,
+              "rule_id": "rule:g1-dark-phase",
+              "type": "random_sampled",
+              "upper_exclusive": 2
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000035",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000039",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000040",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000032",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000031",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000037",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000036",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000038",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000034",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_discard",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000033",
+              "to": "dark_arts_deck",
+              "type": "moved"
+            },
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000035",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 4,
+              "before": 5,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 11,
+        "phase": "dark_arts"
+      }
+    },
+    "preparation": {
+      "decision_point": {
+        "choice": {
+          "cause": "rule:g1-dark-002",
+          "continuation": {
+            "choice_cursor": {
+              "path": [
+                {
+                  "index": 1,
+                  "type": "sequence_effect"
+                }
+              ],
+              "rule_id": "rule:g1-dark-002"
+            },
+            "queue": [],
+            "steps_completed": 4
+          },
+          "id": "choice:target:3",
+          "kind": "target",
+          "max": 1,
+          "min": 1,
+          "options": [
+            "instance:00000051",
+            "instance:00000048",
+            "instance:00000062",
+            "instance:00000052",
+            "instance:00000061"
+          ],
+          "responsible_position": 1
+        },
+        "type": "effect_choice"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 9
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "preparation_samples": [
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 30,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 21,
+          "upper_exclusive": 29,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 21,
+          "upper_exclusive": 28,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 17,
+          "upper_exclusive": 27,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 14,
+          "upper_exclusive": 26,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 25,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 5,
+          "upper_exclusive": 24,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 15,
+          "upper_exclusive": 23,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 22,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 21,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 10,
+          "upper_exclusive": 20,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 4,
+          "upper_exclusive": 19,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 18,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 16,
+          "upper_exclusive": 17,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 10,
+          "upper_exclusive": 16,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 14,
+          "upper_exclusive": 15,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 14,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 9,
+          "upper_exclusive": 13,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 9,
+          "upper_exclusive": 12,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 4,
+          "upper_exclusive": 11,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 6,
+          "upper_exclusive": 10,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 9,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 4,
+          "upper_exclusive": 8,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 7,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 6,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 5,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 4,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 3,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 7,
+          "upper_exclusive": 10,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 9,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 5,
+          "upper_exclusive": 8,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 7,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 6,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 5,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 0,
+          "upper_exclusive": 3,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 2,
+          "upper_exclusive": 3,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": null,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "villain_deck"
+        },
+        {
+          "owner_position": 1,
+          "result": 5,
+          "upper_exclusive": 10,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 2,
+          "upper_exclusive": 9,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 5,
+          "upper_exclusive": 8,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 6,
+          "upper_exclusive": 7,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 2,
+          "upper_exclusive": 6,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 4,
+          "upper_exclusive": 5,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 3,
+          "upper_exclusive": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 1,
+          "upper_exclusive": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 1,
+          "result": 1,
+          "upper_exclusive": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 1,
+          "upper_exclusive": 10,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 8,
+          "upper_exclusive": 9,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 5,
+          "upper_exclusive": 8,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 6,
+          "upper_exclusive": 7,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 4,
+          "upper_exclusive": 6,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 3,
+          "upper_exclusive": 5,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 2,
+          "upper_exclusive": 4,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 0,
+          "upper_exclusive": 3,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "owner_position": 2,
+          "result": 0,
+          "upper_exclusive": 2,
+          "zone": "hero_draw_pile"
+        }
+      ],
+      "prepared_piles": [
+        {
+          "id": "hero:1",
+          "owner_position": 1,
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "owner_position": 2,
+          "zone": "heroes"
+        },
+        {
+          "id": "instance:00000001",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000002",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000003",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000004",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000005",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000006",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000007",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000008",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000009",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000010",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000011",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000012",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000013",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000014",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000015",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000016",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000017",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000018",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000019",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000020",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000021",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000022",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000023",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000024",
+          "owner_position": null,
+          "zone": "market"
+        },
+        {
+          "id": "instance:00000025",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000026",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000027",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000028",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000029",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000030",
+          "owner_position": null,
+          "zone": "hogwarts_deck"
+        },
+        {
+          "id": "instance:00000031",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000032",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000033",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000034",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000035",
+          "owner_position": null,
+          "zone": "dark_arts_discard"
+        },
+        {
+          "id": "instance:00000036",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000037",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000038",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000039",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000040",
+          "owner_position": null,
+          "zone": "dark_arts_deck"
+        },
+        {
+          "id": "instance:00000041",
+          "owner_position": null,
+          "zone": "active_villains"
+        },
+        {
+          "id": "instance:00000042",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000043",
+          "owner_position": null,
+          "zone": "villain_deck"
+        },
+        {
+          "id": "instance:00000044",
+          "owner_position": null,
+          "zone": "active_location"
+        },
+        {
+          "id": "instance:00000045",
+          "owner_position": null,
+          "zone": "location_deck"
+        },
+        {
+          "id": "instance:00000046",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000047",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000048",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000049",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000050",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000051",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000052",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000053",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000054",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000055",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000056",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000057",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000058",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000059",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000060",
+          "owner_position": 1,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000061",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000062",
+          "owner_position": 1,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000063",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        },
+        {
+          "id": "instance:00000064",
+          "owner_position": 2,
+          "zone": "hero_hand"
+        },
+        {
+          "id": "instance:00000065",
+          "owner_position": 2,
+          "zone": "hero_draw_pile"
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 58
+      },
+      "sequence": 0,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000035",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 9,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 1,
+        "phase": "dark_arts"
+      }
+    },
+    "stun": {
+      "decision_point": {
+        "choice": {
+          "cause": "rule:g1-villain-002",
+          "continuation": {
+            "choice_cursor": {
+              "path": [
+                {
+                  "type": "reaction_effect"
+                }
+              ],
+              "rule_id": "rule:g1-villain-002"
+            },
+            "queue": [
+              {
+                "cursor": {
+                  "path": [
+                    {
+                      "type": "reaction_effect"
+                    }
+                  ],
+                  "rule_id": "rule:g1-villain-002"
+                },
+                "responsible_position": 2,
+                "type": "finish_stun"
+              }
+            ],
+            "steps_completed": 4
+          },
+          "id": "choice:stun-discard:3",
+          "kind": "stun_discard",
+          "max": 2,
+          "min": 2,
+          "options": [
+            "instance:00000064",
+            "instance:00000057",
+            "instance:00000019",
+            "instance:00000053",
+            "instance:00000012"
+          ],
+          "responsible_position": 2
+        },
+        "type": "effect_choice"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 5,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 0,
+            "influence": 0
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 3
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 106
+      },
+      "sequence": 84,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000038",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 3,
+              "before": 2,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000044",
+              "type": "resource_changed"
+            },
+            {
+              "after": 0,
+              "before": 2,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-villain-002",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 10,
+        "phase": "dark_arts"
+      }
+    },
+    "terminal": {
+      "decision_point": {
+        "type": "none"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 10,
+            "influence": 1
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "attack": 0,
+            "health": 5,
+            "influence": 5
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 4
+          },
+          "zone": "location_discard",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 2
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 146
+      },
+      "sequence": 141,
+      "status": "won",
+      "steps": [
+        {
+          "effects": [],
+          "phase": "end_turn"
+        },
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000037",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 1,
+              "cause": "effect",
+              "resource": "control",
+              "rule_id": "rule:g1-dark-003",
+              "target_id": "instance:00000045",
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [
+            {
+              "after": 3,
+              "before": 4,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-villain-003",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "villains"
+        },
+        {
+          "effects": [
+            {
+              "from": "hero_hand",
+              "rule_id": "system:play-card",
+              "target_id": "instance:00000002",
+              "target_position": 2,
+              "to": "hero_play_area",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 0,
+              "cause": "effect",
+              "resource": "attack",
+              "rule_id": "rule:g1-hogwarts-002",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "system:play-card",
+              "target_id": "instance:00000019",
+              "target_position": 2,
+              "to": "hero_play_area",
+              "type": "moved"
+            },
+            {
+              "after": 3,
+              "before": 2,
+              "cause": "effect",
+              "resource": "attack",
+              "rule_id": "rule:g1-hogwarts-008",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "after": 4,
+              "before": 3,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-hogwarts-008",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "system:play-card",
+              "target_id": "instance:00000024",
+              "target_position": 2,
+              "to": "hero_play_area",
+              "type": "moved"
+            },
+            {
+              "after": 2,
+              "before": 0,
+              "cause": "effect",
+              "resource": "influence",
+              "rule_id": "rule:g1-hogwarts-009",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "system:play-card",
+              "target_id": "instance:00000053",
+              "target_position": 2,
+              "to": "hero_play_area",
+              "type": "moved"
+            },
+            {
+              "after": 3,
+              "before": 2,
+              "cause": "effect",
+              "resource": "influence",
+              "rule_id": "rule:g1-starter-001",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "system:play-card",
+              "target_id": "instance:00000055",
+              "target_position": 2,
+              "to": "hero_play_area",
+              "type": "moved"
+            },
+            {
+              "after": 4,
+              "before": 3,
+              "cause": "effect",
+              "resource": "influence",
+              "rule_id": "rule:g1-starter-001",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "after": 0,
+              "before": 3,
+              "cause": "cost",
+              "resource": "attack",
+              "rule_id": "system:assign-attack",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "after": 0,
+              "before": 3,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "system:assign-attack",
+              "target_id": "instance:00000043",
+              "type": "resource_changed"
+            },
+            {
+              "from": "active_villains",
+              "rule_id": "system:defeat-villain",
+              "target_id": "instance:00000043",
+              "to": "villain_discard",
+              "type": "moved"
+            },
+            {
+              "after": 10,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-reward-003",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            },
+            {
+              "after": 5,
+              "before": 4,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-reward-003",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "after": 1,
+              "before": 0,
+              "cause": "effect",
+              "resource": "influence",
+              "rule_id": "rule:g1-reward-003",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            },
+            {
+              "after": 5,
+              "before": 4,
+              "cause": "effect",
+              "resource": "influence",
+              "rule_id": "rule:g1-reward-003",
+              "target_id": "hero:2",
+              "target_position": 2,
+              "type": "resource_changed"
+            },
+            {
+              "outcome": "won",
+              "rule_id": "system:game-outcome",
+              "type": "terminal"
+            }
+          ],
+          "phase": "hero_actions"
+        }
+      ],
+      "turn": {
+        "active_position": 2,
+        "number": 16,
+        "phase": "hero_actions"
+      }
+    },
+    "villains": {
+      "decision_point": {
+        "responsible_position": 1,
+        "type": "player_intent"
+      },
+      "heroes_and_locations": [
+        {
+          "id": "hero:1",
+          "kind": "hero",
+          "owner_position": 1,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 8
+          },
+          "zone": "heroes"
+        },
+        {
+          "id": "hero:2",
+          "kind": "hero",
+          "owner_position": 2,
+          "resource_limits": {
+            "health": 10
+          },
+          "resources": {
+            "health": 10
+          },
+          "zone": "heroes"
+        },
+        {
+          "catalog_id": "location:001",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000044",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "active_location",
+          "zone_index": 0
+        },
+        {
+          "catalog_id": "location:002",
+          "dark_arts_count": 1,
+          "effect_rule_id": "rule:g1-location",
+          "id": "instance:00000045",
+          "kind": "location",
+          "resource_limits": {
+            "control": 4
+          },
+          "resources": {
+            "control": 0
+          },
+          "zone": "location_deck",
+          "zone_index": 0
+        }
+      ],
+      "prng": {
+        "algorithm": "chacha20-v1",
+        "counter": 58
+      },
+      "sequence": 1,
+      "status": "in_progress",
+      "steps": [
+        {
+          "effects": [
+            {
+              "from": "dark_arts_deck",
+              "rule_id": "rule:g1-dark-phase",
+              "target_id": "instance:00000035",
+              "to": "dark_arts_discard",
+              "type": "moved"
+            },
+            {
+              "after": 9,
+              "before": 10,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            },
+            {
+              "from": "hero_hand",
+              "rule_id": "rule:g1-dark-002",
+              "target_id": "instance:00000051",
+              "target_position": 1,
+              "to": "hero_discard_pile",
+              "type": "moved"
+            },
+            {
+              "after": 8,
+              "before": 9,
+              "cause": "effect",
+              "resource": "health",
+              "rule_id": "rule:g1-villain-001",
+              "target_id": "hero:1",
+              "target_position": 1,
+              "type": "resource_changed"
+            }
+          ],
+          "phase": "dark_arts"
+        },
+        {
+          "effects": [],
+          "phase": "villains"
+        }
+      ],
+      "turn": {
+        "active_position": 1,
+        "number": 1,
+        "phase": "hero_actions"
+      }
+    }
+  },
+  "commands": [
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 1,
+        "selected_options": [
+          "instance:00000051"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:490458cd7c0862b089657f004f109d153c66f38f52968af51e4ef0b99e9851c5",
+      "snapshot_digest": "blake3:4cb4dc83c052d78cd7e3a531ca7d79d4ab1b075d2ed3550796482cbc9ca6b5e5"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000048",
+        "expected_state_version": 2,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:3408cbe023ccea5761a17cd3d0dcce1c2aacb4e71dd413c58c676781c0820540",
+      "snapshot_digest": "blake3:e7be3cb47fd6bbe2b6b5d2d2a7daa22e689d11c80e7d3187726ab956e5a5b65b"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000062",
+        "expected_state_version": 3,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:df8883fee76e62793b658a9b48c4cb284e594e5749570e1cc21322b3ffcbd92a",
+      "snapshot_digest": "blake3:b82a801dbff3b1693435d67215a8aad1edf852f84a9c487b0e2f6c0604b84492"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 4,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:cee817ba1dc6db2424e3bf4f15da8905deafef9e6a97929197ff66c961260def",
+      "snapshot_digest": "blake3:05080da8663a3d7fd51453fa3cd1090de34c4d6308e8e398ef79e926cc46820f"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000052",
+        "expected_state_version": 5,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:f59bd19506af65a7ed623668b2df5d32a52617ea52b08c7dcfcf2d43e8cd526c",
+      "snapshot_digest": "blake3:4af36e89b234783fef931f5894548bf349964fe264c77f6cb9bb58baf0a8b079"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000061",
+        "expected_state_version": 6,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:8a62c68698c290eb585b47cc3eccdf68b9470b72b2253123291789c792ec7123",
+      "snapshot_digest": "blake3:d5b355a4309b8e048e1b80051f10e9226c1b7b12901306202e2e611f75ee530c"
+    },
+    {
+      "request": {
+        "amount": 2,
+        "expected_state_version": 7,
+        "type": "assign_attack",
+        "villain_id": "instance:00000041"
+      },
+      "event_digest": "blake3:8e16e903882a4f09cd5c6800491ab9742f93fd6400c586507fc055ed3f3d8bf9",
+      "snapshot_digest": "blake3:8f157c686f5be2006adb2ab780797bd971dc31fc11c2686e603acfe4e8126b16"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000004",
+        "expected_state_version": 8,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:df3df431923792beb3432657b9739ef0bbc973dc9959b081d3d9cd75ca8b6a45",
+      "snapshot_digest": "blake3:b6d704c6ba5386599f65637d35dbd24d0553b5f0ec05b9b6103395cca3d40d74"
+    },
+    {
+      "request": {
+        "expected_state_version": 9,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:9cfd3d86d67c416b0803fa326ae372c3d5ecd80b3247c15dfb212f5dcc3d7d88",
+      "snapshot_digest": "blake3:a309f2af2d6a5e8cbc8e1a54d8311f94786a361c3a82546b9b6757cc81799a5f"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000054",
+        "expected_state_version": 10,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:eed9aca43713aa8cbc12f7189ad333fb072f45ddd04c6fabfd6fb70f8d79a2ab",
+      "snapshot_digest": "blake3:f16a76ae40c01eff31babd540e0e2c37a5f045f51a271548bf74ac85ab76154e"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000064",
+        "expected_state_version": 11,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:fe86577f8974aa97fae6174cea6e1428d02dcc571ba81854eedbf8a40c5ab6b7",
+      "snapshot_digest": "blake3:8ea0207c6a6d59239ff6515ab1c657a3c95d4097e2171f568761915e8e5e22c5"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 12,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:ab3839db1803f058281625ef37b2e4ba0fc976a5499027973ec66b4e9771f41a",
+      "snapshot_digest": "blake3:f185dd409edae1371fb0e3ad51e757daae008522a7aff0303b17aa3f83c1734f"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000058",
+        "expected_state_version": 13,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:04f7a21b01b93ed1af599f2eba39294d7f4b8e2775a9c1716302320b443aa29f",
+      "snapshot_digest": "blake3:49733eacb5c11899d1a535c3a091893ff21e27adca9d37575e9167433523a164"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000059",
+        "expected_state_version": 14,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:00b8c23f3888a232275148f54e7fd5efe07c1e7e5be9bc1831ffcdee6842d1fe",
+      "snapshot_digest": "blake3:2ddbd89884156a54da161194ebcd80f304988ce5024222d68819437095b27974"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000057",
+        "expected_state_version": 15,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:379ea45f846a6422ee699dacff4c9e47bd2cddb2a6628f52a51bbeb5cf6ee756",
+      "snapshot_digest": "blake3:ac418291da1b52bc65336c32e0153eef3b38bcc4afb7be259ab0c9869a2c00a7"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000012",
+        "expected_state_version": 16,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:6137a1abbd85b2b946cb9fcc6a88e2d76ef1b43a2ed23e652bb28962e1cf20bc",
+      "snapshot_digest": "blake3:f9a3aab3fb320df11d5cd0d213acb8ab01dc1b822ff9ca1aa7f5b1c6f14d50e4"
+    },
+    {
+      "request": {
+        "expected_state_version": 17,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:fbff3d8c8d5c903a8cfb8df068b04e20ecbc52355d84b0fc8228c7300b726250",
+      "snapshot_digest": "blake3:2e81337cf08b3883a4f4f4e4d5b4928e2e70f397bbdfbc42b88aa57a1c63dafa"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000050",
+        "expected_state_version": 18,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:5782ad4f58f29217251455e61f14d7cd438514bf8a2aae848629c16a48f5f016",
+      "snapshot_digest": "blake3:3573d4a39acbb16edfe0cc540579f375e8dbc4768524cc17e3ad3ddd99ab691f"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000049",
+        "expected_state_version": 19,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:448b9deb48219454c90243bc0973c8ae8ca04843939b178570b8caa6122957f5",
+      "snapshot_digest": "blake3:5dc6b641763eb2b98729e992ff13c2eaafddab43dc7d4403bfb84decb240551b"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000047",
+        "expected_state_version": 20,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:eaaca3cc7d047a62a777b6932f3d18d15e092b9069b0b3030681366d952f5f0f",
+      "snapshot_digest": "blake3:47875be6d51be0c1439e13f9758f748e08111e689c5296b44031545b510a38ce"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000060",
+        "expected_state_version": 21,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:e7f2d71e0e4d1e6075b65dae883e4e1dc6480e8bc575d3ddb0e6b952073d9a40",
+      "snapshot_digest": "blake3:5458bee2c2259da6327af1071a90fb03af8ee7a6c378b36bf9293bca97f92759"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000046",
+        "expected_state_version": 22,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:035e556772dd28d1e058988a6023e845c57d8080292c70e94aef78460b6557c0",
+      "snapshot_digest": "blake3:f3e5adfdd2aa7471c6a702a39df5cfafd017eed880be9f6d823cef3d2457e952"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000009",
+        "expected_state_version": 23,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:63f028d713862c2517d1a53ea26f52b81115838da9ec7a870f3b12815a92a178",
+      "snapshot_digest": "blake3:ec823de0ce10566ae05ddb356f4b515c535c5fa4295d9b3e0ac59e089a8e4955"
+    },
+    {
+      "request": {
+        "expected_state_version": 24,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:3f4f3b1e103012b80930c463fd3a913244d78315c25044c7d2e0fdba8a590df3",
+      "snapshot_digest": "blake3:a065edb1ffa5998351e2e8b30bb847dfe00414e19d9b2bc5134b524e2bf0fca3"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 25,
+        "selected_options": [
+          "instance:00000056"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:ec1964740c9dc110fcb75f2f3fd02205ed81a9c426d6e6c4938429bd2d7c83fa",
+      "snapshot_digest": "blake3:ebfc27d612173429c2570312898652db8e6e8791d7f4bfab361a43abf4f05e83"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000055",
+        "expected_state_version": 26,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:394917518e6a9b9327b477bdb7242ec9e377c211ec9f0cca722c66f4033cd6ca",
+      "snapshot_digest": "blake3:3b2d7b210af59c310ff840e8ef424e963fb026f5a9031bb791a0d5e980713808"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000053",
+        "expected_state_version": 27,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:2eebb92f652be20d2cd6ab8295caaf935ea4540ab0a4a8673f0b4bd7cf0beee1",
+      "snapshot_digest": "blake3:bb835114d4ae47b65fca23378557614cb8575b284642e72b681ac88bf3663e0d"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000063",
+        "expected_state_version": 28,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:ec63cb85ce14f8834a936f31f83d95630d02a137b229afb3ae8d63edabbed148",
+      "snapshot_digest": "blake3:d444b503062260af768b29ffc7e3db146dbd1670175b4d7d604028245dea5163"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000065",
+        "expected_state_version": 29,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:25dd8f84f59d1c46c45c5f4f962b2b61831ac24775034766404bb4991c0186f2",
+      "snapshot_digest": "blake3:1fe19e16ea93bec0b0ccbe7c96f21d646fcc993b461a0229ae021a932c77cf8a"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 30,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:60e18db708acd5dc3a7538947da2ef40ee89a9ddb3b5e9e1bad6908b689f53eb",
+      "snapshot_digest": "blake3:bace4afebe302c5b20589bd25d5bd12a179e6ddbf851578d278971d4ac22b4f8"
+    },
+    {
+      "request": {
+        "amount": 1,
+        "expected_state_version": 31,
+        "type": "assign_attack",
+        "villain_id": "instance:00000041"
+      },
+      "event_digest": "blake3:ee6dc3f833cab1548822977c98f783cf3595a553a6ed5033a74fc9d72db3e8a8",
+      "snapshot_digest": "blake3:21435a0b1e08e0327030ccb4d8c3163605335bd43dc18f8683c517731f29b556"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000023",
+        "destination": "draw_pile",
+        "expected_state_version": 32,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:4ac3a61c3d469eeb624301b5ebaae027cc68c78a6138e786d3c527faedc69e73",
+      "snapshot_digest": "blake3:188811b2c2a70bf454fd1be48327d8cd1d8266a1bed88e591747b2dedbb0d588"
+    },
+    {
+      "request": {
+        "expected_state_version": 33,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:3340417a63f1a773c9cc86afa62cc35ce95815d99ec35444049db609acc5edd8",
+      "snapshot_digest": "blake3:be97c75cb683a021df26b986986867b0c29dce57c9486b8f2b121da87fc2f597"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000048",
+        "expected_state_version": 34,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:7ca5aa7ce4878d3b9f442688ebac3f5f6311393995039e3d87af7f06986f3575",
+      "snapshot_digest": "blake3:76efb8a94698f4179b35e7551f3e735c72738e8a627f4340107d41a17df7f707"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000062",
+        "expected_state_version": 35,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:01ffc26aeb3b3177dd10abe6a82ac440a9d9798f06b76e4df35b1e3d5c33ea47",
+      "snapshot_digest": "blake3:b721de614d2df98e405caebb889b6690dd7ddf79c8e995444b5bac6e43179d35"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 36,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:b4634cefdfd8c23aba0f8d9401e290dcad536d177c280de33258f39f56c04d8a",
+      "snapshot_digest": "blake3:5ca7b7e4d944d0f300c7361b787fb5a6ae8d92783817c749a85d336a903c5b84"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000061",
+        "expected_state_version": 37,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:38c35dd7c43734ad968901120742c4719a01b06150787113df3415978b7e0bf0",
+      "snapshot_digest": "blake3:ded4e25d4d6861d930c80dbfbe293c97d1abc1832503110e49c95eeff0fe7c4a"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000009",
+        "expected_state_version": 38,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:6abc4ce2f2530cd245159e0f404a871d34c731738079ba411478a8a0c0071f25",
+      "snapshot_digest": "blake3:0d1b76499f571bceedea0c3aaaee4fda5212d4e2b1f06614fa0f90dbb77ab637"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000046",
+        "expected_state_version": 39,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:64d1adc98c7e809ceb63d5efa63460c1e28175e855a4ccff987ce05156213ed9",
+      "snapshot_digest": "blake3:d967157e9484c26a0fd5db061543619cae57b43275a25abd659097068fea4322"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000052",
+        "expected_state_version": 40,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:1e84ea6a09738d0d2399bd64f95afe8e176f8a86ba95e2d1a3bbf630139f717d",
+      "snapshot_digest": "blake3:e6802b39a2680c830de1b0a75809862c7861f9df8a544560ecaadeeaf42b377c"
+    },
+    {
+      "request": {
+        "amount": 2,
+        "expected_state_version": 41,
+        "type": "assign_attack",
+        "villain_id": "instance:00000041"
+      },
+      "event_digest": "blake3:1cd64f75e85f7d44a04dfd325276de1d40ec654d9b1c1c91b15929eea81b25f6",
+      "snapshot_digest": "blake3:2bcb421e376888e3e1685c6272c651cd700074b47cfc585ed7b0005004c316a1"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000051",
+        "expected_state_version": 42,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:34d649dbc6940c585aeba63c5aa1cd600d6fe20d7152a1e0ee4168205dad646f",
+      "snapshot_digest": "blake3:81d3cb9762684ba41119f7e118b90050d684f388a240b964930d61400baaa132"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000008",
+        "expected_state_version": 43,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:6b4686175e94e63f34501d34a75b22b4d6ada3bb7f19acb9f7ec83150bf6e014",
+      "snapshot_digest": "blake3:f8f88ac37e44e73f5916f278f107b5ec3fa8e274b84a8f729fd27ed0e3e9e67a"
+    },
+    {
+      "request": {
+        "expected_state_version": 44,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:066de253c7b7c283a2b1e180718cec09829f3526fda94e29bf275a6a8a5b7fa0",
+      "snapshot_digest": "blake3:eae27bfdb367c0b38c773dc84d703d137712804964a46b23d56ca0e7a680d4fb"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000023",
+        "expected_state_version": 45,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:87a41fd9f7976b75c6c77b4d14e7fdda70749cade28e8edb084300d52b85220d",
+      "snapshot_digest": "blake3:661a4bb913ff3a86b4e38b1fc7d10f92dd39cf1746f103a2151921b09eb3abf3"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 46,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:737310c80541ef49087cf7834216f6113940ff7c1651c328fa6d3720457dd84b",
+      "snapshot_digest": "blake3:b9f25a2d7cebcd58d79808fcaed7e041b36b954f673f1b2e6c9d21aa62acb3a2"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000053",
+        "expected_state_version": 47,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:c2dc04ac6bd2421b25dfd5056282beac92367e95482682660c81ce23a41f1b6a",
+      "snapshot_digest": "blake3:dce3b7637e2f841c8d9f41b8f5d74c3c55703156708533efd79a9b1f2a685e07"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000012",
+        "expected_state_version": 48,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:dcbfd3d2fa2bf2272e62e182217eadc3e729cfabea0f2c9f077140f16f4d5318",
+      "snapshot_digest": "blake3:de54ece30daebdcc1ca47a767067b2491b2eab3486c70a25996b45f61bf54d44"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000057",
+        "expected_state_version": 49,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:b6498818503b225507ae08153a9a3f496c7dda0e2e126ebc9ab022d3f2864453",
+      "snapshot_digest": "blake3:f413bdd97cc9567ecab5a8bd33c78e8f3d03923742d56525f26b72d9d61ea5e2"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000065",
+        "expected_state_version": 50,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:8017c41a8325153ef8f644de189217ab7eab54fbef3451968d3c7c0abac70dfd",
+      "snapshot_digest": "blake3:d27792de15ae4f532c4326f36cbdb8ec1aab3c611b773f4b5e804ba80937f66e"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 51,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:37628055a74ef8b5cbbc03a8c4b0a162a525ba15c69c9f00e6be482228b5338e",
+      "snapshot_digest": "blake3:6556c4a38c163db8651ca1c50498ae95110675e0a02efa52dc05b45439ecd4fc"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000058",
+        "expected_state_version": 52,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:58c5b97f7c4d1128eee84fb94baa902ef198bef9d0c1f486c7f1aa80f0f88e34",
+      "snapshot_digest": "blake3:b2a6f13187af57b0e584b0723cb2d7936a5d66ce50c49c6da666db9cc99f5e6e"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000063",
+        "expected_state_version": 53,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:a8204f4379a348c7c82bf3b5a6fddce9ccc04663331df7e94a1361cdf6c45117",
+      "snapshot_digest": "blake3:460e2c70ad6d7d59e13b475e2d3b7f18b99f2649ee7e5cb2e24a5ced13703513"
+    },
+    {
+      "request": {
+        "amount": 2,
+        "expected_state_version": 54,
+        "type": "assign_attack",
+        "villain_id": "instance:00000042"
+      },
+      "event_digest": "blake3:7f3a7d80efdbb15022ef893971fd314070f4c386da02b6271cae40d53fac255d",
+      "snapshot_digest": "blake3:de721a72fd6c3b73ff2f3f42bde149ac23a24a0b78ff1be305f974fded323257"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000019",
+        "expected_state_version": 55,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:38e4a1a40f6010d31dc2c5bc0b5f7ea2681df42dd5929d124dd2b7e214b74757",
+      "snapshot_digest": "blake3:491153170aa11b1c75d0ab56557450eb1613717657ce5ef7c8aafa136b2c07ef"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000024",
+        "destination": "draw_pile",
+        "expected_state_version": 56,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:c84bbc88607e726f88a07bc7573567f91623ee6ee0b6db34692fd61217dfe7bd",
+      "snapshot_digest": "blake3:fc9e9b55d03e18229559fda615f21fbbe0414290ee77e995af6bbb4b6f6e144d"
+    },
+    {
+      "request": {
+        "expected_state_version": 57,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:58dd18b1ff4dfc601ded53509e140626fc7b421bf86f321f529059b7b8ba285f",
+      "snapshot_digest": "blake3:386deb169eb51cf3beb98ba12d5d45171c4b0dc228c01d0c2d7934178fe7fd29"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000060",
+        "expected_state_version": 58,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:625cc23d362850c0c3828049d2ee46c51d0f4a0728418303086f7b403fb31e34",
+      "snapshot_digest": "blake3:9067912a6ee3f4f6b5d40da8657e32aea6b72ef9b39b8e2e58ad861dedcb8f80"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000049",
+        "expected_state_version": 59,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:7a4085fb2184c1769d135df0230ed90828cb12fdd61120ba8b2f6608c44ec38a",
+      "snapshot_digest": "blake3:0ff6421873d580a2698a292454f8b065d4beb26df1f04544a7f847b1d4092167"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000050",
+        "expected_state_version": 60,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:a1591725bb6d0d062a915df461d1750f6855efb30ff98f119350210fc0cc80ac",
+      "snapshot_digest": "blake3:87edf77f9c4bce454ced3369b34150113ead5f9bd70bb959310d8753d36d22c0"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000004",
+        "expected_state_version": 61,
+        "targets": [
+          {
+            "selector_id": "target:hero",
+            "target_ids": [
+              "hero:1"
+            ]
+          }
+        ],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:a35095912f0820da13489d5eb5fc5088aaf4d6b80aa5343c0350cfdfd8b00e49",
+      "snapshot_digest": "blake3:5da49d2d11a3c44b78332e3c559779fad2f8b7726127d6af0924461889569136"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000047",
+        "expected_state_version": 62,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:b02d740e8f7949d967c9583f0e69a1c334dc9cdcb727fab342dd18404dfef8a3",
+      "snapshot_digest": "blake3:95bafa6d4d05fc1c95f1bdfd94d8e28dd08ec9a5d5da4e2b38be4a8a0c2f494a"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000010",
+        "expected_state_version": 63,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:b760e19c84aa0f61dc39fbaeb9765e708cad4c243b562e478896c55a7345ab0d",
+      "snapshot_digest": "blake3:21d3672911634dba862eb4f3b39770a219f8c08bcef7d5404c622767732479fe"
+    },
+    {
+      "request": {
+        "expected_state_version": 64,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:cc110debcf7eb4536f3fa26ee749e0ea0f471e6c8ec3c8451f32607eebdc494c",
+      "snapshot_digest": "blake3:300f57dcd43f9fd4380f1ad6e2a4e2f395e14010ed79e4ddc17e409021c1e908"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000024",
+        "expected_state_version": 65,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:89078437967c8820922e3e396ad604f7b1f6a16d9c80856f9107294eb70790e6",
+      "snapshot_digest": "blake3:0cba38bb512fe1647f5ee9c1f2b0644695687cb386b2a35db6ce3a24f026bc9d"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 66,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:2b53ea6aac278c2a9762bc7ac0eb43b102c434de8267d74c41e5a8f5be7e41ca",
+      "snapshot_digest": "blake3:cf986a6f8a5c6dc14a281e86e11faaa1e0cbdc4300bda6a57e29fe0b734a8ef5"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000054",
+        "expected_state_version": 67,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:d632332f6603d2801e525dbc65e88334635a657a16362928746470e50fc3f2dc",
+      "snapshot_digest": "blake3:2a6163eb27b581222c83cdc196dff361d29608c9f6f431660ed4f912fd023196"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000056",
+        "expected_state_version": 68,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:57b5031932bf0caeb5b1db28f5bd35b7dfe99f88b1e5c7e93e88baeb25f26853",
+      "snapshot_digest": "blake3:0d3ee09e1ce4f40936e7ff452a2fa13f991420bc881a7cb7b39448e133f792a0"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000055",
+        "expected_state_version": 69,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:1f43b0f91fb9d384e346401963dc2c90e167bc2531f1b583f01559e1fe14b0ee",
+      "snapshot_digest": "blake3:bdfb3e33cb72c1211a4e4201f99dc0c8f6f6d9ad61df23a9ff6098125d48bb48"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000059",
+        "expected_state_version": 70,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:f244eb53d53d40905daa257d06aa65b35a366ec6996bfc7a2f5e33833f1e9476",
+      "snapshot_digest": "blake3:13635b4c368210fd4db7f0c6e98799e2423424e085e00b2d6b2e30d493c90592"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000013",
+        "expected_state_version": 71,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:96edd67a459c656593dd035f535fa26f0c7bf530f3b210b182709aa1717f2b9f",
+      "snapshot_digest": "blake3:34275a97ec492eb615a1a6da4c009c9d205d7a4bf89f19958225ceceec17ade3"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000028",
+        "expected_state_version": 72,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:5ace4f351c06b999623e9a1431a8e88e0e7ac6da9f61eeaff0b90c94eda767cd",
+      "snapshot_digest": "blake3:56951885069aa31f3f0e370acdfb52a388671b243ed729efe42829d200b13023"
+    },
+    {
+      "request": {
+        "expected_state_version": 73,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:04e8179a3fc0fb599c3dd5a19f49fc7006241615073f19e34ab52a55a88e3b13",
+      "snapshot_digest": "blake3:d2adaf813ecfc4c89bc781c0d8f3a96c978d1120374ed02ff4b854bf07a05957"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000049",
+        "expected_state_version": 74,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:4f8f8e688c7e468d2824c6640a5006050818062692df6c72bb453c95fbdc6df7",
+      "snapshot_digest": "blake3:889e6dd706c7da3f7981ca0b3e15e760fde7c47b3355e52ec6354a36fbf7d9fa"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000048",
+        "expected_state_version": 75,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:2e6d0ebd9c4d9446d7d6f77adb43c1c318ee6d8dc6daafd038fa5b0ddc107bba",
+      "snapshot_digest": "blake3:f4e100f95d780501087ac7385d634aa6a4181b660c3aba219504fb0a2ff0b41c"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000052",
+        "expected_state_version": 76,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:fd2f4ad822be71133ec593ce7b8a024c9fed82e8654aa4959a745f153637388b",
+      "snapshot_digest": "blake3:625d0a988479509d8a667da28977fd5b8b73000e0a744f7a984858ba20a2def4"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000008",
+        "expected_state_version": 77,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:4f25c591fdf434b02ca283d4bc765cb895d5119ed5bca758de3f21218ec8c365",
+      "snapshot_digest": "blake3:d95cb530d2d04ca9619497c9d56e92defb6a434b1c08ee6c17dd138872183df7"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000004",
+        "expected_state_version": 78,
+        "targets": [
+          {
+            "selector_id": "target:hero",
+            "target_ids": [
+              "hero:1"
+            ]
+          }
+        ],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:77962fed588cfcc9542a038074d6af20cab7d9eda351bf954f4b5af0ba5c9857",
+      "snapshot_digest": "blake3:3d40a8a5b095807cd68b3bef13b965a552ac086a1ca4b1e4e9b2f4dc63d344fd"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000010",
+        "expected_state_version": 79,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:98582848a87083983ce36ee10f628c5fad116e0f8989bb74e6ede778e651cdc4",
+      "snapshot_digest": "blake3:2dd4753a0556d03cfaab7bed7453c161543e657f8ea6ee93fe513892ca1e6b81"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000050",
+        "expected_state_version": 80,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:cc584f21a5dfb0963983d16bfa2aa478ddce1efda5cb4d4fbd56a3ff9e32e18f",
+      "snapshot_digest": "blake3:0303a0047f2bcc2509400cde4a208b2adfa551cf331807874fa44b050cae73bf"
+    },
+    {
+      "request": {
+        "amount": 1,
+        "expected_state_version": 81,
+        "type": "assign_attack",
+        "villain_id": "instance:00000042"
+      },
+      "event_digest": "blake3:79cc9a6bf08d1ebee2abdfe5e811395d4381ce53ca6358348489549d10f9d639",
+      "snapshot_digest": "blake3:5929e8d2a953342027aa0b0bebda13cffc4409b00aaeb91d36774c50e28b677d"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000026",
+        "expected_state_version": 82,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:efa2df9fb93f305ff72ce635d4c2fcdf373990fedb40fb89a5acb1801c496e89",
+      "snapshot_digest": "blake3:f37b34cd56d364d11a831a479df59968f54862609b430e1b72d092413a9a3467"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000007",
+        "expected_state_version": 83,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:646faec896e08f0b1a441a9a95c3ef0f64435d72bbb1a9cbaf96a9918c07cb08",
+      "snapshot_digest": "blake3:d543de460269eae5c93d458fd76f951595a56caa75e730054871b54b9a20f9f1"
+    },
+    {
+      "request": {
+        "expected_state_version": 84,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:84ca75dd948cc8d9794ff3ae3f949dc327bac3be05c540f3f223bc3d1c5bfacf",
+      "snapshot_digest": "blake3:21783a5b3b001a9789391c175a89c3d3c42522af03188d39728cfaec36cbe9e0"
+    },
+    {
+      "request": {
+        "choice_id": "choice:stun-discard:3",
+        "expected_state_version": 85,
+        "selected_options": [
+          "instance:00000064",
+          "instance:00000057"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:18860f9f6a174ce1c6d7c73fb12f6cdcf9809741dc1c7299cb5e9a45ef98b146",
+      "snapshot_digest": "blake3:a8596c4416f12a1170f72ca009bc7ab4a7fd0d157a2b9f0194daa3269b7744c2"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000019",
+        "expected_state_version": 86,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:38adf62aa4c90c57c8746c6192d356d4f540bb6d95f574178c67711c25741f7d",
+      "snapshot_digest": "blake3:a4f8daa8418cebee61bb26b62d5b8ef4db3ae505eb7e7e3fa09ae6bf5099bab4"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000053",
+        "expected_state_version": 87,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:6680db82182ad1377dd789577d05dc8b133363da1c2f7d85b6a447612da476ec",
+      "snapshot_digest": "blake3:ad1e89e1726bec046f7b66b74f35ee105a21d554b68b5f5628d2089e4fecaba5"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000012",
+        "expected_state_version": 88,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:ae845f453b5c92755f23c83b9de97f2e1944a9e002b39fac91b860d68d458e44",
+      "snapshot_digest": "blake3:ad73b94edace2a449755b8c13a1112d25c81bf894b07c569d715669444b56f24"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000058",
+        "expected_state_version": 89,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:a267ec49e62661271c367b8653872e571c47760e8efc8633461eb4c1cbd75329",
+      "snapshot_digest": "blake3:d222e6d993c46f86d658fbeae0f06ca46c0e1cae390d6835e38cc7c9eb142a8f"
+    },
+    {
+      "request": {
+        "amount": 2,
+        "expected_state_version": 90,
+        "type": "assign_attack",
+        "villain_id": "instance:00000042"
+      },
+      "event_digest": "blake3:65b943bf6562b0b8acab294a18cabf062f29e94dfd8bde6b29097decd748f4aa",
+      "snapshot_digest": "blake3:ff70577598f8701e2f3392c17f31b2dd0a347178369d701d3829cbcd28bf742c"
+    },
+    {
+      "request": {
+        "expected_state_version": 91,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:963dc0ce3bad0513d1cee2c4475ba16b8a4adb4d494f21b9e87f0484c9ba7020",
+      "snapshot_digest": "blake3:35f542a53539ca353b2c04cbe7ee28c1642795394b812b78234f906dc3b5f141"
+    },
+    {
+      "request": {
+        "choice_id": "choice:target:3",
+        "expected_state_version": 92,
+        "selected_options": [
+          "instance:00000060"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:fef55f95cb47d0a20328610536eec50c9330f3a4c7092d48524f155cc38da709",
+      "snapshot_digest": "blake3:38afef0578eb6e10d613d5ad68fad1531e3b4cd87ec202603bb5d592f3e48aff"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000051",
+        "expected_state_version": 93,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:223bf333a7320c3a313e8311de4a0165610fa863be35dd6243eae0749e7f262c",
+      "snapshot_digest": "blake3:1d16a16db943ad2e5cc43c9d3eef362e1b185bffb89ed9176effc7763888ca19"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000009",
+        "expected_state_version": 94,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:f21738d18e6535b2ba1a47378046399340fde6e1e564132b90b890ebdd70529f",
+      "snapshot_digest": "blake3:89cd91f2df994fe3bbb88d61e5faa92b3527474d8334f05f0d2aff8a9af66b97"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000047",
+        "expected_state_version": 95,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:291378252e8b5381a943c7d4be6ffff9b376534032d0db761e23b70e8b9f49bf",
+      "snapshot_digest": "blake3:90a5096f6b90ace4d58e56b4ee864aec0c1a5c86bc789bcfb893db3f9f0c7d2b"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000046",
+        "expected_state_version": 96,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:2ec2f47b3071adfc45b2019b7540adc029e35371d1363d804bb5fd4a047849c9",
+      "snapshot_digest": "blake3:1e927b5ddcae1edd2ac87374b4e928bcbb0d3554a6fb6ca7ea5ed3d1b5de4bf7"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000062",
+        "expected_state_version": 97,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:e4e5b36d9fa8b22ca1b92182c945a304c9a4a3a8161fdcb18f40634bf8415d5c",
+      "snapshot_digest": "blake3:135277f9b3cf241785d2411e88ebeb14962de31a803a05333456891a1e2dd8a4"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 98,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:76c082ff8f9b0c5b838c8ef288613037168adcc37fff08936b6526632f7fdb9c",
+      "snapshot_digest": "blake3:f7586ce5e159f30adad4222b3dea5b2250c339301430572d5da54d7279e4a6dc"
+    },
+    {
+      "request": {
+        "amount": 1,
+        "expected_state_version": 99,
+        "type": "assign_attack",
+        "villain_id": "instance:00000042"
+      },
+      "event_digest": "blake3:663d32aaf81d0ecf21c9c98720e4c255b63fe40cf975ee686be8ef1081e2167d",
+      "snapshot_digest": "blake3:98705a32c8910cf7308407584be0c47a6d4e5b6620313a91fdfc9f31d1d3af0e"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000017",
+        "expected_state_version": 100,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:8e6b48bb189effe4818afd3e07ee86c1f5fcd68f7b0a1b80f7089db336851dcd",
+      "snapshot_digest": "blake3:77295a3bbd7f8a62af7ee32431635307d445733d8b74c8aed7eebcabc60c479c"
+    },
+    {
+      "request": {
+        "expected_state_version": 101,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:e58c2ebb560a25565bcec8ff4d48f9654b9225c2e7d11c00c8a469294c9c3cec",
+      "snapshot_digest": "blake3:26dea7256a8c65594cb98792222e0bf30e41e0dff2f787c4cb9e4a1aa8820732"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000065",
+        "expected_state_version": 102,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:6407657fc4d2d66b96e836a58435f7bb94c2b563cd45b66414831db14d869d3b",
+      "snapshot_digest": "blake3:f7ea94de4442cc7b78e0de20532700edaf7b96119e25818c1f35cced97aee35c"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 103,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:2c649e828a76fb18d5bec21a4bfc6bab86238a036c9ebfd01314cdc2a23c6fc2",
+      "snapshot_digest": "blake3:ea3b775cc80b67bfe2cfff1035c4a4405fdc3ce010e554864626e9400f8df572"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000056",
+        "expected_state_version": 104,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:8faed9ab11d14412f5b22e152ec801ce7ec41bcbf3f15b1a094eff406a0375de",
+      "snapshot_digest": "blake3:f855eb511c136831a2e16aae71d6a18949206ae176ae5d495fc96c41bd2a8dac"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000059",
+        "expected_state_version": 105,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:55d31691c969f5dbe36ce50887cbd4f62c368d4bdb66544ca07c5197d0194fb5",
+      "snapshot_digest": "blake3:71b4a9b31a98471f325ed9eca307880c5d479befcab3b4f6692ac1750b39b3fc"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000013",
+        "expected_state_version": 106,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:2854613c06fd3077e56ec043ecb7be59603f750bcde225000d91b241186e4ee1",
+      "snapshot_digest": "blake3:638c5efa24e088acc38f3376c4452cd5e8e920abe767751f9b2d3eff8fdb826f"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000023",
+        "expected_state_version": 107,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:e3e50baa0ad4f418857eddd04ff421dad40f7d12201fe26ae7e1131ce8bdb96a",
+      "snapshot_digest": "blake3:a002f45c1cbd43488cf0e235ac48fa22367c0b5614d4a831478bbdd775d1e648"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 108,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:ece2640e13bb6525710e39355b813590ef08ab0f1b5ad5a6574b9c06c89a9407",
+      "snapshot_digest": "blake3:563b3e398c458af94615e8ff4ac2306081b66b3917fe092455784473cbd2609f"
+    },
+    {
+      "request": {
+        "amount": 1,
+        "expected_state_version": 109,
+        "type": "assign_attack",
+        "villain_id": "instance:00000043"
+      },
+      "event_digest": "blake3:79614e65ffd9dd919137ec74a5d5c83c0b7c327ccc544f07092e6b9df9cf77f1",
+      "snapshot_digest": "blake3:3cead57ecc03e8f4a5aba71c6c6b1e1fe0479d9ab5ca15337139e55b98650435"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000014",
+        "expected_state_version": 110,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:16f0403edd14ed717db78c1737fb8d15dd28382a05b13029510886a7b4cf5acf",
+      "snapshot_digest": "blake3:b09bc13fd151f24bcb2d578e9b5140d5227158b938aa779f674edcf618ded665"
+    },
+    {
+      "request": {
+        "expected_state_version": 111,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:44a99d548c1dccae4479f937872432e3323dde8444a9d46e4fcc3fa6b03660b2",
+      "snapshot_digest": "blake3:b69e247849b3747cafeb4aeafd328eabcfc268226ba7e4bc6d1213117a06a1f1"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000061",
+        "expected_state_version": 112,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:cab3f23c752570d6eccfc86d8ada50f5ec52fd2d8058971b9ba9619be31f6d6d",
+      "snapshot_digest": "blake3:f75dd9181d65d13d4062618ea86986e270c805292c18f28cbf2463c24ad4118a"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000047",
+        "expected_state_version": 113,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:db77b26007712d3eaab5ab2c105de9e6a2a3eb352dccf32485ba2872bd85f575",
+      "snapshot_digest": "blake3:230e130de347454d2537b25754c363a7c4a32a216fced16dff2bf9855e9deef6"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000008",
+        "expected_state_version": 114,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:8ed8f2d89a60cf8231b6a66f58b4ac7593fdae85e677a9d196237eb8830d1166",
+      "snapshot_digest": "blake3:2757078b02ac131a2167ee58585db5575b1e75c31bba1b7142c100b13ddb78b9"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000062",
+        "expected_state_version": 115,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:69ab7b2638732167bde397fd10af2f907aae48c90c82ac024b8529162fe51ad0",
+      "snapshot_digest": "blake3:695ce2b62d36326cc6f3ddb10209cc05e2aeea1af921d6afc272ed3f190185c3"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 116,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:91f5ff4958415f3e5db486112d6dff5e203a9cfa953278884bd0d1e433c7378f",
+      "snapshot_digest": "blake3:bd2fa3d12f86bcb5147fcae5b48396384c438b0d1f6f70815ef3890b6f45333f"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000060",
+        "expected_state_version": 117,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:3525555fab6940112dbb01b90cd925b74777b8aa0dea7c5c55df7459409a10ff",
+      "snapshot_digest": "blake3:69ae112735b79cfd4eef983084d647cbd1ac3a3690bf3f2d767a3524d5e3b73f"
+    },
+    {
+      "request": {
+        "amount": 2,
+        "expected_state_version": 118,
+        "type": "assign_attack",
+        "villain_id": "instance:00000043"
+      },
+      "event_digest": "blake3:343565b42d8e3b2a6b99f0846742ff70e7ebdf64511c7803a3c16a37e78756bc",
+      "snapshot_digest": "blake3:4853224e16170b77857fa1b24a867f96bd0b361dd39a0dc32eb8872f38cf2dd1"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000011",
+        "expected_state_version": 119,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:81131c6f3ee8f1bce39fb67f93d3b5a61f47c764d6727e98b26415051a976727",
+      "snapshot_digest": "blake3:2844e2fe85f464673e66a7a2afd71d882c76e01af5df2f743d5a447b8963795d"
+    },
+    {
+      "request": {
+        "expected_state_version": 120,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:095ae0c7602f05dd4ecd9cd1ecb06605d8c78159f6e142e4203463cc14d76db9",
+      "snapshot_digest": "blake3:42c19a627f410c7ec38589389e9878cc374ab49a6b38ba8c1c754346a9ef1805"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000054",
+        "expected_state_version": 121,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:3547b63e29d5306e3d504809b7ed4ecf6b8576e5316312f1ccbf57cf5e566e5c",
+      "snapshot_digest": "blake3:b49862f56929e4e89adfb87a5af0405f6c768eb007640f0ca03489461cc134fd"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000028",
+        "expected_state_version": 122,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:9f72a78b90680f6991b3fcc13e07ffde208717e8c6e68d23180833ee2a992c69",
+      "snapshot_digest": "blake3:f5072275b3f5cc6c5a3c3a257b3eb7f3e7389c5ed34084a8a83fc6b60d1524ee"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000055",
+        "expected_state_version": 123,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:9c4a5409c319c69b8c4a12a1624c1d9c699faf9ac3bfa0c48da3ca276dc46bd7",
+      "snapshot_digest": "blake3:d2f8a4e948d6eb575498518e40bbe31b4cb0197d82c040eb7d937b22db57d7d1"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000024",
+        "expected_state_version": 124,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:64f6ea59981f8418dbc321d9ac4f7e4eeaa42b5032182120f052dfe96761f363",
+      "snapshot_digest": "blake3:257222aa37eac81557894f56687c87158f8819d9a8daa9ac0ff5271e6fbcd461"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 125,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:2670e784c8cc7d277e0438c1f0f4b1cf58fe44c7f5085ccd895733343bd06b95",
+      "snapshot_digest": "blake3:e7f6423083b9c1bd557f9beed7027f9a17ffccaa251634542b1a662a3f2fa1e0"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000063",
+        "expected_state_version": 126,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:ed62113432d4fac3976b03fc80dd1d2403be73f6daec2fbbb3f4b004264b541a",
+      "snapshot_digest": "blake3:94954e7d81c2e0d5d5ec94f84ede3f514e70714c7e4221446aacd8ef45f1d0e4"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000002",
+        "destination": "draw_pile",
+        "expected_state_version": 127,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:f1a71053285c54e04054e7cf96ea57a759aea0bee29959d56ef27dc6e0e5e254",
+      "snapshot_digest": "blake3:35641127c8e2547b03ea10d4089cc9ed453be33d7a29cb1aace0194050abb34b"
+    },
+    {
+      "request": {
+        "expected_state_version": 128,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:78beaf90fa100d41a3b484a0221bc88660faee1714eb5b2a3341513d1c2055f1",
+      "snapshot_digest": "blake3:9cbee80d6d3625a0f20a6f9e79761f4dbd7562399e45ad79f770f10c2b0a8a7b"
+    },
+    {
+      "request": {
+        "choice_id": "choice:stun-discard:2",
+        "expected_state_version": 129,
+        "selected_options": [
+          "instance:00000010",
+          "instance:00000026"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:e9f2767eb9dc53285b2df7f417d1ef98a07ce3bc29ee73494a75029b3c916252",
+      "snapshot_digest": "blake3:ee9a4422c25f1b2d8da61b5d0366e89eae47d6eb89bc0e932e43c3f84458b9a5"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000046",
+        "expected_state_version": 130,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:c5fa05e9dc305edb5382af31eef3e502505cbd27e52e63ce4f66223039cfddd5",
+      "snapshot_digest": "blake3:a54ccaccbbe37e2d7da8cdc9451f48bd119c2b1b59530441c347dbfefbd5b558"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000049",
+        "expected_state_version": 131,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:2953f2aad0973c6b589437cb068855e374dd84ab89763b552c885da4a3fb1682",
+      "snapshot_digest": "blake3:36da71ab3be6e854a0546cf19f707fffff95f18e46d50b2641935005b536b037"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000048",
+        "expected_state_version": 132,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:2c868c6a98a21482f7d9ecc9910dda252d89e9aca7e9c5adeedaef5df2482f3a",
+      "snapshot_digest": "blake3:3bb7cb9e5798a1b28c21e75e4d46aaa161c4bf30d585835caf617832f49661e6"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000025",
+        "expected_state_version": 133,
+        "type": "acquire_card"
+      },
+      "event_digest": "blake3:453d8754731ebcc44d875c5cf75268f922fd26df32b359ed29f4c51bfe992e9d",
+      "snapshot_digest": "blake3:fa18c16cbe07564ec0a5ac1b6e7a1e9b94d420b0cae1cf5bd3f4871bfd74905b"
+    },
+    {
+      "request": {
+        "expected_state_version": 134,
+        "type": "end_hero_actions"
+      },
+      "event_digest": "blake3:7c18f202d98791c521015db15e17e4e91d524a6d17d3d79420f85e501294a20e",
+      "snapshot_digest": "blake3:de6f3c8af62ed7ac18dbada64d45b4bb42a0b6275971c23168e53bb58be48382"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000002",
+        "expected_state_version": 135,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:f5f2c53a7e6861967dd88b01dfb1b95ad1fb08a2d2f1c11e3c402c7b597ff9d6",
+      "snapshot_digest": "blake3:b9521aef1d4b7a917143a5454a7cb19094688f44b860a4964ded539f2dbba213"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000019",
+        "expected_state_version": 136,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:098fe3c3355f2efce353ab68fa62bea632e55a6372012a38f82f626273fb4d42",
+      "snapshot_digest": "blake3:6a8854e5d688c7bffd7f42a3b43ed5b56afdb7e86b822312d17c83c6681f9609"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000024",
+        "expected_state_version": 137,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:810d7ff03f7dbb9acb6a11bed912e87247846b0328c2d7d3ebbbd3f3d59bc060",
+      "snapshot_digest": "blake3:a0985b4975b2f0f9cd5612ada20baddb9b9d1135eeeabee57595e2abf5e5c179"
+    },
+    {
+      "request": {
+        "choice_id": "choice:effect:2",
+        "expected_state_version": 138,
+        "selected_options": [
+          "option:1"
+        ],
+        "type": "resolve_choice"
+      },
+      "event_digest": "blake3:2fe794621e1427738fa6a636cb0a1b09550b7c10897a6126f2ac521571434255",
+      "snapshot_digest": "blake3:5dfe0e3e930f2653ccca885ba3b7486b12b4d9f72edcdcdb388df0a3288eebce"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000053",
+        "expected_state_version": 139,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:8c991ac41dc7c9c2d02e3f438c7aa82ff6eb89cf77c53ea14ac292b7431d383d",
+      "snapshot_digest": "blake3:5a9b0b61d7866f2f10d3295a491d6f4318aa062121359019b86f581c3196dbc2"
+    },
+    {
+      "request": {
+        "card_id": "instance:00000055",
+        "expected_state_version": 140,
+        "targets": [],
+        "type": "play_card"
+      },
+      "event_digest": "blake3:a0d2050e28d3aeccce7a694ba632bc8ef07ca318e43caf7886808304c349585e",
+      "snapshot_digest": "blake3:067436a98154afdb2a572ba962b0c24513974de1f6b0d479af13ab6906a95d40"
+    },
+    {
+      "request": {
+        "amount": 3,
+        "expected_state_version": 141,
+        "type": "assign_attack",
+        "villain_id": "instance:00000043"
+      },
+      "event_digest": "blake3:beed42f57f40f58f0c916889e30ef6d473ce5f4703bd99f0a2e1f5386ef978f4",
+      "snapshot_digest": "blake3:2058770acdb3a43aa5ba9310e27dfcb5baa229edc57b17057d2c83794a95abec"
+    }
+  ]
+}

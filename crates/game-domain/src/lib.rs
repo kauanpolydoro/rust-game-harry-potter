@@ -8,19 +8,24 @@
 use std::{collections::BTreeSet, str::FromStr};
 
 mod effects;
+mod preparation;
+mod shuffling;
+pub use preparation::PreparationSample;
+pub use shuffling::ShuffleSample;
 
 pub use effects::{
-    EffectChangeCause, EffectChoiceAudience, EffectCondition, EffectContinuation, EffectCursor,
-    EffectDefinition, EffectDie, EffectEligibility, EffectEntity, EffectEntityKind,
+    EffectCardType, EffectChangeCause, EffectChoiceAudience, EffectCondition, EffectContinuation,
+    EffectCursor, EffectDefinition, EffectDie, EffectEligibility, EffectEntity, EffectEntityKind,
     EffectEntityPlacement, EffectExecutionError, EffectGameOutcome, EffectNoOpReason,
-    EffectOperation, EffectOutcome, EffectPathSegment, EffectResource, EffectResourceCost,
-    EffectRoller, EffectRule, EffectSelector, EffectStop, EffectTargetBinding, EffectTargetOwner,
-    EffectTrigger, EffectWorld, EffectZone, HERO_MAX_HEALTH, MAX_EFFECT_BRANCH_INDEX,
-    MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, PendingEffectChoice, PendingEffectChoiceKind,
-    QueuedEffect, effect_action_is_affordable,
+    EffectOperation, EffectOutcome, EffectPathSegment, EffectReactionTrigger, EffectResource,
+    EffectResourceCost, EffectRoller, EffectRule, EffectSelector, EffectStop, EffectTargetBinding,
+    EffectTargetOwner, EffectTrigger, EffectWorld, EffectZone, HERO_MAX_HEALTH,
+    MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, PendingEffectChoice,
+    PendingEffectChoiceKind, QueuedEffect, effect_action_is_affordable,
 };
 
-pub const SNAPSHOT_VERSION: u16 = 4;
+pub const SNAPSHOT_VERSION: u16 = 5;
+const TERMINAL_SNAPSHOT_VERSION: u16 = 4;
 const HERO_ACTION_SNAPSHOT_VERSION: u16 = 3;
 const PARTICIPANT_CHOICE_SNAPSHOT_VERSION: u16 = 2;
 const LEGACY_SNAPSHOT_VERSION: u16 = 1;
@@ -28,6 +33,7 @@ const STRUCTURAL_OUTCOME_RULE_ID: &str = "system:game-outcome";
 pub const INITIAL_STATE_VERSION: u64 = 1;
 pub const INITIAL_SEQUENCE: u64 = 0;
 pub const MAX_TURN_STEPS: usize = 3;
+pub const MAX_TURN_HISTORY_STEPS: usize = 4;
 pub const PRNG_ALGORITHM: &str = "chacha20-v1";
 pub const SHUFFLE_ALGORITHM: &str = "fisher-yates-v1";
 pub const SAMPLING_ALGORITHM: &str = "rejection-sampling-v1";
@@ -139,6 +145,7 @@ pub struct InitialGameState {
     shuffle_algorithm: &'static str,
     sampling_algorithm: &'static str,
     prng_counter: u64,
+    preparation_samples: Vec<PreparationSample>,
     active_villain_limit: u8,
     players: Vec<InitialPlayer>,
     effect_world: EffectWorld,
@@ -228,6 +235,9 @@ pub struct GameIntentDecision {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EndTurnOutcome {
+    DrawingRestored {
+        position: u8,
+    },
     LocationAdvanced {
         location_id: String,
         next_location_id: Option<String>,
@@ -244,6 +254,7 @@ pub enum EndTurnOutcome {
         owner_position: u8,
         zone: EffectZone,
         bottom_to_top: Vec<String>,
+        samples: Vec<ShuffleSample>,
     },
     ResourceReset {
         resource: EffectResource,
@@ -370,6 +381,21 @@ impl<'rules> GameEngine<'rules> {
         settle_initial_turn(state, self.rules.effect_rules(), roller)
     }
 
+    /// Prepares Game 1 decks and resolves the opening turn.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lobby, inventory, or random source is invalid.
+    pub fn start_game_one(
+        &self,
+        input: StartGameInput<'_>,
+        roller: &mut dyn EffectRoller,
+    ) -> Result<InitialGameState, StartGameError> {
+        let mut state = initialize_game(input)?;
+        preparation::prepare_game_one(&mut state, roller)?;
+        settle_initial_turn(state, self.rules.effect_rules(), roller)
+    }
+
     #[must_use]
     pub fn legal_intent_types(
         &self,
@@ -485,6 +511,7 @@ impl<'rules> GameEngine<'rules> {
         let mut next = current.clone();
         let mut resolution = effects::resume_effects(
             &mut next.effect_world,
+            current.active_position,
             pending,
             &selected_options,
             self.rules.effect_rules(),
@@ -653,6 +680,7 @@ pub enum GameCommand {
     },
     AcquireCard {
         card_id: String,
+        destination: CardAcquisitionDestination,
     },
 }
 
@@ -694,6 +722,23 @@ pub struct LegalAttackTarget {
 pub struct LegalAcquisition {
     pub card_id: String,
     pub cost: u16,
+    pub destinations: Vec<CardAcquisitionDestination>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CardAcquisitionDestination {
+    #[default]
+    DiscardPile,
+    DrawPile,
+}
+
+impl CardAcquisitionDestination {
+    const fn zone(self) -> EffectZone {
+        match self {
+            Self::DiscardPile => EffectZone::HeroDiscardPile,
+            Self::DrawPile => EffectZone::HeroDrawPile,
+        }
+    }
 }
 
 pub struct GameCommandInput<'a> {
@@ -840,6 +885,7 @@ pub struct GameStateRestoreInput<'a> {
     pub shuffle_algorithm: &'a str,
     pub sampling_algorithm: &'a str,
     pub prng_counter: u64,
+    pub preparation_samples: Vec<PreparationSample>,
     pub active_villain_limit: u8,
     pub players: Vec<InitialPlayer>,
     pub effect_world: EffectWorld,
@@ -957,6 +1003,11 @@ impl InitialGameState {
     #[must_use]
     pub const fn prng_counter(&self) -> u64 {
         self.prng_counter
+    }
+
+    #[must_use]
+    pub fn preparation_samples(&self) -> &[PreparationSample] {
+        &self.preparation_samples
     }
 
     #[must_use]
@@ -1114,6 +1165,7 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: 0,
+        preparation_samples: vec![],
         active_villain_limit,
         effect_world,
         last_effects: Vec::new(),
@@ -1396,6 +1448,12 @@ fn perform_end_turn(
         });
     }
 
+    outcomes.extend(
+        world
+            .restore_drawing()
+            .into_iter()
+            .map(|position| EndTurnOutcome::DrawingRestored { position }),
+    );
     let mut samples_consumed = 0_u64;
     while world
         .card_ids_in_zone(actor_position, EffectZone::HeroHand)
@@ -1418,22 +1476,12 @@ fn perform_end_turn(
         if shuffled.is_empty() {
             break;
         }
-        for index in (1..shuffled.len()).rev() {
-            let upper_exclusive =
-                u32::try_from(index + 1).map_err(|_| GameIntentError::EffectExecutionFailed)?;
-            let selected = random
-                .sample_below(upper_exclusive)
-                .ok_or(GameIntentError::RandomSourceFailed)?;
-            let selected =
-                usize::try_from(selected).map_err(|_| GameIntentError::RandomSourceFailed)?;
-            if selected > index {
-                return Err(GameIntentError::RandomSourceFailed);
-            }
-            shuffled.swap(index, selected);
-            samples_consumed = samples_consumed
-                .checked_add(1)
-                .ok_or(GameIntentError::VersionOverflow)?;
-        }
+        let samples = shuffling::shuffle(&mut shuffled, random)?;
+        samples_consumed = samples_consumed
+            .checked_add(
+                u64::try_from(samples.len()).map_err(|_| GameIntentError::VersionOverflow)?,
+            )
+            .ok_or(GameIntentError::VersionOverflow)?;
         for card_id in &shuffled {
             world
                 .move_card(
@@ -1450,6 +1498,7 @@ fn perform_end_turn(
             owner_position: actor_position,
             zone: EffectZone::HeroDrawPile,
             bottom_to_top: shuffled,
+            samples,
         });
     }
 
@@ -1466,35 +1515,7 @@ fn perform_end_turn(
 pub fn restore_game_state(
     input: GameStateRestoreInput<'_>,
 ) -> Result<InitialGameState, GameStateRestoreError> {
-    let supported_snapshot = input.snapshot_version == SNAPSHOT_VERSION
-        || input.snapshot_version == HERO_ACTION_SNAPSHOT_VERSION
-        || input.snapshot_version == PARTICIPANT_CHOICE_SNAPSHOT_VERSION
-        || (input.snapshot_version == LEGACY_SNAPSHOT_VERSION && input.pending_choice.is_none());
-    if !supported_snapshot {
-        return Err(GameStateRestoreError::UnsupportedSnapshotVersion);
-    }
-    if input.state_version == 0
-        || input.sequence.checked_add(1) != Some(input.state_version)
-        || input.manifest_version == 0
-    {
-        return Err(GameStateRestoreError::InvalidVersion);
-    }
-    if input.turn == 0 {
-        return Err(GameStateRestoreError::InvalidTurn);
-    }
-    if input.adventure_id.is_empty()
-        || input.content_version.is_empty()
-        || input.ruleset_version.is_empty()
-        || !valid_blake3_digest(input.manifest_digest)
-    {
-        return Err(GameStateRestoreError::InvalidContentIdentity);
-    }
-    if input.prng_algorithm != PRNG_ALGORITHM
-        || input.shuffle_algorithm != SHUFFLE_ALGORITHM
-        || input.sampling_algorithm != SAMPLING_ALGORITHM
-    {
-        return Err(GameStateRestoreError::UnsupportedAlgorithm);
-    }
+    validate_restore_metadata(&input)?;
     let expected_positions = (1_u8..=4)
         .take(input.players.len())
         .collect::<BTreeSet<_>>();
@@ -1534,7 +1555,13 @@ pub fn restore_game_state(
     {
         return Err(GameStateRestoreError::InvalidPlayers);
     }
-    if !restored_control_is_valid(&input) {
+    if !restored_control_is_valid(&input)
+        || !preparation::valid_samples(
+            &input.preparation_samples,
+            &participant_positions,
+            input.prng_counter,
+        )
+    {
         return Err(GameStateRestoreError::InvalidControlState);
     }
 
@@ -1558,6 +1585,7 @@ pub fn restore_game_state(
         shuffle_algorithm: SHUFFLE_ALGORITHM,
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: input.prng_counter,
+        preparation_samples: input.preparation_samples,
         active_villain_limit: input.active_villain_limit,
         players,
         effect_world: input.effect_world,
@@ -1568,6 +1596,42 @@ pub fn restore_game_state(
         decision_point: input.decision_point,
         last_turn_steps: input.last_turn_steps,
     })
+}
+
+fn validate_restore_metadata(
+    input: &GameStateRestoreInput<'_>,
+) -> Result<(), GameStateRestoreError> {
+    let supported_snapshot = input.snapshot_version == SNAPSHOT_VERSION
+        || input.snapshot_version == TERMINAL_SNAPSHOT_VERSION
+        || input.snapshot_version == HERO_ACTION_SNAPSHOT_VERSION
+        || input.snapshot_version == PARTICIPANT_CHOICE_SNAPSHOT_VERSION
+        || (input.snapshot_version == LEGACY_SNAPSHOT_VERSION && input.pending_choice.is_none());
+    if !supported_snapshot {
+        return Err(GameStateRestoreError::UnsupportedSnapshotVersion);
+    }
+    if input.state_version == 0
+        || input.sequence.checked_add(1) != Some(input.state_version)
+        || input.manifest_version == 0
+    {
+        return Err(GameStateRestoreError::InvalidVersion);
+    }
+    if input.turn == 0 {
+        return Err(GameStateRestoreError::InvalidTurn);
+    }
+    if input.adventure_id.is_empty()
+        || input.content_version.is_empty()
+        || input.ruleset_version.is_empty()
+        || !valid_blake3_digest(input.manifest_digest)
+    {
+        return Err(GameStateRestoreError::InvalidContentIdentity);
+    }
+    if input.prng_algorithm != PRNG_ALGORITHM
+        || input.shuffle_algorithm != SHUFFLE_ALGORITHM
+        || input.sampling_algorithm != SAMPLING_ALGORITHM
+    {
+        return Err(GameStateRestoreError::UnsupportedAlgorithm);
+    }
+    Ok(())
 }
 
 fn valid_villain_capacity(world: &EffectWorld, capacity: u8) -> bool {
@@ -1582,7 +1646,12 @@ fn restored_control_is_valid(input: &GameStateRestoreInput<'_>) -> bool {
     if input.queued_phases.len() > 3
         || input.queued_effects.len() > 4_096
         || input.last_effects.len() > 4_096
-        || input.last_turn_steps.len() > MAX_TURN_STEPS
+        || input.last_turn_steps.len()
+            > if input.snapshot_version < SNAPSHOT_VERSION {
+                MAX_TURN_STEPS
+            } else {
+                MAX_TURN_HISTORY_STEPS
+            }
         || input
             .last_turn_steps
             .iter()
@@ -1732,9 +1801,16 @@ pub fn decide_game_command(
             villain_id,
             amount,
         ),
-        GameCommand::AcquireCard { card_id } => {
-            decide_acquire_card(state, actor_position, &legal_intentions, card_id)
-        }
+        GameCommand::AcquireCard {
+            card_id,
+            destination,
+        } => decide_acquire_card(
+            state,
+            actor_position,
+            &legal_intentions,
+            card_id,
+            destination,
+        ),
     }
 }
 
@@ -1804,6 +1880,7 @@ fn decide_choice_response(
     let mut effect_world = state.effect_world.clone();
     let resolution = effects::resume_effects(
         &mut effect_world,
+        state.active_position,
         pending,
         &selected_options,
         effect_rules,
@@ -1933,7 +2010,7 @@ fn decide_play_card(
         .find(|playable| playable.card_id == card_id)
         .filter(|playable| target_bindings_match_slots(&targets, &playable.target_slots))
         .ok_or(GameCommandError::CommandNotLegal)?;
-    let (_, card) = state
+    state
         .effect_world
         .entity(&card_id)
         .filter(|(zone, card)| {
@@ -1945,17 +2022,6 @@ fn decide_play_card(
                 )
         })
         .ok_or(GameCommandError::CommandNotLegal)?;
-    let rule_id = card
-        .effect_rule_id()
-        .ok_or(GameCommandError::CommandNotLegal)?;
-    let matching_rules = effect_rules
-        .iter()
-        .filter(|rule| rule.id == rule_id && rule.trigger == EffectTrigger::Manual)
-        .collect::<Vec<_>>();
-    let [rule] = matching_rules.as_slice() else {
-        return Err(GameCommandError::CommandNotLegal);
-    };
-
     let state_version = state
         .state_version
         .checked_add(1)
@@ -1976,7 +2042,7 @@ fn decide_play_card(
     let resolution = effects::execute_effect_rule(
         &mut effect_world,
         actor_position,
-        rule,
+        &card_id,
         effect_rules,
         &targets,
         die_roller,
@@ -1993,15 +2059,6 @@ fn decide_play_card(
         .prng_counter
         .checked_add(rolls_consumed)
         .ok_or(GameCommandError::VersionOverflow)?;
-    let mut event_effects = Vec::with_capacity(outcomes.len() + 2);
-    event_effects.push(EffectOutcome::Moved {
-        rule_id: "system:play-card".to_owned(),
-        target_id: card_id.clone(),
-        target_position: Some(actor_position),
-        from: EffectZone::HeroHand,
-        to: EffectZone::HeroPlayArea,
-    });
-    event_effects.extend(outcomes);
     let event = GameEvent::CardPlayed {
         sequence,
         state_version,
@@ -2009,7 +2066,7 @@ fn decide_play_card(
         actor_position,
         card_id,
         targets,
-        effects: event_effects,
+        effects: outcomes,
         stop,
         prng_counter,
     };
@@ -2073,30 +2130,27 @@ fn decide_assign_attack(
     let mut effect_world = state.effect_world.clone();
     effects::apply_effect_outcomes(&mut effect_world, &effects)
         .map_err(map_effect_execution_error)?;
-    let (mut stop, rolls_consumed) =
-        if let Some(reward_rule_id) = reward_rule_id.filter(|_| defeated) {
-            let matching_rules = effect_rules
+    let reward_rule = reward_rule_id
+        .filter(|_| defeated)
+        .map(|reward_id| {
+            effect_rules
                 .iter()
-                .filter(|rule| {
-                    rule.id == reward_rule_id && rule.trigger == EffectTrigger::VillainReward
-                })
-                .collect::<Vec<_>>();
-            let [reward_rule] = matching_rules.as_slice() else {
-                return Err(GameCommandError::EffectExecutionFailed);
-            };
-            let resolution = effects::execute_forced_effect_rule(
-                &mut effect_world,
-                actor_position,
-                reward_rule,
-                effect_rules,
-                die_roller,
-            )
-            .map_err(map_effect_execution_error)?;
-            effects.extend(resolution.outcomes);
-            (resolution.stop, resolution.rolls_consumed)
-        } else {
-            (EffectStop::Stable, 0)
-        };
+                .find(|rule| rule.id == reward_id && rule.trigger == EffectTrigger::VillainReward)
+                .ok_or(GameCommandError::EffectExecutionFailed)
+        })
+        .transpose()?;
+    let resolution = effects::execute_committed_effects(
+        &mut effect_world,
+        actor_position,
+        reward_rule,
+        effect_rules,
+        effects,
+        die_roller,
+    )
+    .map_err(map_effect_execution_error)?;
+    let mut effects = resolution.outcomes;
+    let mut stop = resolution.stop;
+    let rolls_consumed = resolution.rolls_consumed;
     settle_structural_outcome(&effect_world, &mut effects, &mut stop);
     let prng_counter = next_prng_counter(state, rolls_consumed)?;
     let event = GameEvent::AttackAssigned {
@@ -2119,11 +2173,14 @@ fn decide_acquire_card(
     actor_position: u8,
     legal_intentions: &LegalGameIntentions,
     card_id: String,
+    destination: CardAcquisitionDestination,
 ) -> Result<GameCommandDecision, GameCommandError> {
     legal_intentions
         .acquisitions
         .iter()
-        .find(|acquisition| acquisition.card_id == card_id)
+        .find(|acquisition| {
+            acquisition.card_id == card_id && acquisition.destinations.contains(&destination)
+        })
         .ok_or(GameCommandError::CommandNotLegal)?;
     let hero = state
         .effect_world
@@ -2152,8 +2209,14 @@ fn decide_acquire_card(
         .entities_in(EffectZone::HogwartsDeck)
         .first()
         .map(|entity| entity.id().to_owned());
-    let effects =
-        card_acquisition_effects(hero, actor_position, card, cost, refill_card_id.as_deref());
+    let effects = card_acquisition_effects(
+        hero,
+        actor_position,
+        card,
+        cost,
+        refill_card_id.as_deref(),
+        destination,
+    );
     let sequence = state
         .sequence
         .checked_add(1)
@@ -2212,6 +2275,7 @@ fn card_acquisition_effects(
     card: &EffectEntity,
     cost: u16,
     refill_card_id: Option<&str>,
+    destination: CardAcquisitionDestination,
 ) -> Vec<EffectOutcome> {
     let available_influence = hero.resource(EffectResource::Influence);
     let mut effects = vec![
@@ -2229,7 +2293,7 @@ fn card_acquisition_effects(
             target_id: card.id().to_owned(),
             target_position: Some(actor_position),
             from: EffectZone::Market,
-            to: EffectZone::HeroDiscardPile,
+            to: destination.zone(),
         },
     ];
     if let Some(refill_card_id) = refill_card_id {
@@ -2374,7 +2438,7 @@ fn legal_hero_action_intentions(
         complete_dark_arts: false,
         playable_cards: legal_playable_cards(state, actor_position, effect_rules),
         attack_targets: legal_attack_targets(state, actor_position),
-        acquisitions: legal_acquisitions(state, actor_position),
+        acquisitions: legal_acquisitions(state, actor_position, effect_rules),
     }
 }
 
@@ -2462,7 +2526,11 @@ fn legal_attack_targets(state: &InitialGameState, actor_position: u8) -> Vec<Leg
         .collect()
 }
 
-fn legal_acquisitions(state: &InitialGameState, actor_position: u8) -> Vec<LegalAcquisition> {
+fn legal_acquisitions(
+    state: &InitialGameState,
+    actor_position: u8,
+    rules: &[EffectRule],
+) -> Vec<LegalAcquisition> {
     let available_influence = state
         .effect_world
         .hero_resource(actor_position, EffectResource::Influence)
@@ -2479,6 +2547,19 @@ fn legal_acquisitions(state: &InitialGameState, actor_position: u8) -> Vec<Legal
             (cost <= available_influence).then(|| LegalAcquisition {
                 card_id: card.id().to_owned(),
                 cost,
+                destinations: if effects::can_acquire_on_deck(
+                    &state.effect_world,
+                    actor_position,
+                    card,
+                    rules,
+                ) {
+                    vec![
+                        CardAcquisitionDestination::DiscardPile,
+                        CardAcquisitionDestination::DrawPile,
+                    ]
+                } else {
+                    vec![CardAcquisitionDestination::DiscardPile]
+                },
             })
         })
         .collect()
@@ -2936,7 +3017,7 @@ fn validate_effect_prng_counter(
 ) -> Result<(), GameEventError> {
     let rolls = effects
         .iter()
-        .filter(|outcome| matches!(outcome, EffectOutcome::DieRolled { .. }))
+        .filter(|outcome| outcome.consumes_random_sample())
         .count();
     let consumed = u64::try_from(rolls).map_err(|_| GameEventError::VersionOverflow)?;
     if previous_counter.checked_add(consumed) != Some(next_counter) {
@@ -3072,7 +3153,8 @@ fn random_samples_consumed(
             EndTurnOutcome::PileShuffled { bottom_to_top, .. } => {
                 bottom_to_top.len().saturating_sub(1)
             }
-            EndTurnOutcome::LocationAdvanced { .. }
+            EndTurnOutcome::DrawingRestored { .. }
+            | EndTurnOutcome::LocationAdvanced { .. }
             | EndTurnOutcome::VillainRevealed { .. }
             | EndTurnOutcome::CardMoved { .. }
             | EndTurnOutcome::ResourceReset { .. }
@@ -3082,7 +3164,7 @@ fn random_samples_consumed(
             steps
                 .iter()
                 .flat_map(|step| &step.effects)
-                .map(|outcome| usize::from(matches!(outcome, EffectOutcome::DieRolled { .. }))),
+                .map(|outcome| usize::from(outcome.consumes_random_sample())),
         )
         .try_fold(0_u64, |total, consumed| {
             total
@@ -3249,7 +3331,7 @@ fn apply_end_turn_outcomes(
             continue;
         }
 
-        let mut current = world.card_ids_in_zone(actor_position, EffectZone::HeroDiscardPile);
+        let current = world.card_ids_in_zone(actor_position, EffectZone::HeroDiscardPile);
         if current.is_empty() {
             break;
         }
@@ -3257,6 +3339,7 @@ fn apply_end_turn_outcomes(
             owner_position,
             zone,
             bottom_to_top,
+            samples,
         }) = supplied.next()
         else {
             return Err(GameEventError::EffectTransitionInvalid);
@@ -3264,10 +3347,7 @@ fn apply_end_turn_outcomes(
         if *owner_position != actor_position || *zone != EffectZone::HeroDrawPile {
             return Err(GameEventError::EffectTransitionInvalid);
         }
-        let mut ordered = bottom_to_top.clone();
-        current.sort();
-        ordered.sort();
-        if current != ordered || bottom_to_top.is_empty() {
+        if !shuffling::matches(&current, bottom_to_top, samples) {
             return Err(GameEventError::EffectTransitionInvalid);
         }
         for card_id in bottom_to_top {
@@ -3317,6 +3397,9 @@ fn replay_hero_recovery(
                 after,
             },
         )?;
+    }
+    for position in world.restore_drawing() {
+        expect_end_turn_outcome(supplied, &EndTurnOutcome::DrawingRestored { position })?;
     }
     Ok(())
 }
@@ -3534,9 +3617,11 @@ fn apply_attack_assigned_event(
         .collect::<Vec<_>>();
     if committed_effects != expected_effects
         || (!reward_effects.is_empty()
-            && reward_rule_id.as_deref().is_none_or(|rule_id| {
-                !outcomes_belong_to_window(&state.effect_world, reward_effects, rule_id)
-            }))
+            && !outcomes_belong_to_window(
+                &state.effect_world,
+                reward_effects,
+                reward_rule_id.as_deref().unwrap_or("system:defeat-villain"),
+            ))
         || (!defeated && !reward_effects.is_empty())
         || !effects::effect_transition_is_valid(event_effects, stop, &participant_positions)
     {
@@ -3618,6 +3703,17 @@ fn apply_card_acquired_event(
         card,
         cost,
         expected_refill.as_deref(),
+        if matches!(
+            event_effects.get(1),
+            Some(EffectOutcome::Moved {
+                to: EffectZone::HeroDrawPile,
+                ..
+            })
+        ) {
+            CardAcquisitionDestination::DrawPile
+        } else {
+            CardAcquisitionDestination::DiscardPile
+        },
     );
     if event_effects != expected_effects {
         return Err(GameEventError::EffectTransitionInvalid);
@@ -3669,7 +3765,7 @@ fn validate_event_prng_counter(
 ) -> Result<(), GameEventError> {
     let rolled = effects
         .iter()
-        .filter(|outcome| matches!(outcome, EffectOutcome::DieRolled { .. }))
+        .filter(|outcome| outcome.consumes_random_sample())
         .count();
     let expected = state
         .prng_counter
@@ -3718,8 +3814,15 @@ fn outcomes_belong_to_window(
             _ => None,
         })
         .collect::<BTreeSet<_>>();
+    let reaction_sources = world.entities().filter(|(zone, entity)| {
+        matches!(zone, EffectZone::ActiveVillains | EffectZone::HeroPlayArea)
+            || outcomes.iter().any(|outcome| matches!(outcome,
+                EffectOutcome::Moved { target_id, from: EffectZone::HeroHand, to: EffectZone::HeroDiscardPile, .. }
+                if target_id == entity.id()))
+    }).filter_map(|(_, entity)| entity.effect_rule_id()).collect::<BTreeSet<_>>();
     outcomes.iter().all(|outcome| outcome_belongs_to_rule(outcome, primary_rule)
         || rewards.contains(effect_outcome_rule_id(outcome))
+        || reaction_sources.contains(effect_outcome_rule_id(outcome))
         || matches!(outcome,
             EffectOutcome::Moved { rule_id, from: EffectZone::ActiveVillains, to: EffectZone::VillainDiscard, target_position: None, .. }
                 if rule_id == "system:defeat-villain")
@@ -3756,13 +3859,7 @@ fn outcome_belongs_to_rule(outcome: &EffectOutcome, rule_id: &str) -> bool {
 }
 
 fn effect_outcome_rule_id(outcome: &EffectOutcome) -> &str {
-    match outcome {
-        EffectOutcome::DieRolled { rule_id, .. }
-        | EffectOutcome::Moved { rule_id, .. }
-        | EffectOutcome::NoOp { rule_id, .. }
-        | EffectOutcome::ResourceChanged { rule_id, .. }
-        | EffectOutcome::Terminal { rule_id, .. } => rule_id,
-    }
+    outcome.rule_id()
 }
 
 fn validate_effect_world(state: &InitialGameState) -> Result<(), GameEventError> {
@@ -3880,6 +3977,7 @@ mod tests {
             shuffle_algorithm: state.shuffle_algorithm(),
             sampling_algorithm: state.sampling_algorithm(),
             prng_counter: state.prng_counter(),
+            preparation_samples: state.preparation_samples().to_vec(),
             players: state.players().to_vec(),
             effect_world: state.effect_world().clone(),
             last_effects: state.last_effects().to_vec(),
@@ -4084,6 +4182,7 @@ mod tests {
             shuffle_algorithm: state.shuffle_algorithm(),
             sampling_algorithm: state.sampling_algorithm(),
             prng_counter: state.prng_counter(),
+            preparation_samples: state.preparation_samples().to_vec(),
             players: state.players().to_vec(),
             effect_world: state.effect_world().clone(),
             last_effects: state.last_effects().to_vec(),
@@ -4146,6 +4245,7 @@ mod tests {
             shuffle_algorithm: started.shuffle_algorithm(),
             sampling_algorithm: started.sampling_algorithm(),
             prng_counter: started.prng_counter(),
+            preparation_samples: started.preparation_samples().to_vec(),
             players: started.players().to_vec(),
             effect_world: world,
             last_effects: started.last_effects().to_vec(),
@@ -4491,6 +4591,7 @@ mod tests {
             shuffle_algorithm: started.shuffle_algorithm(),
             sampling_algorithm: started.sampling_algorithm(),
             prng_counter: started.prng_counter(),
+            preparation_samples: started.preparation_samples().to_vec(),
             players: started.players().to_vec(),
             effect_world: started.effect_world().clone(),
             last_effects: started.last_effects().to_vec(),
@@ -4558,6 +4659,7 @@ mod tests {
             shuffle_algorithm: started.shuffle_algorithm(),
             sampling_algorithm: started.sampling_algorithm(),
             prng_counter: started.prng_counter(),
+            preparation_samples: started.preparation_samples().to_vec(),
             players: shuffled_players,
             effect_world: started.effect_world().clone(),
             last_effects: started.last_effects().to_vec(),
@@ -5028,7 +5130,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_turn_history_uses_the_same_three_step_limit_as_the_transport() {
+    fn persisted_turn_history_is_bounded_after_hero_actions_join_the_opening_phases() {
         let participants = valid_participants();
         let rules = ValidatedGameRules::new(Vec::new()).expect("empty rules should be valid");
         let mut random = ScriptedRoller::new(&[]);
@@ -5044,7 +5146,7 @@ mod tests {
             .expect("automatic phases should reach the first player intent");
         let mut invalid = state.clone();
         let extra_step = TurnStep::new(GamePhase::DarkArts, Vec::new());
-        while invalid.last_turn_steps.len() <= MAX_TURN_STEPS {
+        while invalid.last_turn_steps.len() <= MAX_TURN_HISTORY_STEPS {
             invalid.last_turn_steps.push(extra_step.clone());
         }
         invalid.last_effects = invalid
@@ -5138,6 +5240,7 @@ mod tests {
                 shuffle_algorithm: SHUFFLE_ALGORITHM,
                 sampling_algorithm: SAMPLING_ALGORITHM,
                 prng_counter: 0,
+                preparation_samples: vec![],
                 players: players.clone(),
                 effect_world: EffectWorld::new(
                     players
@@ -6041,6 +6144,39 @@ mod tests {
             Ok(decision.state)
         );
         assert_end_turn_replay_rejects_noncanonical_payloads(&state, &decision.event);
+        assert_end_turn_shuffle_evidence(&state, &decision.event);
+    }
+
+    fn assert_end_turn_shuffle_evidence(state: &InitialGameState, event: &GameEvent) {
+        let GameEvent::TurnCompleted { end_turn, .. } = event else {
+            panic!("turn")
+        };
+        let samples = end_turn
+            .iter()
+            .find_map(|outcome| match outcome {
+                EndTurnOutcome::PileShuffled { samples, .. } => Some(samples),
+                _ => None,
+            })
+            .expect("shuffle evidence");
+        assert_eq!(
+            samples
+                .iter()
+                .map(|sample| (sample.upper_exclusive, sample.result))
+                .collect::<Vec<_>>(),
+            [(4, 2), (3, 1), (2, 1)]
+        );
+        let mut forged = event.clone();
+        if let GameEvent::TurnCompleted { end_turn, .. } = &mut forged {
+            for outcome in end_turn {
+                if let EndTurnOutcome::PileShuffled { samples, .. } = outcome {
+                    samples[0].result = 0;
+                }
+            }
+        }
+        assert_eq!(
+            apply_game_event(state, &forged),
+            Err(GameEventError::EffectTransitionInvalid)
+        );
     }
 
     #[test]

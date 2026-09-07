@@ -1385,6 +1385,17 @@ input {
   overflow-wrap: anywhere;
 }
 
+.table-row__description {
+  margin: 0;
+  max-width: 64ch;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.choice-confirmation {
+  margin-top: 1rem;
+}
+
 .table-row__identity span,
 .table-row__identity small,
 .table-row__note,
@@ -1410,6 +1421,11 @@ input {
   grid-column: 1 / -1;
   color: var(--chalk-muted);
   font-size: 0.78rem;
+}
+
+.table-row__action--acquire {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .table-row__action select {
@@ -1794,6 +1810,14 @@ input {
 @media (max-width: 47.999rem) {
   .security-notice {
     grid-template-columns: 1fr;
+  }
+
+  .table-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .table-row__action {
+    justify-content: start;
   }
 
   .security-notice .text-button {

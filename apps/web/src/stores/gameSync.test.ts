@@ -251,6 +251,38 @@ describe('official game synchronization', () => {
     expect(sync.cursor).toBe(1)
   })
 
+  it('keeps observers synchronized when a played Game 1 card resolves its choice', () => {
+    const access = useRoomAccessStore()
+    access.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(access.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    socket?.receive(synchronizedMessage(access.game))
+    const next = projection(1)
+    next.turn = { number: 1, phase: 'hero_actions', active_position: 1 }
+    socket?.receive({
+      type: 'events', protocol_version: 2, from_cursor: 0, cursor: 1, projection: next,
+      events: [{
+        event_version: 6, type: 'choice_resolved', sequence: 1, state_version: 2,
+        turn: 1, actor_position: 1, choice_id: 'choice:effect:1',
+        choice_cause: 'rule:g1-hogwarts-009', selected_options: ['option:1'],
+        steps: [{ phase: 'hero_actions', effects: [{
+          type: 'resource_changed', rule_id: 'rule:g1-hogwarts-009', target_id: 'hero:1',
+          target_position: 1, resource: 'influence', before: 0, after: 2, cause: 'effect',
+        }] }],
+        control: {
+          status: 'in_progress', turn: 1, phase: 'hero_actions', active_position: 1,
+          queued_phases: ['end_turn'], queued_effect_count: 0,
+          decision_point: { type: 'player_intent', responsible_position: 1 },
+        }, prng_counter: 58,
+      }],
+    })
+    expect(sync.status).toBe('connected')
+    expect(sync.cursor).toBe(1)
+    expect(access.game).toEqual(next)
+  })
+
   it('derives the coordination block only from the required participant presence', () => {
     const roomAccess = useRoomAccessStore()
     const officialProjection = projection()
