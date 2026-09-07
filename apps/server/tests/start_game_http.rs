@@ -24,6 +24,7 @@ use tower::ServiceExt;
 mod game_one;
 mod game_two;
 mod lifecycle;
+mod restore;
 
 struct ReadyRoom {
     app: axum::Router,
