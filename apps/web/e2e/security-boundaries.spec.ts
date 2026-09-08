@@ -64,7 +64,8 @@ test('recovery document enforces CSP and clears its credential before applicatio
   for (const directive of ["script-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'self'"]) {
     expect(csp).toContain(directive)
   }
-  expect(csp).not.toMatch(/unsafe-inline|unsafe-eval/)
+  expect(csp).not.toMatch(/'unsafe-inline'|'unsafe-eval'/)
+  expect(csp).toContain("'wasm-unsafe-eval'")
   await expect(page.getByRole('heading', { name: 'Recupere sua participação' })).toBeVisible()
   expect(new URL(page.url()).hash).toBe('')
   expect(requests.every((url) => !url.includes(token))).toBe(true)
@@ -99,5 +100,17 @@ test('recovery tells the player when to retry after the real credential budget i
     expect((await recoveryContext.cookies()).some((cookie) => cookie.name === '__Host-session')).toBe(false)
   } finally {
     await recoveryContext.close()
+  }
+})
+
+test('versioned visual resources cache independently from the recovery document', async ({ request }) => {
+  const model = await request.get('/table-assets/v1/card.glb')
+  expect(model.ok()).toBe(true)
+  expect(model.headers()['cache-control']).toBe('public, max-age=31536000, immutable')
+  const art = await request.get('/table-art/card-back.png')
+  expect(art.headers()['cache-control']).toBe('public, max-age=0, must-revalidate')
+  for (const path of ['/', '/recovery-review-route', '/assets/missing.js']) {
+    const document = await request.get(path)
+    expect(document.headers()['cache-control']).toBe('no-store')
   }
 })

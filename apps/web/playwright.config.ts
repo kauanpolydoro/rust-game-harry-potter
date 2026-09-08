@@ -39,7 +39,7 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   // Concurrent software-rendered scenes otherwise starve each other's input loop.
-  workers: 2,
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
@@ -94,7 +94,8 @@ export default defineConfig({
         E2E_TLS_DIRECTORY: process.env.E2E_TLS_DIRECTORY,
       },
       reuseExistingServer: false,
-      timeout: 30_000,
+      // Includes type checking and bundling on the shared build host.
+      timeout: 120_000,
       url: frontendOrigin,
       ignoreHTTPSErrors: true,
     },

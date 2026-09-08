@@ -1,0 +1,20 @@
+{
+  "cleanedAt": "2026-09-08T17:00:21.998745+00:00",
+  "removedAllocatedBytes": {
+    "/home/kauan/developer/git/rust-game-harry-potter-2/target": 4867661824,
+    "/home/kauan/developer/git/rust-game-harry-potter-2/apps/web/dist": 7876608,
+    "/home/kauan/developer/git/rust-game-harry-potter-2/apps/web/test-results": 74178560,
+    "/tmp/hogwarts-issue30-audio-runtime": 6184960,
+    "/tmp/hogwarts-issue30-ktx": 26173440
+  },
+  "totalRemovedAllocatedBytes": 4982075392,
+  "retainedBuildArtifacts": [],
+  "retained": [
+    "Committed screenshots, prototype video and validation reports",
+    "Pre-existing node_modules and local toolchain/backup directories",
+    "Other sessions browser runtimes and artifacts"
+  ],
+  "database": "Dropped only hogwarts_issue30_validation_20260908 after confirming no clients",
+  "temporaryServices": "Stopped only the session PulseAudio null sink and network monitor",
+  "filesystemAfterCleanup": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1       193G   73G  121G  38% /"
+}

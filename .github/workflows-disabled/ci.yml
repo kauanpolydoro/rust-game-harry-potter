@@ -46,11 +46,13 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
       - run: node scripts/check-boundaries.mjs
+      - run: node scripts/generate-visual-manifest.mjs --check
       - run: npm run generate:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: node scripts/check-table-budgets.mjs
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: cargo build --release -p harry-potter-server --example e2e_harness
       - run: xvfb-run -a npm run test:e2e

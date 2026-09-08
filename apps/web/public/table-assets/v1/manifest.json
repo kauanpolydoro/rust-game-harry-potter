@@ -1,0 +1,692 @@
+{
+  "version": "game-one-visual-v1",
+  "locale": "pt-BR",
+  "content": "game-one-en-v1",
+  "budgets": {
+    "decodedImages": 16,
+    "textureBytes": 67108864,
+    "essentialTransferBytes": 8388608
+  },
+  "models": {
+    "card": {
+      "url": "/table-assets/v1/card.glb",
+      "bytes": 1392,
+      "sha256": "b7f4d7fd0872645855045a4469d3ba255ea6ac4c7d2e31aad6d81d9b3a5038da",
+      "format": "glb",
+      "vertices": 24,
+      "triangles": 12
+    }
+  },
+  "materials": {
+    "wood": {
+      "color": "#38251e",
+      "compressed": {
+        "url": "/table-assets/v1/wood.ktx2",
+        "bytes": 1113127,
+        "sha256": "8b362fffdc654aa97b78b1ba2bddd4b907ad650d831ca4f26eaecd3905dd81fd"
+      },
+      "fallback": {
+        "url": "/table-art/wood.png",
+        "bytes": 1589636,
+        "sha256": "d0dfccf352771422b75f2254b213ae490cb8188cb6d42515ee7af35131ea2e62"
+      }
+    },
+    "back": {
+      "color": "#173042",
+      "compressed": {
+        "url": "/table-assets/v1/card-back.ktx2",
+        "bytes": 11755,
+        "sha256": "1a83b5ad8a831929b91d864878d1a16bc9cc47e0e8017dc15fb5101af0b1b267"
+      },
+      "fallback": {
+        "url": "/table-art/card-back.png",
+        "bytes": 11076,
+        "sha256": "0dfa9ead0a033490054e7dfeacab43269e48f17c31491f45f720ff590680edd1"
+      }
+    },
+    "stock": {
+      "color": "#b6a17b"
+    }
+  },
+  "audio": {
+    "card": {
+      "url": "/table-audio/v1/card.wav",
+      "bytes": 7982,
+      "sha256": "7be5dd28c826ee720f10ae405fb8e36a742a967b4ba0dfa2c8da1d7d74be58c0"
+    },
+    "damage": {
+      "url": "/table-audio/v1/damage.wav",
+      "bytes": 14156,
+      "sha256": "154ce4f366831def2889c0ff7d2dd3f12ab1a5321efda4ad3e4dfb2c2ae244a9"
+    },
+    "heal": {
+      "url": "/table-audio/v1/heal.wav",
+      "bytes": 21212,
+      "sha256": "6413d050c83a8554b90a9f3b413617dcd2a2e89d1e91f278a5195ac5c11cbb25"
+    },
+    "resource": {
+      "url": "/table-audio/v1/resource.wav",
+      "bytes": 10628,
+      "sha256": "8e451b1f283e3763d197b1cd826d89298e79efadc98e8e1922aa91b7a9da8f34"
+    },
+    "victory": {
+      "url": "/table-audio/v1/victory.wav",
+      "bytes": 52964,
+      "sha256": "3c869783b04eb0e167e079af0aee5ca12bfa3beebae13ad9b0494db787957648"
+    },
+    "defeat": {
+      "url": "/table-audio/v1/defeat.wav",
+      "bytes": 41940,
+      "sha256": "2dd22cd693e0b3b6544a98169e76ec75d4d89c45699b3b05087fb28d44717dc3"
+    },
+    "ambient": {
+      "url": "/table-audio/v1/ambient.wav",
+      "bytes": 352844,
+      "sha256": "cb280b9293dd2007d486b17ad50fcc7455485d2f932ef660c71bfa9cbca7d78d"
+    }
+  },
+  "entries": {
+    "hogwarts-card:001": {
+      "name": "Alvo Dumbledore",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:002": {
+      "name": "Descendo",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:003": {
+      "name": "Essência de Ditamno",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:004": {
+      "name": "Pomo de Ouro",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:005": {
+      "name": "Incendio",
+      "art": {
+        "url": "/table-art/incendio.png",
+        "bytes": 68253,
+        "sha256": "1d63e13d9138b1984e7e1047a5e885c26716e6c8ccd92f6e1539202784608493",
+        "resolution": [
+          192,
+          240
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:006": {
+      "name": "Lumos",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:007": {
+      "name": "Olívio Wood",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:008": {
+      "name": "Equipamento de Quadribol",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:009": {
+      "name": "Reparo",
+      "art": {
+        "url": "/table-art/hogwarts-cards.png",
+        "bytes": 168335,
+        "sha256": "83b0a979b406142cab839bfb5615d472f0cf550511ed438a18c35f89ee2a39d5",
+        "resolution": [
+          480,
+          247
+        ],
+        "crop": [
+          177,
+          49,
+          127,
+          74
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:010": {
+      "name": "Rúbeo Hagrid",
+      "art": {
+        "url": "/table-art/hogwarts-cards.png",
+        "bytes": 168335,
+        "sha256": "83b0a979b406142cab839bfb5615d472f0cf550511ed438a18c35f89ee2a39d5",
+        "resolution": [
+          480,
+          247
+        ],
+        "crop": [
+          323,
+          49,
+          124,
+          77
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:011": {
+      "name": "Chapéu Seletor",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hogwarts-card:013": {
+      "name": "Wingardium Leviosa",
+      "art": {
+        "url": "/table-art/hogwarts-cards.png",
+        "bytes": 168335,
+        "sha256": "83b0a979b406142cab839bfb5615d472f0cf550511ed438a18c35f89ee2a39d5",
+        "resolution": [
+          480,
+          247
+        ],
+        "crop": [
+          25,
+          52,
+          123,
+          74
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "dark-arts:001": {
+      "name": "Expulso",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "dark-arts:002": {
+      "name": "Flipendo",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "dark-arts:003": {
+      "name": "Aquele-Que-Não-Deve-Ser-Nomeado",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "dark-arts:004": {
+      "name": "Petrificação",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "villain:001": {
+      "name": "Crabbe e Goyle",
+      "art": {
+        "url": "/table-art/crabbe-goyle.png",
+        "bytes": 100386,
+        "sha256": "bf61e289cb7b77e243cb150a36f27b19ba0c4230d87468e2645de81b5683fc8b",
+        "resolution": [
+          480,
+          217
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "damage",
+      "fallback": "identity-and-text"
+    },
+    "villain:002": {
+      "name": "Draco Malfoy",
+      "art": {
+        "url": "/table-art/draco.png",
+        "bytes": 34496,
+        "sha256": "4ce19b76d9ab432ab1e70d5cbd1c40472ac3946e524230d0535827fca6d19441",
+        "resolution": [
+          223,
+          168
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "damage",
+      "fallback": "identity-and-text"
+    },
+    "villain:003": {
+      "name": "Quirinus Quirrell",
+      "art": {
+        "url": "/table-art/quirrell.png",
+        "bytes": 13847,
+        "sha256": "a5ff807a0421412f5590ff266c0e5037116a14228c85dd739af5e5edd1babc02",
+        "resolution": [
+          178,
+          178
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "damage",
+      "fallback": "identity-and-text"
+    },
+    "location:001": {
+      "name": "Beco Diagonal",
+      "art": {
+        "url": "/table-art/diagon-alley.png",
+        "bytes": 51134,
+        "sha256": "474a1bbff44cf0dd29352d0fc3cf82dceb63410c0d6ccb0127fddedb3553fd1f",
+        "resolution": [
+          197,
+          126
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "location:002": {
+      "name": "Espelho de Ojesed",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:001": {
+      "name": "Alohomora",
+      "art": {
+        "url": "/table-art/alohomora.jpg",
+        "bytes": 16859,
+        "sha256": "c14a5494fe3cdf4e377ee07987879259aa49e0bfaf96b8eed88579914b85986a",
+        "resolution": [
+          191,
+          240
+        ],
+        "crop": [
+          18,
+          18,
+          135,
+          140
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:002": {
+      "name": "Capa da Invisibilidade",
+      "art": {
+        "url": "/table-art/starting-cards.jpg",
+        "bytes": 30411,
+        "sha256": "0011347d6907d6b498e289c332b816b450f51aea77aba3eb991d8746f5c40cbb",
+        "resolution": [
+          480,
+          202
+        ],
+        "crop": [
+          27,
+          27,
+          84,
+          72
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:003": {
+      "name": "Firebolt",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:004": {
+      "name": "Edwiges",
+      "art": {
+        "url": "/table-art/starting-cards.jpg",
+        "bytes": 30411,
+        "sha256": "0011347d6907d6b498e289c332b816b450f51aea77aba3eb991d8746f5c40cbb",
+        "resolution": [
+          480,
+          202
+        ],
+        "crop": [
+          132,
+          48,
+          82,
+          74
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:005": {
+      "name": "Feijõezinhos de Todos os Sabores",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:006": {
+      "name": "Cleansweep 11",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:007": {
+      "name": "Pichitinho",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:008": {
+      "name": "Vira-Tempo",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:009": {
+      "name": "Os Contos de Beedle, o Bardo",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:010": {
+      "name": "Bichento",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:011": {
+      "name": "Lembrol",
+      "art": {
+        "url": "/table-art/starting-cards.jpg",
+        "bytes": 30411,
+        "sha256": "0011347d6907d6b498e289c332b816b450f51aea77aba3eb991d8746f5c40cbb",
+        "resolution": [
+          480,
+          202
+        ],
+        "crop": [
+          257,
+          30,
+          87,
+          65
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:012": {
+      "name": "Mandrágora",
+      "art": {
+        "url": "/table-art/starting-cards.jpg",
+        "bytes": 30411,
+        "sha256": "0011347d6907d6b498e289c332b816b450f51aea77aba3eb991d8746f5c40cbb",
+        "resolution": [
+          480,
+          202
+        ],
+        "crop": [
+          356,
+          55,
+          81,
+          74
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "starter:013": {
+      "name": "Trevor",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hero:001": {
+      "name": "Harry - Jogo 1",
+      "art": {
+        "url": "/table-art/heroes.jpg",
+        "bytes": 42792,
+        "sha256": "c238a39adc5df124795552c82b3cc969090f84b98fbf488cfee6ba9d32ff0680",
+        "resolution": [
+          600,
+          253
+        ],
+        "crop": [
+          118,
+          122,
+          80,
+          84
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hero:004": {
+      "name": "Hermione - Jogo 1",
+      "art": {
+        "url": "/table-art/heroes.jpg",
+        "bytes": 42792,
+        "sha256": "c238a39adc5df124795552c82b3cc969090f84b98fbf488cfee6ba9d32ff0680",
+        "resolution": [
+          600,
+          253
+        ],
+        "crop": [
+          355,
+          120,
+          80,
+          84
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hero:007": {
+      "name": "Neville - Jogo 1",
+      "art": {
+        "url": "/table-art/heroes.jpg",
+        "bytes": 42792,
+        "sha256": "c238a39adc5df124795552c82b3cc969090f84b98fbf488cfee6ba9d32ff0680",
+        "resolution": [
+          600,
+          253
+        ],
+        "crop": [
+          505,
+          24,
+          80,
+          84
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "hero:010": {
+      "name": "Rony - Jogo 1",
+      "art": {
+        "url": "/table-art/heroes.jpg",
+        "bytes": 42792,
+        "sha256": "c238a39adc5df124795552c82b3cc969090f84b98fbf488cfee6ba9d32ff0680",
+        "resolution": [
+          600,
+          253
+        ],
+        "crop": [
+          263,
+          26,
+          80,
+          84
+        ],
+        "status": "provisional",
+        "provenance": "/table-art/sources.json"
+      },
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "turn-order:001": {
+      "name": "Ordem de Turno 1",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "turn-order:002": {
+      "name": "Ordem de Turno 2",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "turn-order:003": {
+      "name": "Ordem de Turno 3",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "turn-order:004": {
+      "name": "Ordem de Turno 4",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "catalog:game-one-v1": {
+      "name": "Catálogo do Jogo 1",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "ruleset:game-one-v1": {
+      "name": "Regras do Jogo 1",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    },
+    "adventure:001": {
+      "name": "Jogo 1",
+      "art": null,
+      "model": "card",
+      "material": "stock",
+      "audio": "card",
+      "fallback": "identity-and-text"
+    }
+  }
+}

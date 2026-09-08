@@ -14,18 +14,30 @@ import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder'
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
-import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { Mesh } from '@babylonjs/core/Meshes/mesh'
+import type { Geometry } from '@babylonjs/core/Meshes/geometry'
+import type { AssetContainer } from '@babylonjs/core/assetContainer'
+import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
+import '@babylonjs/loaders/glTF/2.0/glTFLoader'
 import type { GameProjectionResponse } from '../contracts/identity-access.generated'
 import type { TableCard } from './tablePresentation'
-import { cardArt } from './tableArt'
+import { visualArt, visualManifest } from './visualManifest'
+import type { TableCue, TableVisualGroup } from './tableTimeline'
+import { createTableQuality, qualityProfiles, type QualityPreference, type TableQuality } from './tableQuality'
+import { acquireTableTextureDecoder } from './tableTextureDecoder'
 import '@babylonjs/core/Culling/ray'
+import { createDistribution } from './tableTelemetry'
 
 export interface CardAnchor { id: string; x: number; y: number; width: number; height: number }
-export interface TableMeasurements { frames: number; medianFrameMs: number; p95FrameMs: number; meshes: number; textures: number }
+export interface TableMeasurements { frames: number; medianFrameMs: number; p95FrameMs: number; meshes: number; textures: number; quality: TableQuality; estimatedTextureBytes: number; compressedMaterials: number; loadedCardModel: boolean; decodedImages: number; frameDistribution: ReturnType<ReturnType<typeof createDistribution>['read']> }
 export interface TableScene {
   update(game: GameProjectionResponse, cards: TableCard[], selectedId: string | null, handPage: number, playPage: number): void
   resize(): void
   pause(value: boolean): void
+  present(group: TableVisualGroup, reducedMotion: boolean): void
+  discardMotion(): void
+  setQuality(value: QualityPreference): void
+  resetMeasurements(): void
   measurements(): TableMeasurements
   dispose(): void
 }
@@ -34,10 +46,17 @@ const colors = { hand: '#263e51', play: '#263e51', market: '#315b50', villain: '
 const labels = { hand: 'HOGWARTS', play: 'EM JOGO', market: 'HOGWARTS', villain: 'VILÃO', location: 'LOCAL', dark_arts: 'ARTES DAS TREVAS' }
 
 /** Owns every GPU resource; no scene objects enter Vue's reactive graph. */
-export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: CardAnchor[]) => void): TableScene {
+export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: CardAnchor[]) => void,
+  qualityChanged: (quality: TableQuality) => void = () => {}, frameDistribution = createDistribution()) : TableScene {
   const engine = new Engine(canvas, true, { stencil: false, preserveDrawingBuffer: false, powerPreference: 'low-power' })
   engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 1.5))
   const scene = new Scene(engine)
+  const releaseDecoder = acquireTableTextureDecoder()
+  let modelContainer: AssetContainer | null = null
+  let cardGeometry: Geometry | null = null
+  const quality = createTableQuality()
+  quality.resetWindow(performance.now())
+  let appliedQuality: TableQuality = 'balanced'
   scene.clearColor = Color4.FromHexString('#0b111aff')
   const camera = new FreeCamera('table-camera', new Vector3(0, 14, -12), scene)
   camera.setTarget(new Vector3(0, 0, 0))
@@ -58,13 +77,29 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
     return value
   }
   const wood = material('dark-wood', '#38251e')
-  wood.diffuseTexture = new Texture('/table-art/wood.png', scene)
+  function compressedTexture(target: StandardMaterial, url: string, fallback: string) {
+    let settled = false
+    const fallbackTexture = () => {
+      if (settled || scene.isDisposed) return
+      settled = true
+      clearTimeout(timeout)
+      texture.dispose()
+      target.diffuseTexture = new Texture(fallback, scene)
+    }
+    // A silent worker/network failure must not leave a material pending forever.
+    const timeout = setTimeout(fallbackTexture, 8000)
+    const texture = new Texture(url, scene, false, true, Texture.TRILINEAR_SAMPLINGMODE,
+      () => { settled = true; clearTimeout(timeout) }, fallbackTexture)
+    scene.onDisposeObservable.addOnce(() => clearTimeout(timeout))
+    target.diffuseTexture = texture
+  }
+  compressedTexture(wood, visualManifest.materials.wood.compressed.url, visualManifest.materials.wood.fallback.url)
   const leather = material('blue-leather', '#162732')
   leather.diffuseTexture = new Texture('/textures/stage-panel.jpg', scene)
   const brass = material('aged-brass', '#b59150')
   const edge = material('card-stock', '#b6a17b')
   const back = material('card-back', '#173042')
-  back.diffuseTexture = new Texture('/table-art/card-back.png', scene)
+  compressedTexture(back, visualManifest.materials.back.compressed.url, visualManifest.materials.back.fallback.url)
   const shadow = material('contact-shadow', '#080e14')
   shadow.alpha = 0.5
   const table = CreateBox('table', { width: 25, depth: 14, height: 0.5 }, scene)
@@ -107,7 +142,54 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
   let needsAnchors = true
   const intervals: number[] = []
   let lastFrame = 0
-  const images = new Map<string, HTMLImageElement>()
+  const images = new Map<string, { image: HTMLImageElement; abort: AbortController }>()
+  // The table owns its materials; skip the loader's unused PBR/embedded BRDF.
+  void LoadAssetContainerAsync(visualManifest.models.card.url, scene, {
+    pluginOptions: { gltf: { skipMaterials: true } },
+  }).then(container => {
+    if (disposed) { container.dispose(); return }
+    modelContainer = container
+    const source = container.meshes.find(mesh => mesh instanceof Mesh && mesh.geometry)
+    if (!(source instanceof Mesh) || !source.geometry) return
+    cardGeometry = source.geometry
+    for (const object of objects.values()) {
+      const stock = object.root.getChildMeshes().find(mesh => mesh.name.startsWith('stock-'))
+      if (stock instanceof Mesh) cardGeometry.applyToMesh(stock)
+    }
+  }).catch(() => { /* Procedural card stock preserves identity and interaction. */ })
+  let markerVersion = -1
+  let markerGame = ''
+  const sparks = { damage: material('damage-feedback', '#ffc098'), heal: material('healing-feedback', '#acd8ad'),
+    resource: material('resource-feedback', '#dfc58e') }
+  for (const value of Object.values(sparks)) value.emissiveColor = value.diffuseColor
+  const motions: Array<{ mesh: Mesh; from: Vector3; to: Vector3; start: number; duration: number; arc: number }> = []
+  function applyQuality() {
+    appliedQuality = quality.current()
+    const profile = qualityProfiles[appliedQuality]
+    engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, profile.pixelRatio))
+    shadow.alpha = profile.shadows ? 0.5 : 0
+    qualityChanged(appliedQuality)
+    needsAnchors = true
+  }
+
+  function zonePoint(zone: string | undefined): Vector3 {
+    const points: Record<string, number[]> = {
+      hero_hand: [-1.1, 0.3, -4.2], hero_play_area: [-1, 0.3, -0.55], hero_draw_pile: [-8.8, 0.3, -1.45],
+      hero_discard_pile: [-8.8, 0.3, -3.55], market: [7.5, 0.3, 2], hogwarts_deck: [9.8, 0.3, -1.45],
+      active_villains: [0, 0.3, 2.45], villain_deck: [9.8, 0.3, -3.55], villain_discard: [3, 0.3, 4.6],
+      active_location: [-6.2, 0.3, 2.55], location_discard: [-8, 0.3, 4.6], dark_arts_deck: [-3.75, 0.3, 4.8],
+      dark_arts_discard: [-3.75, 0.3, 2.55],
+    }
+    return Vector3.FromArray(points[zone ?? ''] ?? [0, 0.4, 0])
+  }
+  function cuePoint(cue: TableCue): Vector3 {
+    const object = objects.get(cue.target) ?? (cue.resource === 'control' ? objects.get('current-location') : undefined)
+    return object?.root.position.clone() ?? (cue.position ? new Vector3((cue.position - 2.5) * 3, 0.5, -4.9) : zonePoint(cue.to))
+  }
+  function discardMotion() {
+    for (const motion of motions) motion.mesh.dispose()
+    motions.length = 0
+  }
 
   function faceTexture(card: TableCard) {
     const texture = new DynamicTexture(`face-${card.id}`, { width: 384, height: 512 }, scene, false)
@@ -139,15 +221,21 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
     }
     ctx.fillText(line, 192, y)
     texture.update()
-    const art = card.catalogId ? cardArt[card.catalogId] : undefined
+    const art = card.catalogId ? visualArt(card.catalogId) : undefined
     if (art) {
-      let img = images.get(art.file)
-      if (!img) {
-        img = new Image()
-        img.src = `/table-art/${art.file}`
-        images.set(art.file, img)
+      let cached = images.get(art.file)
+      if (!cached) {
+        cached = { image: new Image(), abort: new AbortController() }
+        cached.image.src = `/table-art/${art.file}`
+      } else images.delete(art.file)
+      images.set(art.file, cached)
+      while (images.size > visualManifest.budgets.decodedImages) {
+        const [key, evicted] = images.entries().next().value!
+        evicted.abort.abort()
+        evicted.image.src = ''
+        images.delete(key)
       }
-      const source = img
+      const source = cached.image
       const paint = () => {
         if (disposed || objects.get(card.id)?.texture !== texture || !source.naturalWidth) return
         const [x, y, width, height] = art.crop ?? [0, 0, source.naturalWidth, source.naturalHeight]
@@ -155,7 +243,7 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
         texture.update()
       }
       if (source.complete) queueMicrotask(paint)
-      else source.addEventListener('load', paint, { once: true })
+      else source.addEventListener('load', paint, { once: true, signal: cached.abort.signal })
     }
     return texture
   }
@@ -163,6 +251,7 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
   function addCard(card: TableCard) {
     const root = new TransformNode(card.id, scene)
     const body = CreateBox(`stock-${card.id}`, { width: 1.6, depth: 2.16, height: 0.045 }, scene)
+    cardGeometry?.applyToMesh(body)
     body.parent = root
     body.material = edge
     const underside = CreateGround(`back-${card.id}`, { width: 1.59, height: 2.15 }, scene)
@@ -241,8 +330,24 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
   function render() {
     if (stopped || disposed || !canvas.clientWidth || !canvas.clientHeight) { lastFrame = 0; return }
     const now = performance.now()
-    if (lastFrame) { intervals.push(now - lastFrame); if (intervals.length > 3600) intervals.shift() }
+    if (lastFrame && appliedQuality === 'basic' && now - lastFrame < 1000 / 30 - 1) return
+    if (lastFrame) {
+      frameDistribution.add(now - lastFrame)
+      intervals.push(now - lastFrame)
+      if (intervals.length > 3600) intervals.shift()
+      quality.frame(now, now - lastFrame)
+      if (quality.current() !== appliedQuality) applyQuality()
+    }
     lastFrame = now
+    for (let index = motions.length - 1; index >= 0; index--) {
+      const motion = motions[index]!
+      const elapsed = Math.min(1, (now - motion.start) / motion.duration)
+      const progress = 1 - (1 - elapsed) ** 3
+      motion.mesh.position.copyFrom(Vector3.Lerp(motion.from, motion.to, progress))
+      motion.mesh.position.y += Math.sin(progress * Math.PI) * motion.arc
+      motion.mesh.visibility = elapsed > 0.8 ? (1 - elapsed) / 0.2 : 1
+      if (elapsed === 1) { motion.mesh.dispose(); motions.splice(index, 1) }
+    }
     scene.render()
     if (needsAnchors) { publishAnchors(); needsAnchors = false }
   }
@@ -251,15 +356,22 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
   return {
     update(game, cards, selectedId, handPage, playPage) {
       selected = selectedId
+      const hand = cards.filter(card => card.zone === 'hand').slice(handPage * 7, handPage * 7 + 7)
+      const played = cards.filter(card => card.zone === 'play').slice(playPage * 4, playPage * 4 + 4)
+      const visible = cards.filter(card => card.zone !== 'hand' && card.zone !== 'play' || hand.includes(card) || played.includes(card))
       for (const [id, object] of objects) {
-        const next = cards.find((card) => card.id === id)
+        const next = visible.find((card) => card.id === id)
         if (!next || JSON.stringify(next) !== JSON.stringify(object.card)) {
           object.root.dispose(false)
           object.face.dispose(false, true)
           objects.delete(id)
         }
       }
-      place(cards, handPage, playPage)
+      place(visible, 0, 0)
+      needsAnchors = true
+      if (markerVersion === game.snapshot.state_version && markerGame === game.game.id) return
+      markerVersion = game.snapshot.state_version
+      markerGame = game.game.id
       for (const marker of markers) marker.dispose()
       markers.length = 0
       const piles = [game.table.draw_pile_count, game.table.discard_pile_count, game.table.hogwarts_deck_count, game.table.villain_deck_count]
@@ -287,18 +399,56 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
       camera.setTarget(new Vector3(0, 0, -0.65))
       needsAnchors = true
     },
-    pause(value) { stopped = value; lastFrame = 0 },
+    pause(value) {
+      stopped = value
+      lastFrame = 0
+      quality.resetWindow(performance.now())
+      if (value) { discardMotion(); engine.stopRenderLoop(render) }
+      else if (!disposed) engine.runRenderLoop(render)
+    },
+    discardMotion,
+    setQuality(value) { quality.select(value, performance.now()); applyQuality() },
+    present(group, reducedMotion) {
+      if (disposed || stopped) return
+      for (const cue of group.cues) {
+        if (motions.length >= 24 || cue.kind === 'phase') continue
+        const movingCard = Boolean(cue.from && cue.to)
+        const particleBudget = reducedMotion ? 0 : qualityProfiles[appliedQuality].particles
+        if (!movingCard && motions.filter(motion => motion.mesh.name.startsWith('effect-')).length >= particleBudget) continue
+        const to = movingCard ? objects.get(cue.target)?.root.position.clone() ?? zonePoint(cue.to) : cuePoint(cue)
+        const from = reducedMotion ? to.clone() : movingCard ? zonePoint(cue.from)
+          : objects.get(cue.source ?? '')?.root.position.clone() ?? new Vector3(-1, 0.5, -3)
+        const mesh = movingCard ? CreateBox(`motion-${group.key}`, { width: 1.5, depth: 2, height: 0.05 }, scene)
+          : CreateSphere(`effect-${group.key}`, { diameter: reducedMotion ? 0.5 : 0.22, segments: 6 }, scene)
+        mesh.material = movingCard ? back : cue.kind === 'damage' || cue.kind === 'stun' ? sparks.damage
+          : cue.kind === 'heal' ? sparks.heal : sparks.resource
+        mesh.isPickable = false
+        mesh.position.copyFrom(from)
+        motions.push({ mesh, from, to, start: performance.now(), duration: reducedMotion ? 120 : movingCard ? 420 : 300,
+          arc: reducedMotion ? 0 : movingCard ? 1.4 : 0.6 })
+      }
+    },
+    resetMeasurements() { intervals.length = 0; frameDistribution.reset() },
     measurements() {
       const sorted = [...intervals].sort((a, b) => a - b)
       return { frames: sorted.length, medianFrameMs: sorted[Math.floor(sorted.length * 0.5)] ?? 0,
-        p95FrameMs: sorted[Math.floor(sorted.length * 0.95)] ?? 0, meshes: scene.meshes.length, textures: scene.textures.length }
+        p95FrameMs: sorted[Math.floor(sorted.length * 0.95)] ?? 0, meshes: scene.meshes.length, textures: scene.textures.length,
+        quality: appliedQuality, compressedMaterials: [wood, back].filter(material => material.diffuseTexture instanceof Texture && material.diffuseTexture.url?.endsWith('.ktx2') && material.diffuseTexture.isReady()).length,
+        loadedCardModel: cardGeometry !== null, decodedImages: images.size, frameDistribution: frameDistribution.read(), estimatedTextureBytes: scene.textures.reduce((bytes, texture) => {
+          const size = texture.getSize()
+          return bytes + size.width * size.height * 4 * (texture instanceof DynamicTexture ? 1 : 4 / 3)
+        }, 0) }
     },
     dispose() {
       disposed = true
+      discardMotion()
+      releaseDecoder()
+      modelContainer?.dispose()
       engine.stopRenderLoop(render)
       scene.dispose()
       engine.dispose()
       objects.clear()
+      for (const cached of images.values()) { cached.abort.abort(); cached.image.src = '' }
       images.clear()
       anchors([])
     },

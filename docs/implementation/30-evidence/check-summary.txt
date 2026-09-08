@@ -1,0 +1,105 @@
+Command: make check
+Observed exit code: 0
+Full log filtered to aggregate results and browser case outcomes.
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.79s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.09s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.02s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.59s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.38s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.75s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.72s
+test result: ok. 95 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 223.37s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+ℹ tests 16
+ℹ pass 16
+ℹ fail 0
+ℹ skipped 0
+ℹ duration_ms 19731.423064
+ Test Files  12 passed (12)
+      Tests  128 passed (128)
+  ✓   1 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 2 players reaches lost through the browser and WebSocket (17.9s)
+  ✓   2 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 2 players reaches won through the browser and WebSocket (55.6s)
+  ✓   3 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 3 players reaches lost through the browser and WebSocket (15.6s)
+  ✓   4 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 3 players reaches won through the browser and WebSocket (51.3s)
+  ✓   5 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 4 players reaches lost through the browser and WebSocket (17.2s)
+  ✓   6 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 4 players reaches won through the browser and WebSocket (1.1m)
+  ✓   7 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 2 players reaches lost through the browser and WebSocket (34.5s)
+  ✓   8 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 2 players reaches won through the browser and WebSocket (1.8m)
+  ✓   9 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 3 players reaches lost through the browser and WebSocket (32.7s)
+  ✓  10 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 3 players reaches won through the browser and WebSocket (2.0m)
+  ✓  11 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 4 players reaches lost through the browser and WebSocket (52.1s)
+  ✓  12 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 4 players reaches won through the browser and WebSocket (2.7m)
+  ✓  13 [mobile-chromium] › e2e/game-expiration.spec.ts:12:1 › expiration clears private data, pending commands and channels in every connected browser (7.0s)
+  ✓  14 [mobile-chromium] › e2e/health-shell.spec.ts:364:1 › a player sees when the authoritative service is ready (798ms)
+  ✓  15 [mobile-chromium] › e2e/health-shell.spec.ts:374:1 › a player can retry when the authoritative service is unavailable (708ms)
+  ✓  16 [mobile-chromium] › e2e/health-shell.spec.ts:389:1 › a guest creates a private room and becomes its host (1.1s)
+  ✓  17 [mobile-chromium] › e2e/health-shell.spec.ts:405:1 › a participant revokes the current session and the browser removes private state (1.6s)
+  ✓  18 [mobile-chromium] › e2e/health-shell.spec.ts:430:1 › a guest joins with an available hero and keeps the same position after reload (3.3s)
+  ✓  19 [mobile-chromium] › e2e/health-shell.spec.ts:467:1 › a participant explicitly replaces one of two sessions when recovering on a third device (5.7s)
+  ✓  20 [mobile-chromium] › e2e/health-shell.spec.ts:564:1 › recovery rotation preserves sessions and replaces direct and assisted credentials (6.3s)
+  ✓  21 [mobile-chromium] › e2e/health-shell.spec.ts:661:1 › a player replays a missed event and falls back to Snapshot within recovery SLOs (7.0s)
+  ✓  22 [mobile-chromium] › e2e/health-shell.spec.ts:889:1 › the current interface reflows at an effective 200 percent zoom (1.0s)
+  ✓  23 [mobile-chromium] › e2e/health-shell.spec.ts:909:1 › a targeted card stays in the official hand until its command is accepted (1.1s)
+  ✓  24 [mobile-chromium] › e2e/health-shell.spec.ts:974:1 › a stale command resynchronizes before the player can decide again (1.1s)
+  ✓  25 [mobile-chromium] › e2e/security-boundaries.spec.ts:3:1 › a modified browser cannot bypass CSRF, strict schemas or server session identity (1.4s)
+  ✓  26 [mobile-chromium] › e2e/security-boundaries.spec.ts:56:1 › recovery document enforces CSP and clears its credential before application requests (798ms)
+  ✓  27 [mobile-chromium] › e2e/security-boundaries.spec.ts:81:1 › recovery tells the player when to retry after the real credential budget is exhausted (2.8s)
+  ✓  28 [mobile-chromium] › e2e/security-boundaries.spec.ts:106:1 › versioned visual resources cache independently from the recovery document (235ms)
+  ✓  29 [mobile-chromium] › e2e/table3d.spec.ts:9:1 › HTTP N+2 precedes WebSocket N+1 while both confirmed plays animate once (24.8s)
+  ✓  30 [mobile-chromium] › e2e/table3d.spec.ts:91:1 › prototype completes selection, target, damage, acquisition and a turn (17.1s)
+  ✓  31 [mobile-chromium] › e2e/table3d.spec.ts:142:1 › long hands remain inspectable and rotation cancels a local gesture (13.5s)
+  ✓  32 [mobile-chromium] › e2e/table3d.spec.ts:173:1 › keyboard, invalid drops and pointer cancellation preserve explicit decisions (13.1s)
+  ✓  33 [mobile-chromium] › e2e/table3d.spec.ts:203:1 › seven played cards remain individually reachable by touch (23.2s)
+  ✓  34 [mobile-chromium] › e2e/table3d.spec.ts:224:1 › real pending, remote, stale and rejected commands require a fresh decision (50.7s)
+  ✓  35 [mobile-chromium] › e2e/table3d.spec.ts:328:3 › 2 participants finish a real Game 1 turn through the 3D table (53.9s)
+  ✓  36 [mobile-chromium] › e2e/table3d.spec.ts:328:3 › 3 participants finish a real Game 1 turn through the 3D table (46.7s)
+  ✓  37 [mobile-chromium] › e2e/table3d.spec.ts:328:3 › 4 participants finish a real Game 1 turn through the 3D table (1.1m)
+  ✓  38 [mobile-chromium] › e2e/table3d.spec.ts:406:1 › basic reduced motion preserves separate damage, healing, health trail and gesture-gated audio (12.8s)
+  ✓  39 [mobile-chromium] › e2e/table3d.spec.ts:438:1 › failed texture worker uses image fallback and leaves cards selectable (6.3s)
+  ✓  40 [mobile-chromium] › e2e/table3d.spec.ts:453:1 › visibility signal pauses GPU updates and audio until the newest state is visible (8.7s)
+  ✓  41 [mobile-chromium] › e2e/table3d.spec.ts:485:1 › accessible mode rejects late texture work and releases the visual animation loop (4.9s)
+  ✓  42 [table-webkit] › e2e/table3d.spec.ts:9:1 › HTTP N+2 precedes WebSocket N+1 while both confirmed plays animate once (17.3s)
+  ✓  43 [table-webkit] › e2e/table3d.spec.ts:91:1 › prototype completes selection, target, damage, acquisition and a turn (15.3s)
+  ✓  44 [table-webkit] › e2e/table3d.spec.ts:142:1 › long hands remain inspectable and rotation cancels a local gesture (9.0s)
+  ✓  45 [table-webkit] › e2e/table3d.spec.ts:173:1 › keyboard, invalid drops and pointer cancellation preserve explicit decisions (4.7s)
+  ✓  46 [table-webkit] › e2e/table3d.spec.ts:203:1 › seven played cards remain individually reachable by touch (13.5s)
+  ✓  47 [table-webkit] › e2e/table3d.spec.ts:224:1 › real pending, remote, stale and rejected commands require a fresh decision (36.2s)
+  ✓  48 [table-webkit] › e2e/table3d.spec.ts:328:3 › 2 participants finish a real Game 1 turn through the 3D table (38.4s)
+  ✓  49 [table-webkit] › e2e/table3d.spec.ts:328:3 › 3 participants finish a real Game 1 turn through the 3D table (42.2s)
+  ✓  50 [table-webkit] › e2e/table3d.spec.ts:328:3 › 4 participants finish a real Game 1 turn through the 3D table (58.2s)
+  ✓  51 [table-webkit] › e2e/table3d.spec.ts:406:1 › basic reduced motion preserves separate damage, healing, health trail and gesture-gated audio (5.6s)
+  ✓  52 [table-webkit] › e2e/table3d.spec.ts:438:1 › failed texture worker uses image fallback and leaves cards selectable (4.2s)
+  ✓  53 [table-webkit] › e2e/table3d.spec.ts:453:1 › visibility signal pauses GPU updates and audio until the newest state is visible (5.3s)
+  ✓  54 [table-webkit] › e2e/table3d.spec.ts:485:1 › accessible mode rejects late texture work and releases the visual animation loop (5.0s)
+  ✓  55 [table-firefox] › e2e/table3d.spec.ts:9:1 › HTTP N+2 precedes WebSocket N+1 while both confirmed plays animate once (19.9s)
+  ✓  56 [table-firefox] › e2e/table3d.spec.ts:91:1 › prototype completes selection, target, damage, acquisition and a turn (6.2s)
+  ✓  57 [table-firefox] › e2e/table3d.spec.ts:142:1 › long hands remain inspectable and rotation cancels a local gesture (6.4s)
+  ✓  58 [table-firefox] › e2e/table3d.spec.ts:173:1 › keyboard, invalid drops and pointer cancellation preserve explicit decisions (3.4s)
+  ✓  59 [table-firefox] › e2e/table3d.spec.ts:203:1 › seven played cards remain individually reachable by touch (8.3s)
+  ✓  60 [table-firefox] › e2e/table3d.spec.ts:224:1 › real pending, remote, stale and rejected commands require a fresh decision (34.3s)
+  ✓  61 [table-firefox] › e2e/table3d.spec.ts:328:3 › 2 participants finish a real Game 1 turn through the 3D table (29.3s)
+  ✓  62 [table-firefox] › e2e/table3d.spec.ts:328:3 › 3 participants finish a real Game 1 turn through the 3D table (31.4s)
+  ✓  63 [table-firefox] › e2e/table3d.spec.ts:328:3 › 4 participants finish a real Game 1 turn through the 3D table (33.6s)
+  ✓  64 [table-firefox] › e2e/table3d.spec.ts:406:1 › basic reduced motion preserves separate damage, healing, health trail and gesture-gated audio (6.4s)
+  ✓  65 [table-firefox] › e2e/table3d.spec.ts:438:1 › failed texture worker uses image fallback and leaves cards selectable (7.6s)
+  ✓  66 [table-firefox] › e2e/table3d.spec.ts:453:1 › visibility signal pauses GPU updates and audio until the newest state is visible (17.9s)
+  ✓  67 [table-firefox] › e2e/table3d.spec.ts:485:1 › accessible mode rejects late texture work and releases the visual animation loop (6.9s)
+  67 passed (26.7m)

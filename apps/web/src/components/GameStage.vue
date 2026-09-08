@@ -386,6 +386,9 @@ function acquireCard(cardId: string, destination: CardAcquisitionDestination): v
         {{ game.game.status === 'won' ? 'Vitória da equipe' : game.game.status === 'lost' ? 'Derrota da equipe' : game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
       </h2>
         <GameTable3D
+          :take-presentation="gameSync.takePresentation"
+          :presentation-epoch="gameSync.presentationEpoch"
+          @discard-presentation="gameSync.discardPresentation"
           :presence="gameSync.participantPresence"
           :decision-error="['failed', 'stale', 'resynced'].includes(gameCommand.status) ? commandError : null"
         :commands-disabled="tableCommandsDisabled || game.turn.phase !== 'hero_actions' || game.choice.status === 'pending'"

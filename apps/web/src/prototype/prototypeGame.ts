@@ -2,7 +2,7 @@ import type { GameProjectionResponse } from '../contracts/identity-access.genera
 
 /** Fictional demonstration data. Never imported by the live game's entry point. */
 export function prototypeGame(): GameProjectionResponse {
-  const participants: GameProjectionResponse['participants'] = ['Harry', 'Hermione', 'Ron', 'Neville'].map((name, index) => ({
+  const participants: GameProjectionResponse['participants'] = ['Harry', 'Hermione', 'Rony', 'Neville'].map((name, index) => ({
     position: index + 1, display_name: ['Minerva', 'Luna', 'Cedrico', 'Ginny'][index]!,
     hero: { id: (['harry', 'hermione', 'ron', 'neville'] as const)[index]!, name },
     resources: { attack: 0, influence: 0, health: 10 - index },

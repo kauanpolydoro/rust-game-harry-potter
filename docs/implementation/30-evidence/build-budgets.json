@@ -1,0 +1,16 @@
+{
+  "measurements": {
+    "shellJsGzipBytes": 82939,
+    "cssGzipBytes": 8928,
+    "shellTransferBytes": 409271,
+    "additionalJsGzipBytes": 697689,
+    "completeBuildTransferBytes": 5017176
+  },
+  "limits": {
+    "shellJsGzipBytes": 204800,
+    "cssGzipBytes": 51200,
+    "shellTransferBytes": 1048576,
+    "additionalJsGzipBytes": 819200,
+    "completeBuildTransferBytes": 8388608
+  }
+}

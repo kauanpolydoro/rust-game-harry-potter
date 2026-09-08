@@ -72,7 +72,7 @@ impl HeroId {
             Self::Harry => "Harry",
             Self::Hermione => "Hermione",
             Self::Neville => "Neville",
-            Self::Ron => "Ron",
+            Self::Ron => "Rony",
         }
     }
 }

@@ -350,6 +350,35 @@ describe('official game synchronization', () => {
     expect(roomAccess.game?.game.expires_at).toBe('2026-09-10T12:00:00Z')
   })
 
+  it('keeps HTTP N+2 when WebSocket N+1 arrives without requesting recovery', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    socket?.receive(synchronizedMessage(roomAccess.game))
+
+    roomAccess.advanceGameProjection(projection(2))
+    sync.connect(roomAccess.game!)
+    socket?.receive(eventBatch(0, 1))
+    socket?.receive(eventBatch(1, 2))
+    socket?.receive(eventBatch(0, 2))
+
+    expect(roomAccess.game?.snapshot.cursor).toBe(2)
+    expect(roomAccess.game?.turn.number).toBe(3)
+    expect(sync.cursor).toBe(2)
+    expect(sync.status).toBe('connected')
+    vi.advanceTimersByTime(250)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    const groups = []
+    for (let group = sync.takePresentation(250); group; group = sync.takePresentation(250)) groups.push(group)
+    expect(groups.map(group => group.key)).toEqual([
+      `${roomAccess.game!.game.id}:1:2`, `${roomAccess.game!.game.id}:1:3`, `${roomAccess.game!.game.id}:1:4`,
+      `${roomAccess.game!.game.id}:2:2`, `${roomAccess.game!.game.id}:2:3`, `${roomAccess.game!.game.id}:2:4`,
+    ])
+  })
+
   it('schedules a full snapshot without an immediate loop when a batch has a cursor gap', () => {
     const roomAccess = useRoomAccessStore()
     roomAccess.game = projection()
@@ -369,6 +398,46 @@ describe('official game synchronization', () => {
     expect(FakeWebSocket.instances[1]?.url).toContain('snapshot_version=0')
     expect(roomAccess.game?.snapshot.cursor).toBe(0)
     expect(sync.commandsFrozen).toBe(true)
+  })
+
+  it('discards queued and hidden events on graphic recovery without opening a session or sending commands', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    socket?.receive(eventBatch(0, 1))
+    const epoch = sync.presentationEpoch
+    sync.discardPresentation()
+    expect(sync.presentationEpoch).toBeGreaterThan(epoch)
+    expect(sync.takePresentation(0)).toBeNull()
+    socket?.receive(eventBatch(0, 1))
+    expect(sync.takePresentation(0)).toBeNull()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    socket?.receive(eventBatch(1, 2))
+    expect(roomAccess.game?.snapshot.cursor).toBe(2)
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    socket?.receive(eventBatch(0, 2))
+    expect(sync.takePresentation(0)).toBeNull()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(sync.status).toBe('connected')
+  })
+
+  it('retires late visual events already covered by HTTP when graphics reset before the socket advances', () => {
+    const roomAccess = useRoomAccessStore()
+    roomAccess.game = projection()
+    const sync = useGameSyncStore()
+    sync.connect(roomAccess.game)
+    const socket = FakeWebSocket.instances[0]
+    socket?.open()
+    roomAccess.advanceGameProjection(projection(2))
+    sync.discardPresentation()
+    socket?.receive(eventBatch(0, 1))
+    socket?.receive(eventBatch(1, 2))
+    expect(sync.takePresentation(0)).toBeNull()
+    expect(roomAccess.game?.snapshot.cursor).toBe(2)
+    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
   it('rejects event payload fields outside the public allowlist without a tight loop', () => {

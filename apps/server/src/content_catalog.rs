@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, LazyLock},
+};
 
 use game_content::{
     Condition, ContentManifest, Die, Effect, EffectChoiceAudience as ContentEffectChoiceAudience,
@@ -560,9 +563,21 @@ async fn verify_immutable_manifest(
 }
 
 fn entry_name(entry: &ManifestEntry) -> String {
+    // Editorial localization is independent from the immutable rules/content digest.
+    static PORTUGUESE: LazyLock<BTreeMap<String, BTreeMap<String, String>>> = LazyLock::new(|| {
+        serde_json::from_str(include_str!(
+            "../../../content/locales/game-one.pt-BR.v1.json"
+        ))
+        .expect("shipped Game 1 localization must be valid JSON")
+    });
+    let localized = PORTUGUESE
+        .get(entry.catalog_id.as_str())
+        .filter(|names| names.get("en") == entry.names.get("en"))
+        .and_then(|names| names.get("pt-BR"));
     entry
         .names
         .get("pt-BR")
+        .or(localized)
         .or_else(|| entry.names.get("en"))
         .or_else(|| entry.names.values().next())
         .cloned()
@@ -817,6 +832,43 @@ const fn effect_game_outcome(outcome: GameOutcome) -> game_domain::EffectGameOut
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn game_one_localization_preserves_the_rules_manifest_and_labels_choices() {
+        let manifest = super::game_one_manifest();
+        let digest = manifest.digest.clone();
+        let catalog = super::ContentCatalog::new(vec![manifest]);
+        assert_eq!(
+            catalog.entity_name(&digest, "starter:004").as_deref(),
+            Some("Edwiges")
+        );
+        assert_eq!(
+            catalog.entity_name(&digest, "location:002").as_deref(),
+            Some("Espelho de Ojesed")
+        );
+        assert_eq!(
+            catalog
+                .rule_name(&digest, "rule:g1-hogwarts-003")
+                .as_deref(),
+            Some("Essência de Ditamno")
+        );
+        assert_eq!(
+            catalog.entity_name(&digest, "adventure:001").as_deref(),
+            Some("Jogo 1")
+        );
+        assert_eq!(catalog.manifests[0].digest, digest);
+        assert_eq!(
+            catalog.manifests[0]
+                .entries
+                .iter()
+                .find(|entry| entry.catalog_id.as_str() == "starter:004")
+                .unwrap()
+                .names
+                .get("en")
+                .map(String::as_str),
+            Some("Hedwig")
+        );
+    }
+
     #[test]
     fn real_reparo_choice_explains_each_option_at_its_continuation_cursor() {
         let manifest = super::game_one_manifest();

@@ -14,7 +14,11 @@ export class ObservedPlayer {
       }
     })
     page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => {
-      const message: unknown = JSON.parse(String(payload))
+      // Firefox's Juggler observer exposes text frames as byte strings even
+      // though the browser's MessageEvent.data has already decoded UTF-8.
+      const text = typeof payload === 'string' && page.context().browser()?.browserType().name() === 'firefox'
+        ? Buffer.from(payload, 'latin1').toString('utf8') : String(payload)
+      const message: unknown = JSON.parse(text)
       if (message && typeof message === 'object' && 'type' in message && message.type === 'events' && 'projection' in message) {
         expect(isRealtimeEventBatchMessage(message), JSON.stringify(message)).toBe(true)
         this.eventBatches += 1
@@ -52,7 +56,7 @@ export async function startTable(browser: Browser, host: ObservedPlayer, count: 
   await host.page.getByRole('button', { name: 'Confirmar Herói' }).click()
   await host.page.getByRole('button', { name: 'Estou pronto' }).click()
   await expect(host.page.getByRole('button', { name: 'Atualizar estado da sala', exact: true })).toBeEnabled()
-  for (const hero of ['Hermione', 'Ron', 'Neville'].slice(0, count - 1)) {
+  for (const hero of ['Hermione', 'Rony', 'Neville'].slice(0, count - 1)) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true })
     const player = new ObservedPlayer(await context.newPage())
     players.push(player)

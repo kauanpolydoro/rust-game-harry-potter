@@ -1,0 +1,182 @@
+{
+  "hogwarts-card:001": {
+    "en": "Albus Dumbledore",
+    "pt-BR": "Alvo Dumbledore"
+  },
+  "hogwarts-card:002": {
+    "en": "Descendo",
+    "pt-BR": "Descendo"
+  },
+  "hogwarts-card:003": {
+    "en": "Essence of Dittany",
+    "pt-BR": "Essência de Ditamno"
+  },
+  "hogwarts-card:004": {
+    "en": "Golden Snitch",
+    "pt-BR": "Pomo de Ouro"
+  },
+  "hogwarts-card:005": {
+    "en": "Incendio",
+    "pt-BR": "Incendio"
+  },
+  "hogwarts-card:006": {
+    "en": "Lumos",
+    "pt-BR": "Lumos"
+  },
+  "hogwarts-card:007": {
+    "en": "Oliver Wood",
+    "pt-BR": "Olívio Wood"
+  },
+  "hogwarts-card:008": {
+    "en": "Quidditch Gear",
+    "pt-BR": "Equipamento de Quadribol"
+  },
+  "hogwarts-card:009": {
+    "en": "Reparo",
+    "pt-BR": "Reparo"
+  },
+  "hogwarts-card:010": {
+    "en": "Rubeus Hagrid",
+    "pt-BR": "Rúbeo Hagrid"
+  },
+  "hogwarts-card:011": {
+    "en": "Sorting Hat",
+    "pt-BR": "Chapéu Seletor"
+  },
+  "hogwarts-card:013": {
+    "en": "Wingardium Leviosa",
+    "pt-BR": "Wingardium Leviosa"
+  },
+  "dark-arts:001": {
+    "en": "Expulso",
+    "pt-BR": "Expulso"
+  },
+  "dark-arts:002": {
+    "en": "Flipendo",
+    "pt-BR": "Flipendo"
+  },
+  "dark-arts:003": {
+    "en": "He Who Must Not Be Named",
+    "pt-BR": "Aquele-Que-Não-Deve-Ser-Nomeado"
+  },
+  "dark-arts:004": {
+    "en": "Petrification",
+    "pt-BR": "Petrificação"
+  },
+  "villain:001": {
+    "en": "Crabbe & Goyle",
+    "pt-BR": "Crabbe e Goyle"
+  },
+  "villain:002": {
+    "en": "Draco Malfoy",
+    "pt-BR": "Draco Malfoy"
+  },
+  "villain:003": {
+    "en": "Quirinus Quirrell",
+    "pt-BR": "Quirinus Quirrell"
+  },
+  "location:001": {
+    "en": "Diagon Alley",
+    "pt-BR": "Beco Diagonal"
+  },
+  "location:002": {
+    "en": "Mirror of Erised",
+    "pt-BR": "Espelho de Ojesed"
+  },
+  "starter:001": {
+    "en": "Alohomora",
+    "pt-BR": "Alohomora"
+  },
+  "starter:002": {
+    "en": "Invisibility Cloak",
+    "pt-BR": "Capa da Invisibilidade"
+  },
+  "starter:003": {
+    "en": "Firebolt",
+    "pt-BR": "Firebolt"
+  },
+  "starter:004": {
+    "en": "Hedwig",
+    "pt-BR": "Edwiges"
+  },
+  "starter:005": {
+    "en": "Every Flavour Beans",
+    "pt-BR": "Feijõezinhos de Todos os Sabores"
+  },
+  "starter:006": {
+    "en": "Cleansweep 11",
+    "pt-BR": "Cleansweep 11"
+  },
+  "starter:007": {
+    "en": "Pigwidgeon",
+    "pt-BR": "Pichitinho"
+  },
+  "starter:008": {
+    "en": "Time-Turner",
+    "pt-BR": "Vira-Tempo"
+  },
+  "starter:009": {
+    "en": "The Tales of Beedle the Bard",
+    "pt-BR": "Os Contos de Beedle, o Bardo"
+  },
+  "starter:010": {
+    "en": "Crookshanks",
+    "pt-BR": "Bichento"
+  },
+  "starter:011": {
+    "en": "Remembrall",
+    "pt-BR": "Lembrol"
+  },
+  "starter:012": {
+    "en": "Mandrake",
+    "pt-BR": "Mandrágora"
+  },
+  "starter:013": {
+    "en": "Trevor",
+    "pt-BR": "Trevor"
+  },
+  "hero:001": {
+    "en": "Harry - Game 1",
+    "pt-BR": "Harry - Jogo 1"
+  },
+  "hero:004": {
+    "en": "Hermione - Game 1",
+    "pt-BR": "Hermione - Jogo 1"
+  },
+  "hero:007": {
+    "en": "Neville - Game 1",
+    "pt-BR": "Neville - Jogo 1"
+  },
+  "hero:010": {
+    "en": "Ron - Game 1",
+    "pt-BR": "Rony - Jogo 1"
+  },
+  "turn-order:001": {
+    "en": "Turn Order 1",
+    "pt-BR": "Ordem de Turno 1"
+  },
+  "turn-order:002": {
+    "en": "Turn Order 2",
+    "pt-BR": "Ordem de Turno 2"
+  },
+  "turn-order:003": {
+    "en": "Turn Order 3",
+    "pt-BR": "Ordem de Turno 3"
+  },
+  "turn-order:004": {
+    "en": "Turn Order 4",
+    "pt-BR": "Ordem de Turno 4"
+  },
+  "catalog:game-one-v1": {
+    "en": "Game 1 Catalog",
+    "pt-BR": "Catálogo do Jogo 1"
+  },
+  "ruleset:game-one-v1": {
+    "en": "Game 1 Rules",
+    "pt-BR": "Regras do Jogo 1"
+  },
+  "adventure:001": {
+    "en": "Game 1",
+    "pt-BR": "Jogo 1"
+  }
+}

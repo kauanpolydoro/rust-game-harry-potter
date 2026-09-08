@@ -73,9 +73,9 @@ for (const game of ['one', 'two'] as const) {
         const commands: unknown[] = []
         try {
           if (count === 2 && outcome === 'lost') {
-            await page.screenshot({ path: testInfo.outputPath(`game-${game}-mobile.png`), fullPage: true })
+            await page.screenshot({ path: testInfo.outputPath(`game-${game}-mobile.png`), fullPage: true, scale: 'css' })
             await page.setViewportSize({ width: 1440, height: 1000 })
-            await page.screenshot({ path: testInfo.outputPath(`game-${game}-desktop.png`), fullPage: true })
+            await page.screenshot({ path: testInfo.outputPath(`game-${game}-desktop.png`), fullPage: true, scale: 'css' })
             await page.setViewportSize({ width: 393, height: 851 })
           }
           for (let command = 0; command < 600 && host.current().game.status === 'in_progress'; command += 1) {

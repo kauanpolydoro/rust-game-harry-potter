@@ -6,6 +6,12 @@
 .table-experience button:disabled { opacity: .55; cursor: default; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 12px; font-size: 14px; }
 .table-toolbar button { padding: 6px 12px; }
+.table-toolbar > span:first-child { margin-right: auto; }
+.table-settings summary { min-height: 44px; min-width: 44px; padding: 12px 8px; cursor: pointer; }
+.table-settings-content { position: fixed; z-index: 6; inset: 100px 12px auto auto; width: min(340px, calc(100% - 24px)); max-height: calc(100dvh - 156px); overflow-y: auto; padding: 16px; background: var(--ink-raised); border: 1px solid var(--brass); border-radius: 8px; }
+.table-settings-content label { display: grid; gap: 8px; margin-bottom: 16px; }
+.table-settings-content select, .table-settings-content input { width: 100%; }
+.table-settings-content p { font-size: 13px; line-height: 1.5; color: var(--chalk-muted); }
 .play-pagination { display: flex; align-items: center; gap: 4px; font-size: 12px; }
 .table-phase { display: block; color: var(--chalk-muted); font-size: 11px; }
 .hero-strip { display: flex; gap: 8px; padding: 4px 12px; }
@@ -13,7 +19,8 @@
 .hero-medallion--active { outline: 1px solid var(--brass); }
 .hero-medallion small { display: block; color: var(--chalk-muted); font-size: 11px; }
 .hero-medallion b { font-weight: 650; }
-.hero-identity { min-width: 0; }
+.hero-identity { min-width: 0; flex: 1; }
+.hero-identity > b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hero-identity > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hero-identity > .hero-stunned { color: #ffc098; font-weight: 650; }
 .hero-portrait { display: block; flex-shrink: 0; width: 34px; height: 36px; border-radius: 4px; background-image: url('/table-art/heroes.jpg'); background-size: 255px 107.5px; }
@@ -21,7 +28,25 @@
 .hero-portrait--ron { background-position: -112px -11px; }
 .hero-portrait--hermione { background-position: -151px -51px; }
 .hero-portrait--neville { background-position: -215px -10px; }
-.hero-vitals { margin-left: auto; }
+.hero-vitals { margin-left: auto; flex-shrink: 0; }
+.hero-vitals small { display: flex; flex-wrap: wrap; column-gap: 6px; }
+.hero-vitals small > span { white-space: nowrap; }
+@media (max-width: 900px) { .hero-vitals small { display: block; } .hero-vitals small > span { display: block; } }
+.hero-medallion { position: relative; }
+.hero-feedback { position: absolute; z-index: 2; inset: 0 4px auto auto; display: flex; flex-wrap: wrap; gap: 4px; pointer-events: none; }
+.health-meter { display: block; position: relative; height: 3px; margin: 3px 0; background: #09131d; overflow: hidden; }
+.health-meter > span { position: absolute; inset: 0; transform-origin: left; }
+.health-meter__trail { background: #ffc098; transition: transform 650ms cubic-bezier(.16,1,.3,1); }
+.health-meter__current { background: #acd8ad; }
+.board-feedback { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.table-experience .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.table-effect { display: inline-block; color: #f4f0e7; background: #10202ef5; border-radius: 3px; padding: 4px 7px; font: 650 13px/1.2 Inter, sans-serif; animation: table-feedback 1100ms cubic-bezier(.16,1,.3,1) both; }
+.board-feedback .table-effect { position: absolute; translate: -50% -50%; }
+.table-effect--damage, .table-effect--stun, .table-effect--lost, .table-effect--location_lost { color: #ffc098; }
+.table-effect--heal, .table-effect--won, .table-effect--villain_defeated { color: #acd8ad; }
+@keyframes table-feedback { from { transform: translateY(8px); opacity: 1; } 70% { transform: translateY(-10px); opacity: 1; } to { transform: translateY(-14px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .table-effect { animation: table-feedback-reduced 1100ms linear both; } .health-meter__trail { transition-duration: 100ms; } }
+@keyframes table-feedback-reduced { from, 85% { opacity: 1; } to { opacity: 0; } }
 .hero-presence { width: 6px; height: 6px; flex-shrink: 0; border: 1px solid var(--chalk-muted); border-radius: 50%; }
 .hero-presence--online { background: #acd8ad; border-color: #acd8ad; }
 .hero-presence--reconnecting { background: #e7cd96; border-radius: 0; }
@@ -93,3 +118,6 @@
   .shell--game:has(.table-canvas) .game-information, .shell--game:has(.table-canvas) .game-history, .shell--game:has(.table-canvas) .game-management { top: 36px; }
   .shell--game:has(.table-canvas) .effect-choice { position: relative; inset: auto; width: calc(100% - 24px); margin: 12px; }
 }
+
+.health-meter > .health-meter__damage { right: auto; background: #ffc098; animation: health-loss 900ms ease-out both; }
+@keyframes health-loss { 0%, 20% { opacity: 1; } 100% { opacity: 0; } }

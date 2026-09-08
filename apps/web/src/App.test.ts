@@ -1758,8 +1758,8 @@ describe('application shell', () => {
 
     render(App, { global: { plugins: [createPinia()] } })
 
-    expect(await screen.findAllByRole('checkbox')).toHaveLength(3)
-    const choiceGroup = screen.getByRole('group', { name: 'Selecione de 1 a 2 opções' })
+    const choiceGroup = await screen.findByRole('group', { name: 'Selecione de 1 a 2 opções' })
+    expect(within(choiceGroup).getAllByRole('checkbox')).toHaveLength(3)
     expect(choiceGroup).toHaveAccessibleDescription(
       'Luna precisa escolher 1 a 2 entre as opções elegíveis. Causa oficial rule:functional',
     )
@@ -1968,7 +1968,8 @@ describe('application shell', () => {
 
     render(App, { global: { plugins: [createPinia()] } })
 
-    expect(await screen.findAllByRole('checkbox')).toHaveLength(3)
+    const choiceGroup = await screen.findByRole('group', { name: 'Selecione até 1 opção' })
+    expect(within(choiceGroup).getAllByRole('checkbox')).toHaveLength(3)
     const firstOption = screen.getByRole('checkbox', { name: 'Minerva' })
     const confirmation = screen.getByRole('button', { name: 'Confirmar escolha' })
     expect(confirmation).toBeEnabled()
@@ -2982,7 +2983,7 @@ describe('application shell', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Atacar Draco com 2' }))
     await screen.findByText('Ação não aceita')
-    await fireEvent.change(screen.getByRole('combobox', { name: 'Destino de Nimbus 2000' }), { target: { value: 'draw_pile' } })
+    await fireEvent.update(screen.getByRole('combobox', { name: 'Destino de Nimbus 2000' }), 'draw_pile')
     await fireEvent.click(
       screen.getByRole('button', { name: 'Adquirir Nimbus 2000 por 2 de Influência' }),
     )

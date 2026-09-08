@@ -12,6 +12,7 @@ import {
   type RealtimePresenceMessage,
 } from '../contracts/identity-access.generated'
 import { useRoomAccessStore } from './roomAccess'
+import { createTableTimeline } from '../presentation/tableTimeline'
 
 const realtimeSubprotocol = 'hogwarts.realtime.v2'
 const baseReconnectDelayMilliseconds = 500
@@ -398,9 +399,19 @@ export const useGameSyncStore = defineStore('gameSync', () => {
   const requiredParticipantPosition = ref<number | null>(null)
   const gameBlocked = ref(false)
   const animationCancellations = new Set<() => void>()
+  const timeline = createTableTimeline()
+  const presentationEpoch = ref(0)
   const commandsFrozen = computed(() => status.value !== 'connected')
 
+  function discardPresentation(): void {
+    const current = roomAccess.game
+    const confirmedCursor = current?.game.id === currentGameId.value ? current.snapshot.cursor : 0
+    timeline.reset(currentGameId.value ?? '', Math.max(cursor.value, confirmedCursor))
+    presentationEpoch.value++
+  }
+
   function discardAnimations(): void {
+    discardPresentation()
     const cancellations = [...animationCancellations]
     animationCancellations.clear()
     for (const cancel of cancellations) {
@@ -451,6 +462,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       participantPresence.value = {}
       requiredParticipantPosition.value = null
       gameBlocked.value = false
+      discardPresentation()
     } else {
       cursor.value = Math.max(cursor.value, game.snapshot.cursor)
       if (cursor.value === game.snapshot.cursor) {
@@ -510,6 +522,7 @@ export const useGameSyncStore = defineStore('gameSync', () => {
       digest.value = message.projection.snapshot.digest
       snapshotVersion.value = message.projection.snapshot.snapshot_version
       roomAccess.replaceGameProjection(message.projection)
+      discardPresentation()
       connection.markSynchronized()
       return
     }
@@ -534,7 +547,6 @@ export const useGameSyncStore = defineStore('gameSync', () => {
         message.cursor !== message.projection.snapshot.cursor ||
         message.cursor !== message.projection.snapshot.sequence ||
         message.projection.snapshot.snapshot_version !== snapshotVersion.value ||
-        message.projection.snapshot.state_version < current.snapshot.state_version ||
         !projectionHasCanonicalCursor(message.projection) ||
         message.from_cursor > cursor.value ||
         !eventBatchContinuesFrom(message, cursor.value)
@@ -543,12 +555,15 @@ export const useGameSyncStore = defineStore('gameSync', () => {
         return
       }
       if (message.cursor <= cursor.value) {
+        if (!document.hidden) timeline.append(current.game.id, message.events, performance.now())
         return
       }
       cursor.value = message.cursor
       digest.value = message.projection.snapshot.digest
       snapshotVersion.value = message.projection.snapshot.snapshot_version
       roomAccess.advanceGameProjection(message.projection)
+      if (document.hidden) discardPresentation()
+      else timeline.append(current.game.id, message.events, performance.now())
       connection.markSynchronized()
       return
     }
@@ -588,6 +603,9 @@ export const useGameSyncStore = defineStore('gameSync', () => {
 
   return {
     commandsFrozen,
+    discardPresentation,
+    presentationEpoch,
+    takePresentation: (now: number) => timeline.take(now),
     connect,
     cursor,
     disconnect,

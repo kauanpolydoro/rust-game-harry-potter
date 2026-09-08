@@ -1,0 +1,94 @@
+{
+  "verifiedAt": "2026-09-08T16:58:48.751958+00:00",
+  "command": "make check",
+  "exitCode": 0,
+  "baseCommit": "34a32a1",
+  "checks": [
+    "Rust formatting",
+    "Clippy with warnings denied",
+    "Rust workspace tests",
+    "Module boundaries",
+    "Visual manifest consistency",
+    "Generated contracts",
+    "Frontend lint",
+    "Frontend types",
+    "Script tests",
+    "Frontend unit tests",
+    "Production build",
+    "Build transfer budgets",
+    "Browser integration tests",
+    "Secret scan"
+  ],
+  "rust": {
+    "passed": 368,
+    "failed": 0,
+    "ignored": 2
+  },
+  "separateLoadProfiles": [
+    {
+      "test": "lifecycle::lifecycle_profile_measures_detection_and_purge_for_one_hundred_games",
+      "reason": "100-game lifecycle SLO profile; run with make check-lifecycle-profile"
+    },
+    {
+      "test": "reference_reconnect_profile_meets_replay_and_snapshot_slos",
+      "reason": "reference load profile; run make check-reconnect-profile"
+    }
+  ],
+  "scripts": {
+    "passed": 16,
+    "failed": 0
+  },
+  "frontendUnit": {
+    "files": 12,
+    "passed": 128,
+    "failed": 0
+  },
+  "browser": {
+    "passed": 67,
+    "failed": 0,
+    "retries": 0,
+    "duration": "26.7m",
+    "projects": {
+      "mobile-chromium": 41,
+      "table-webkit": 13,
+      "table-firefox": 13
+    }
+  },
+  "targetedAudioRegression": {
+    "passed": 6,
+    "failed": 0,
+    "projects": [
+      "mobile-chromium",
+      "table-webkit",
+      "table-firefox"
+    ]
+  },
+  "environment": {
+    "host": "Shared Linux VPS with software rendering",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "line-tables-only",
+    "CARGO_PROFILE_TEST_DEBUG": "line-tables-only",
+    "RUST_TEST_THREADS": "4",
+    "E2E_FRONTEND_PORT": "4183",
+    "E2E_BACKEND_PORT": "18083",
+    "browserDisplay": "xvfb-run",
+    "browserLibraries": "Existing extracted Ubuntu runtime, read-only; see implementation report",
+    "audio": "Temporary PulseAudio null sink with extracted GStreamer plugins",
+    "remoteCI": "intentionally disabled"
+  },
+  "physicalDeviceMeasurements": null,
+  "issueAcceptanceComplete": false,
+  "pending": [
+    "Final Game 1 artwork",
+    "Physical device performance, input latency, loading and memory validation"
+  ],
+  "evidence": [
+    "check-summary.txt",
+    "build-budgets.json",
+    "dependencies.json",
+    "mobile-start.png",
+    "mobile-turn-complete.png",
+    "desktop-turn-complete.png",
+    "prototype-turn-chromium.webm"
+  ]
+}

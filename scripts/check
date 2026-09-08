@@ -22,11 +22,13 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 node scripts/check-boundaries.mjs
+node scripts/generate-visual-manifest.mjs --check
 npm run generate:check
 npm run lint
 npm run typecheck
 npm test
 npm run build
+node scripts/check-table-budgets.mjs
 cargo build --release -p harry-potter-server --example e2e_harness
 if [[ -z "${DISPLAY:-}" ]] && command -v xvfb-run >/dev/null 2>&1; then
   env -u NO_COLOR xvfb-run -a npm run test:e2e
