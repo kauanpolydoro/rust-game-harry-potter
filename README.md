@@ -47,6 +47,7 @@ Após alterar o código Rust, interrompa com `Ctrl+C` e execute `./scripts/dev` 
 Mutações HTTP e WebSockets aceitam somente a origem exata configurada em `APPLICATION_ORIGIN`.
 O cliente envia a proteção CSRF obrigatória nas mutações.
 Consulte [SECURITY.md](SECURITY.md) para os limites, headers, logging e requisitos de implantação.
+Consulte [SLOs e observabilidade](ops/observability.md) e os [runbooks](ops/runbooks.md) para métricas, alertas, retenção e resposta operacional.
 
 Em desenvolvimento, o valor padrão é `http://127.0.0.1:5173`.
 

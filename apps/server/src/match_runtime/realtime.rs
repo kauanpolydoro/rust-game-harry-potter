@@ -74,6 +74,15 @@ enum RealtimeFailure {
     WriteTimeout,
 }
 
+impl RealtimeFailure {
+    const fn outcome(&self) -> &'static str {
+        match self {
+            Self::WriteTimeout => "timeout",
+            _ => "error",
+        }
+    }
+}
+
 impl std::fmt::Display for RealtimeFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -285,6 +294,7 @@ struct RealtimePosition {
     snapshot_version: Option<u16>,
     digest: Option<String>,
     synchronized: bool,
+    receipt: Option<crate::telemetry::delivery::ReceiptProbe>,
 }
 
 #[derive(Clone, Copy)]
@@ -387,11 +397,14 @@ async fn serve_game_events(
     query: RealtimeQuery,
     protocol: RealtimeProtocol,
 ) {
+    let _lifetime = crate::telemetry::Timer::new("socket_lifetime_seconds", "game_socket");
+    crate::telemetry::observe("realtime_connections", "game_socket", "started", 1.0);
     let mut position = RealtimePosition {
         cursor: query.cursor.and_then(|value| i64::try_from(value).ok()),
         snapshot_version: query.snapshot_version,
         digest: query.digest,
         synchronized: false,
+        receipt: None,
     };
     let synchronization_signal = state.subscribe_to_game_synchronization(game_id);
     let presence_signal = state.subscribe_to_game_presence(game_id);
@@ -486,12 +499,7 @@ async fn register_connection_presence(
     {
         Ok(true) => state.signal_game_presence(game_id),
         Ok(false) => {
-            close_socket(
-                socket,
-                crate::session::inactive_session_close_code(state, session).await,
-                "access ended",
-            )
-            .await;
+            crate::telemetry::close_access(socket, state, session).await;
             return None;
         }
         Err(_error) => {
@@ -542,9 +550,16 @@ async fn realtime_event_loop(
     let mut last_client_activity = now;
 
     loop {
+        let receipt_deadline = expire_receipt(position);
         let action = tokio::select! {
+            () = tokio::time::sleep_until(receipt_deadline.unwrap_or(now + REALTIME_MAX_CONNECTION_AGE)), if receipt_deadline.is_some() => RealtimeLoopAction::Continue,
             message = socket.recv() => {
-                handle_client_message(
+                if let Some(Ok(Message::Pong(payload))) = &message
+                    && position.receipt.as_mut().is_some_and(|receipt| receipt.acknowledge(payload)) {
+                    position.receipt = None;
+                    last_client_activity = tokio::time::Instant::now();
+                    RealtimeLoopAction::Continue
+                } else { handle_client_message(
                     socket,
                     message,
                     game_id,
@@ -553,7 +568,7 @@ async fn realtime_event_loop(
                     connection_id,
                     &mut last_client_activity,
                 )
-                .await
+                .await }
             }
             notification = synchronization.recv() => {
                 match notification {
@@ -613,6 +628,12 @@ async fn realtime_event_loop(
             return;
         }
     }
+}
+
+fn expire_receipt(position: &mut RealtimePosition) -> Option<tokio::time::Instant> {
+    let receipt = position.receipt.as_mut()?;
+    receipt.expire();
+    receipt.deadline()
 }
 
 fn realtime_interval(first_tick: tokio::time::Instant, period: Duration) -> tokio::time::Interval {
@@ -681,12 +702,7 @@ async fn synchronize_presence(
     match revalidate_socket_session(state, session).await {
         Ok(true) => {}
         Ok(false) => {
-            close_socket(
-                socket,
-                crate::session::inactive_session_close_code(state, session).await,
-                "access ended",
-            )
-            .await;
+            crate::telemetry::close_access(socket, state, session).await;
             return false;
         }
         Err(_) => {
@@ -750,12 +766,7 @@ async fn handle_client_message(
                     RealtimeLoopAction::Continue
                 }
                 Ok(false) => {
-                    close_socket(
-                        socket,
-                        crate::session::inactive_session_close_code(state, session).await,
-                        "access ended",
-                    )
-                    .await;
+                    crate::telemetry::close_access(socket, state, session).await;
                     RealtimeLoopAction::Stop
                 }
                 Err(_error) => {
@@ -812,12 +823,7 @@ async fn validate_realtime_session(
     match revalidate_socket_session(state, session).await {
         Ok(true) => RealtimeLoopAction::Continue,
         Ok(false) => {
-            close_socket(
-                socket,
-                crate::session::inactive_session_close_code(state, session).await,
-                "access ended",
-            )
-            .await;
+            crate::telemetry::close_access(socket, state, session).await;
             RealtimeLoopAction::Stop
         }
         Err(_) => {
@@ -839,12 +845,7 @@ async fn synchronize_connection(
     match revalidate_socket_session(state, session).await {
         Ok(true) => {}
         Ok(false) => {
-            close_socket(
-                socket,
-                crate::session::inactive_session_close_code(state, session).await,
-                "access ended",
-            )
-            .await;
+            crate::telemetry::close_access(socket, state, session).await;
             return false;
         }
         Err(_) => {
@@ -889,6 +890,16 @@ fn reconciliation_jitter(game_id: Uuid, participant_id: Uuid) -> Duration {
 }
 
 async fn close_socket(socket: &mut WebSocket, code: u16, reason: &'static str) {
+    crate::telemetry::observe(
+        "socket_closes",
+        "game_socket",
+        match code {
+            1000 | 1001 | 1012 => "success",
+            1008 | 4001 => "rejected",
+            _ => "error",
+        },
+        1.0,
+    );
     let result = tokio::time::timeout(
         REALTIME_WRITE_TIMEOUT,
         socket.send(Message::Close(Some(CloseFrame {
@@ -1010,6 +1021,7 @@ async fn synchronize_socket(
     force_snapshot: bool,
     protocol: RealtimeProtocol,
 ) -> Result<(), RealtimeFailure> {
+    let mut sync = synchronization_timer(position);
     let observed = load_realtime_position(&state.database, participant_id, game_id).await?;
     if !force_snapshot
         && position.cursor == observed.cursor
@@ -1020,6 +1032,7 @@ async fn synchronize_socket(
             send_realtime_synchronized(socket, &observed, protocol).await?;
             position.synchronized = true;
         }
+        sync.finish("success");
         return Ok(());
     }
 
@@ -1050,6 +1063,8 @@ async fn synchronize_socket(
         || !anchor_matches;
 
     if needs_snapshot {
+        crate::telemetry::observe("realtime_snapshot_fallbacks", "game_socket", "success", 1.0);
+        sync.set_operation("realtime_snapshot");
         send_realtime_snapshot(
             socket,
             projection,
@@ -1059,6 +1074,7 @@ async fn synchronize_socket(
             protocol,
         )
         .await?;
+        sync.finish("success");
         return Ok(());
     }
 
@@ -1068,10 +1084,68 @@ async fn synchronize_socket(
         ));
     };
     if from_cursor == current_cursor {
+        sync.finish("success");
         return Ok(());
     }
-    let events = match postgres::game_events_for_participant(
+    let events = load_replay_events(
         &state.database,
+        participant_id,
+        game_id,
+        from_cursor,
+        current_cursor,
+    )
+    .await?;
+    if !events_are_contiguous(&events, from_cursor, current_cursor) {
+        crate::telemetry::observe("realtime_snapshot_fallbacks", "game_socket", "error", 1.0);
+        sync.set_operation("realtime_snapshot");
+        send_realtime_snapshot(
+            socket,
+            projection,
+            current_cursor,
+            current_snapshot_version,
+            position,
+            protocol,
+        )
+        .await?;
+        sync.finish("success");
+        return Ok(());
+    }
+
+    let message = RealtimeEventBatchMessage {
+        protocol_version: protocol.version(),
+        message_type: "events",
+        from_cursor,
+        cursor: current_cursor,
+        events,
+        projection,
+    };
+    deliver_event_batch(socket, state, game_id, position, message).await?;
+    sync.finish("success");
+    Ok(())
+}
+
+fn synchronization_timer(position: &RealtimePosition) -> crate::telemetry::Timer {
+    crate::telemetry::Timer::new(
+        "realtime_sync_seconds",
+        if position.synchronized {
+            "realtime_live"
+        } else {
+            "realtime_replay"
+        },
+    )
+    .with_counter("realtime_syncs")
+    .with_failure_outcome("error")
+}
+
+async fn load_replay_events(
+    database: &sqlx::PgPool,
+    participant_id: Uuid,
+    game_id: Uuid,
+    from_cursor: i64,
+    current_cursor: i64,
+) -> Result<Vec<RealtimeGameEvent>, RealtimeFailure> {
+    let events = match postgres::game_events_for_participant(
+        database,
         participant_id,
         game_id,
         from_cursor,
@@ -1086,31 +1160,81 @@ async fn synchronize_socket(
         Err(error) => Err(error),
     };
     let events = events.map_err(|_| RealtimeFailure::InvalidData("decode persisted events"))?;
-    if !events_are_contiguous(&events, from_cursor, current_cursor) {
-        send_realtime_snapshot(
-            socket,
-            projection,
-            current_cursor,
-            current_snapshot_version,
-            position,
-            protocol,
-        )
-        .await?;
-        return Ok(());
-    }
+    Ok(events)
+}
 
-    let message = RealtimeEventBatchMessage {
-        protocol_version: protocol.version(),
-        message_type: "events",
-        from_cursor,
-        cursor: current_cursor,
-        events,
-        projection,
+async fn deliver_event_batch(
+    socket: &mut WebSocket,
+    state: &AppState,
+    game_id: Uuid,
+    position: &mut RealtimePosition,
+    message: RealtimeEventBatchMessage,
+) -> Result<(), RealtimeFailure> {
+    let count = u32::try_from(message.events.len()).unwrap_or(u32::MAX);
+    crate::telemetry::observe(
+        "realtime_backlog",
+        "game_socket",
+        "success",
+        f64::from(count),
+    );
+    let measured = std::time::Instant::now();
+    let commit_ages = if position.synchronized {
+        Some(
+            match tokio::time::timeout(
+                Duration::from_millis(50),
+                postgres::event_commit_ages(
+                    &state.database,
+                    game_id,
+                    message.from_cursor,
+                    message.cursor,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(ages)) if ages.len() == message.events.len() => ages
+                    .into_iter()
+                    .map(
+                        |(age, command_id)| crate::telemetry::delivery::DeliveryEvidence {
+                            commit_age: age.filter(|value| value.is_finite() && *value >= 0.0),
+                            command_trace: Some(state.command_trace(command_id)),
+                        },
+                    )
+                    .collect(),
+                _ => vec![
+                    crate::telemetry::delivery::DeliveryEvidence {
+                        commit_age: None,
+                        command_trace: None
+                    };
+                    message.events.len()
+                ],
+            },
+        )
+    } else {
+        None
     };
     let digest = message.projection.snapshot.digest.clone();
-    send_realtime_message(socket, &message).await?;
-    position.cursor = Some(current_cursor);
-    position.snapshot_version = Some(current_snapshot_version);
+    let mut probe =
+        commit_ages.map(|ages| crate::telemetry::delivery::ReceiptProbe::new(measured, ages));
+    if let Err(error) = send_realtime_message(socket, &message).await {
+        if let Some(probe) = probe.take() {
+            probe.finish(error.outcome());
+        }
+        return Err(error);
+    }
+    if let Some(probe) = probe {
+        if position.receipt.is_some() {
+            probe.finish("unavailable");
+        } else {
+            let result = send_frame(socket, Message::Ping(probe.nonce().to_vec().into())).await;
+            if let Err(error) = result {
+                probe.finish(error.outcome());
+                return Err(error);
+            }
+            position.receipt = Some(probe);
+        }
+    }
+    position.cursor = Some(message.cursor);
+    position.snapshot_version = u16::try_from(message.projection.snapshot.snapshot_version).ok();
     position.digest = Some(digest);
     position.synchronized = true;
     Ok(())
@@ -1162,6 +1286,7 @@ async fn load_realtime_position(
         snapshot_version: Some(snapshot_version),
         digest: Some(stored.2),
         synchronized: true,
+        receipt: None,
     })
 }
 
@@ -1221,6 +1346,7 @@ fn realtime_event(
 ) -> Result<RealtimeGameEvent, ApiError> {
     let mut payload = decode_persisted_event(&stored.payload_json)?;
     if !realtime_event_metadata_matches(&payload, stored) {
+        crate::telemetry::observe("p0_state_divergence", "integrity", "violation", 1.0);
         return Err(ApiError::internal());
     }
     // Copy links belong to canonical persistence. Public v6 already expresses
@@ -1576,15 +1702,26 @@ async fn send_realtime_message(
     socket: &mut WebSocket,
     value: &impl Serialize,
 ) -> Result<(), RealtimeFailure> {
-    let serialized = serde_json::to_string(value)
-        .map_err(|error| RealtimeFailure::Serialize(error.to_string()))?;
-    tokio::time::timeout(
-        REALTIME_WRITE_TIMEOUT,
-        socket.send(Message::Text(serialized.into())),
-    )
-    .await
-    .map_err(|_| RealtimeFailure::WriteTimeout)?
-    .map_err(|error| RealtimeFailure::Send(error.to_string()))
+    let timer = crate::telemetry::Timer::new("socket_write_seconds", "game_socket")
+        .with_counter("socket_writes");
+    let result = match serde_json::to_string(value) {
+        Ok(serialized) => send_frame(socket, Message::Text(serialized.into())).await,
+        Err(error) => Err(RealtimeFailure::Serialize(error.to_string())),
+    };
+    timer.finish(
+        result
+            .as_ref()
+            .map_or_else(RealtimeFailure::outcome, |()| "success"),
+    );
+    result
+}
+
+async fn send_frame(socket: &mut WebSocket, frame: Message) -> Result<(), RealtimeFailure> {
+    match tokio::time::timeout(REALTIME_WRITE_TIMEOUT, socket.send(frame)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(RealtimeFailure::Send(error.to_string())),
+        Err(_) => Err(RealtimeFailure::WriteTimeout),
+    }
 }
 
 #[cfg(test)]

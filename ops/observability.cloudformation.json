@@ -1,0 +1,2119 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Sanitized telemetry retention and actionable alarms for issue #35. Deploy only after configuring the existing notification topic and awslogs routing.",
+  "Parameters": {
+    "Environment": {
+      "Type": "String",
+      "AllowedValues": [
+        "development",
+        "staging",
+        "production"
+      ]
+    },
+    "NotificationTopicArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+"
+    }
+  },
+  "Resources": {
+    "ServerLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/hogwarts/${Environment}/server"
+        },
+        "RetentionInDays": 7
+      }
+    },
+    "WorkerLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/hogwarts/${Environment}/worker"
+        },
+        "RetentionInDays": 7
+      }
+    },
+    "P0StateDivergence": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P0: StateDivergence. Contain the affected operation. Runbook: ops/runbooks.md#divergência-e-autorização-após-revogação-ou-expiração",
+        "Namespace": "Hogwarts",
+        "MetricName": "p0_state_divergence",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "integrity"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "P0AckBeforeCommit": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P0: AckBeforeCommit. Contain the affected operation. Runbook: ops/runbooks.md#commit-incerto-e-confirmação-antes-do-commit",
+        "Namespace": "Hogwarts",
+        "MetricName": "p0_ack_before_commit",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "integrity"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "P0AuthorizationAfterAccessEnd": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P0: AuthorizationAfterAccessEnd. Contain the affected operation. Runbook: ops/runbooks.md#divergência-e-autorização-após-revogação-ou-expiração",
+        "Namespace": "Hogwarts",
+        "MetricName": "p0_authorization_after_access_end",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "integrity"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "P0SecretDetected": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P0: SecretDetected. Contain the affected operation. Runbook: ops/runbooks.md#segredo-detectado-ou-chave-comprometida",
+        "Namespace": "Hogwarts",
+        "MetricName": "p0_secret_detected",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "telemetry"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "P0RestoreResurrection": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P0: RestoreResurrection. Contain the affected operation. Runbook: ops/runbooks.md#restore-e-ressurreição",
+        "Namespace": "Hogwarts",
+        "MetricName": "p0_restore_resurrection",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "integrity"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "ServerHeartbeat": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: no telemetry heartbeat for three minutes. Check process and log ingestion before interpreting missing observations as healthy.",
+        "Namespace": "Hogwarts",
+        "MetricName": "server_heartbeat",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "runtime"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 3,
+        "DatapointsToAlarm": 3,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "WorkerHeartbeat": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: no telemetry heartbeat for three minutes. Check process and log ingestion before interpreting missing observations as healthy.",
+        "Namespace": "Hogwarts",
+        "MetricName": "worker_heartbeat",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 3,
+        "DatapointsToAlarm": 3,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "CommandP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: CommandP95 SLO breached. See ops/observability.md and ops/runbooks.md.",
+        "Namespace": "Hogwarts",
+        "MetricName": "http_duration_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "command"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 5,
+        "DatapointsToAlarm": 3,
+        "Threshold": 0.3,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "CommandP99": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: CommandP99 SLO breached. See ops/observability.md and ops/runbooks.md.",
+        "Namespace": "Hogwarts",
+        "MetricName": "http_duration_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "command"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 5,
+        "DatapointsToAlarm": 3,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p99"
+      }
+    },
+    "RecoveryP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: RecoveryP95 SLO breached. See ops/observability.md and ops/runbooks.md.",
+        "Namespace": "Hogwarts",
+        "MetricName": "http_duration_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "recovery"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 5,
+        "DatapointsToAlarm": 3,
+        "Threshold": 2,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "PurgeDeadline": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: PurgeDeadline SLO breached. See ops/observability.md and ops/runbooks.md.",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_purge_max_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 5,
+        "DatapointsToAlarm": 3,
+        "Threshold": 86400,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "DetectionP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: DetectionP95 SLO breached. See ops/observability.md and ops/runbooks.md.",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_detection_p95_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 5,
+        "DatapointsToAlarm": 3,
+        "Threshold": 300,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "PurgeP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "P1: PurgeP95 SLO breached. See ops/observability.md and ops/runbooks.md.",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_purge_p95_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 5,
+        "DatapointsToAlarm": 3,
+        "Threshold": 3600,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "RemoteReceiptP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "RemoteReceiptP95: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "commit_to_receipt_upper_bound_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "event_delivery"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0.5,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "RemoteReceiptP99": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "RemoteReceiptP99: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "commit_to_receipt_upper_bound_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "event_delivery"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1.5,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p99"
+      }
+    },
+    "ReplayP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "ReplayP95: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "replay_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 3,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "SnapshotP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "SnapshotP95: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "snapshot_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 5,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "RecoveryHumanP75": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "RecoveryHumanP75: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "recovery_human_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 90,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p75"
+      }
+    },
+    "RevocationCloseP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "RevocationCloseP95: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "access_end_to_close_upper_bound_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "revocation"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 2,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "RevocationCloseP99": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "RevocationCloseP99: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "access_end_to_close_upper_bound_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "revocation"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 5,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p99"
+      }
+    },
+    "LcpP75": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "LcpP75: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "web_lcp_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 2.5,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p75"
+      }
+    },
+    "InpP75": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "InpP75: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "web_inp_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0.2,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p75"
+      }
+    },
+    "ClsP75": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "ClsP75: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "web_cls_ratio",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0.1,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p75"
+      }
+    },
+    "TouchFeedbackP95": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "TouchFeedbackP95: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#banco-indisponível",
+        "Namespace": "Hogwarts",
+        "MetricName": "touch_feedback_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "browser"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0.1,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "ExtendedStatistic": "p95"
+      }
+    },
+    "MissingEventCommitTime": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "MissingEventCommitTime: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "commit_time_observations",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "event_delivery"
+          },
+          {
+            "Name": "outcome",
+            "Value": "unavailable"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "MissingAccessEndTime": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "MissingAccessEndTime: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "access_end_time_observations",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "revocation"
+          },
+          {
+            "Name": "outcome",
+            "Value": "unavailable"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "LifecycleDatabaseFailure": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "LifecycleDatabaseFailure: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_batches",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          },
+          {
+            "Name": "outcome",
+            "Value": "database_error"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "LifecycleLedgerFailure": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "LifecycleLedgerFailure: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_batches",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          },
+          {
+            "Name": "outcome",
+            "Value": "ledger_error"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "LifecycleMeasurementFailure": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "LifecycleMeasurementFailure: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_measurements",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          },
+          {
+            "Name": "outcome",
+            "Value": "error"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "RestoreAuditFailure": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "RestoreAuditFailure: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "restore_audits",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "restore"
+          },
+          {
+            "Name": "outcome",
+            "Value": "error"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "BackupMeasurementFailure": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "BackupMeasurementFailure: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "backup_measurements",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "backup"
+          },
+          {
+            "Name": "outcome",
+            "Value": "unavailable"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "UnknownRecoverySource": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "UnknownRecoverySource: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "recovery_completions",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "recovery"
+          },
+          {
+            "Name": "outcome",
+            "Value": "unavailable"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "BackupRpo": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "BackupRpo: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#restore-e-ressurreição",
+        "Namespace": "Hogwarts",
+        "MetricName": "backup_rpo_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "backup"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 300,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "BackupWindow": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "BackupWindow: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#restore-e-ressurreição",
+        "Namespace": "Hogwarts",
+        "MetricName": "backup_window_seconds",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "backup"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 604800,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "BackupRetention": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "BackupRetention: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#restore-e-ressurreição",
+        "Namespace": "Hogwarts",
+        "MetricName": "backup_retention_days",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "backup"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 7,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "ManualBackupInventory": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "ManualBackupInventory: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#restore-e-ressurreição",
+        "Namespace": "Hogwarts",
+        "MetricName": "backup_manual_snapshots",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "backup"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Maximum"
+      }
+    },
+    "BackupProbeMissing": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "BackupProbeMissing: inspect the observation population and collection coverage. Runbook: ops/runbooks.md#restore-e-ressurreição",
+        "Namespace": "Hogwarts",
+        "MetricName": "backup_measurements",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "backup"
+          },
+          {
+            "Name": "outcome",
+            "Value": "success"
+          }
+        ],
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "ApiAvailability": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Five-minute error guard; compute the monthly SLI from summed counts, not averaged percentages. Runbook: ops/runbooks.md#banco-indisponível",
+        "Metrics": [
+          {
+            "Id": "m0total",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "api"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0error",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "api"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "error"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0cancel",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "api"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "cancelled"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0limit",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "api"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "rate_limited"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m1total",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "command"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m1error",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "command"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "error"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m1cancel",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "command"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "cancelled"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m1limit",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "command"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "rate_limited"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "availability",
+            "Expression": "IF((FILL(m0total,0)+FILL(m1total,0))>0,100*(1-(FILL(m0error,0)+FILL(m0cancel,0)+FILL(m0limit,0)+FILL(m1error,0)+FILL(m1cancel,0)+FILL(m1limit,0))/(FILL(m0total,0)+FILL(m1total,0))))",
+            "Label": "Technical availability (%)",
+            "ReturnData": true
+          }
+        ],
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 99.5,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "RecoveryAvailability": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Five-minute error guard; compute the monthly SLI from summed counts, not averaged percentages. Runbook: ops/runbooks.md#banco-indisponível",
+        "Metrics": [
+          {
+            "Id": "m0total",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "recovery"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0error",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "recovery"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "error"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0cancel",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "recovery"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "cancelled"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0limit",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "recovery"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "rate_limited"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "availability",
+            "Expression": "IF((FILL(m0total,0))>0,100*(1-(FILL(m0error,0)+FILL(m0cancel,0)+FILL(m0limit,0))/(FILL(m0total,0))))",
+            "Label": "Technical availability (%)",
+            "ReturnData": true
+          }
+        ],
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 99.5,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "HandshakeAvailability": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Five-minute error guard; compute the monthly SLI from summed counts, not averaged percentages. Runbook: ops/runbooks.md#banco-indisponível",
+        "Metrics": [
+          {
+            "Id": "m0total",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "handshake"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0error",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "handshake"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "error"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0cancel",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "handshake"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "cancelled"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "m0limit",
+            "MetricStat": {
+              "Metric": {
+                "Namespace": "Hogwarts",
+                "MetricName": "http_requests",
+                "Dimensions": [
+                  {
+                    "Name": "environment",
+                    "Value": {
+                      "Ref": "Environment"
+                    }
+                  },
+                  {
+                    "Name": "operation",
+                    "Value": "handshake"
+                  },
+                  {
+                    "Name": "outcome",
+                    "Value": "rate_limited"
+                  }
+                ]
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "availability",
+            "Expression": "IF((FILL(m0total,0))>0,100*(1-(FILL(m0error,0)+FILL(m0cancel,0)+FILL(m0limit,0))/(FILL(m0total,0))))",
+            "Label": "Technical availability (%)",
+            "ReturnData": true
+          }
+        ],
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 99.5,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "missing",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ]
+      }
+    },
+    "PurgePendingDeadline": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Investigate overdue or blocked purge immediately. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_overdue",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "PurgeOrphans": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Investigate overdue or blocked purge immediately. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_orphan_jobs",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "PurgeBatchOrphans": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Investigate overdue or blocked purge immediately. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_batches",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          },
+          {
+            "Name": "outcome",
+            "Value": "orphans"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    },
+    "PurgeBatchTimeout": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Investigate overdue or blocked purge immediately. Runbook: ops/runbooks.md#worker-atrasado-ledger-e-orfaos",
+        "Namespace": "Hogwarts",
+        "MetricName": "lifecycle_batches",
+        "Dimensions": [
+          {
+            "Name": "environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          },
+          {
+            "Name": "operation",
+            "Value": "lifecycle"
+          },
+          {
+            "Name": "outcome",
+            "Value": "timeout"
+          }
+        ],
+        "Period": 60,
+        "EvaluationPeriods": 1,
+        "DatapointsToAlarm": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopicArn"
+          }
+        ],
+        "Statistic": "Sum"
+      }
+    }
+  },
+  "Outputs": {
+    "ServerLogGroup": {
+      "Value": {
+        "Ref": "ServerLogs"
+      }
+    },
+    "WorkerLogGroup": {
+      "Value": {
+        "Ref": "WorkerLogs"
+      }
+    }
+  }
+}

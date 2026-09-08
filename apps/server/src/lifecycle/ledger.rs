@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 
@@ -27,8 +27,14 @@ impl TombstoneLedger for FileLedger {
         tokio::task::spawn_blocking(move || {
             // Missing storage is an outage, not an empty ledger.
             fs::read_dir(&directory).map_err(|_| PurgeError::Ledger)?;
-            match fs::read(directory.join(name)) {
-                Ok(bytes) => decode_proof(&bytes).map(Some),
+            match File::open(directory.join(name)) {
+                Ok(file) => {
+                    let mut bytes = Vec::new();
+                    file.take(4097)
+                        .read_to_end(&mut bytes)
+                        .map_err(|_| PurgeError::Ledger)?;
+                    decode_proof(&bytes).map(Some)
+                }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
                 Err(_) => Err(PurgeError::Ledger),
             }
@@ -221,12 +227,16 @@ impl TombstoneLedger for S3Ledger {
                 {
                     return Err(PurgeError::Ledger);
                 }
-                let bytes = object
-                    .body
-                    .collect()
-                    .await
-                    .map_err(|_| PurgeError::Ledger)?;
-                decode_proof(&bytes.into_bytes()).map(Some)
+                let mut body = object.body;
+                let mut bytes = Vec::new();
+                while let Some(chunk) = body.next().await {
+                    let chunk = chunk.map_err(|_| PurgeError::Ledger)?;
+                    if bytes.len() + chunk.len() > 4096 {
+                        return Err(PurgeError::Ledger);
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                decode_proof(&bytes).map(Some)
             }
             Err(error)
                 if error.as_service_error().is_some_and(

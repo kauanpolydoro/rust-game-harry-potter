@@ -631,6 +631,12 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        if matches!(
+            self.code,
+            ErrorCode::GameExpired | ErrorCode::SessionInvalid
+        ) {
+            crate::telemetry::access_ended();
+        }
         let correlation_id = crate::current_correlation_id();
         let game_expired = matches!(self.code, ErrorCode::GameExpired);
         let mut response = (

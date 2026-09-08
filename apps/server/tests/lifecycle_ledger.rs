@@ -47,6 +47,8 @@ async fn local_proofs_survive_reopen_reject_conflicts_and_expire_only_after_four
     let ledger = FileLedger::new(directory.clone());
     let key = "a".repeat(64);
     ledger.record(&key, &proof(None)).await.unwrap();
+    assert!(ledger.lookup(&key).await.unwrap().is_some());
+    assert!(ledger.lookup(&"c".repeat(64)).await.unwrap().is_none());
     FileLedger::new(directory.clone())
         .record(&key, &proof(None))
         .await
@@ -167,6 +169,7 @@ async fn s3_adapter_uses_signed_encrypted_durable_puts_and_propagates_storage_fa
     let ledger = S3Ledger::new(aws_sdk_s3::Client::from_conf(config), "proofs".into());
     ledger.validate_retention().await.unwrap();
     let key = "b".repeat(64);
+    assert!(ledger.lookup(&key).await.unwrap().is_none());
     ledger.record(&key, &proof(None)).await.unwrap();
     ledger.record(&key, &proof(None)).await.unwrap();
     ledger.record(&key, &proof(Some(4000))).await.unwrap();

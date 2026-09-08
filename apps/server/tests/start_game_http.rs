@@ -25,6 +25,7 @@ mod game_one;
 mod game_three;
 mod game_two;
 mod lifecycle;
+mod observability;
 mod restore;
 
 struct ReadyRoom {
@@ -6855,6 +6856,7 @@ async fn a_revoked_session_closes_its_existing_websocket_before_delivering_an_ev
 
 #[tokio::test]
 async fn device_session_revocation_closes_the_target_websocket_within_two_seconds() {
+    let logs = log_capture::LogCapture::start();
     let room = ready_room().await;
     start_ready_game(&room, "realtime-device-session-revocation").await;
     let second_host_cookie = additional_session_for_participant(&room, "host").await;
@@ -6903,6 +6905,41 @@ async fn device_session_revocation_closes_the_target_websocket_within_two_second
         .expect("the revoked device connection must close within the p95 target");
     assert_eq!(close_code, 1008);
     assert!(committed_at.elapsed() <= Duration::from_secs(2));
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    target_socket.send_frame(8, &1008_u16.to_be_bytes()).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if logs.text().lines().any(|line| {
+                let sample: Value = serde_json::from_str(line).unwrap();
+                sample["metric"] == "access_end_socket_closures" && sample["outcome"] == "success"
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the remote close acknowledgement must be observed");
+    // The bounded duration query finishes after the close counter and can lack
+    // commit-time evidence even when timestamp tracking is enabled.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if logs.text().lines().any(|line| {
+                let sample: Value = serde_json::from_str(line).unwrap();
+                sample["operation"] == "revocation"
+                    && ((sample["metric"] == "access_end_to_close_upper_bound_seconds"
+                        && sample["outcome"] == "success"
+                        && sample["value"].as_f64().unwrap() >= 0.04)
+                        || (sample["metric"] == "access_end_time_observations"
+                            && sample["outcome"] == "unavailable"))
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the close duration must include the remote delay or report missing evidence");
     server.abort();
 }
 
@@ -6910,6 +6947,7 @@ async fn device_session_revocation_closes_the_target_websocket_within_two_second
 async fn device_session_revocation_closes_connections_within_p95_and_p99_targets() {
     const CONNECTION_COUNT: usize = 100;
 
+    let _logs = log_capture::LogCapture::start();
     let room = ready_room().await;
     start_ready_game(&room, "realtime-device-session-revocation-percentiles").await;
     let second_host_cookie = additional_session_for_participant(&room, "host").await;

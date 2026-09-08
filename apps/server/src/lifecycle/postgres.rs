@@ -5,6 +5,18 @@ use super::{LifecycleMetrics, PurgeError, PurgeProof};
 
 type Tx<'a> = Transaction<'a, Postgres>;
 
+pub(super) async fn roots_after(
+    database: &PgPool,
+    cursor: Option<Uuid>,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM games WHERE $1::uuid IS NULL OR id > $1 ORDER BY id LIMIT 100",
+    )
+    .bind(cursor)
+    .fetch_all(database)
+    .await
+}
+
 #[derive(sqlx::FromRow)]
 pub(super) struct Job {
     pub game_id: Uuid,

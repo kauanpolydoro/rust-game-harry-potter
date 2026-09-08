@@ -105,9 +105,11 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
   let stopped = false
   let disposed = false
   let needsAnchors = true
+  let needsRender = true
   const intervals: number[] = []
   let lastFrame = 0
   const images = new Map<string, HTMLImageElement>()
+  scene.onDataLoadedObservable.add(() => { needsRender = true })
 
   function faceTexture(card: TableCard) {
     const texture = new DynamicTexture(`face-${card.id}`, { width: 384, height: 512 }, scene, false)
@@ -153,6 +155,7 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
         const [x, y, width, height] = art.crop ?? [0, 0, source.naturalWidth, source.naturalHeight]
         ctx.drawImage(source, x, y, width, height, 26, 72, 332, 215)
         texture.update()
+        needsRender = true
       }
       if (source.complete) queueMicrotask(paint)
       else source.addEventListener('load', paint, { once: true })
@@ -243,6 +246,9 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
     const now = performance.now()
     if (lastFrame) { intervals.push(now - lastFrame); if (intervals.length > 3600) intervals.shift() }
     lastFrame = now
+    // Keep measuring browser frame cadence without redrawing an unchanged board.
+    if (!needsRender) return
+    needsRender = false
     scene.render()
     if (needsAnchors) { publishAnchors(); needsAnchors = false }
   }
@@ -276,6 +282,8 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
         markers.push(token)
       }
       needsAnchors = true
+      needsRender = true
+      scene.executeWhenReady(() => { needsRender = true })
     },
     resize() {
       if (!canvas.clientWidth || !canvas.clientHeight) return
@@ -286,8 +294,9 @@ export function mountTableScene(canvas: HTMLCanvasElement, anchors: (items: Card
       camera.position.set(0, (aspect > 3 ? 10 : 14) * distance, (aspect > 3 ? -17 : -12) * distance)
       camera.setTarget(new Vector3(0, 0, -0.65))
       needsAnchors = true
+      needsRender = true
     },
-    pause(value) { stopped = value; lastFrame = 0 },
+    pause(value) { stopped = value; lastFrame = 0; if (!value) needsRender = true },
     measurements() {
       const sorted = [...intervals].sort((a, b) => a - b)
       return { frames: sorted.length, medianFrameMs: sorted[Math.floor(sorted.length * 0.5)] ?? 0,

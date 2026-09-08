@@ -6,6 +6,8 @@ services:
     command:
       - postgres
       - -c
+      - track_commit_timestamp=on
+      - -c
       - log_error_verbosity=terse
       - -c
       - log_min_error_statement=panic

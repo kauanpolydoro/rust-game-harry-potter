@@ -37,7 +37,7 @@ mod session_events;
 mod telemetry;
 
 pub use content_catalog::{game_one_manifest, game_three_manifest, game_two_manifest};
-pub use telemetry::tracing_subscriber;
+pub use telemetry::{observe_runtime, tracing_subscriber};
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 const DEFAULT_APPLICATION_ORIGIN: &str = "http://127.0.0.1:5173";
@@ -426,6 +426,16 @@ impl AppState {
         ))
     }
 
+    fn command_trace(&self, command_id: Uuid) -> Uuid {
+        let digest = hmac_sha256(
+            self.session_token_key.as_ref(),
+            &[b"observability-command-v1", command_id.as_bytes()],
+        );
+        let mut bytes = [0_u8; 16];
+        bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(bytes)
+    }
+
     fn admit_request(&self, class: &str, subject: &[u8], limit: u32) -> bool {
         let key = hmac_sha256(
             self.session_token_key.as_ref(),
@@ -479,6 +489,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(current_session::router())
         .merge(match_runtime::router())
         .merge(session_events::router())
+        .merge(telemetry::client::router())
         .layer(DefaultBodyLimit::max(16 * 1024))
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(
@@ -506,25 +517,32 @@ async fn correlate_request(request: Request, next: Next) -> Response {
         .get::<MatchedPath>()
         .map_or("unmatched", MatchedPath::as_str)
         .to_owned();
+    let operation = telemetry::http_operation(&route);
     let span = tracing::info_span!(
         "http_request",
         correlation_id = %correlation_id,
         %method,
         %route
     );
-    REQUEST_CORRELATION_ID
-        .scope(correlation_id, async move {
-            let mut response = next.run(request).await;
-            if let Ok(value) = HeaderValue::from_str(&correlation_id.to_string()) {
-                response.headers_mut().insert("x-correlation-id", value);
-            }
-            tracing::info!(
-                status = response.status().as_u16(),
-                "HTTP request completed"
-            );
-            response
-        })
-        .instrument(span)
+    telemetry::OPERATION
+        .scope(
+            operation,
+            REQUEST_CORRELATION_ID
+                .scope(correlation_id, async move {
+                    let mut response = telemetry::http(operation, next.run(request)).await;
+                    if let Ok(value) = HeaderValue::from_str(&correlation_id.to_string()) {
+                        response.headers_mut().insert("x-correlation-id", value);
+                    }
+                    tracing::info!(
+                        status = response.status().as_u16(),
+                        method,
+                        route = route.as_str(),
+                        "HTTP request completed"
+                    );
+                    response
+                })
+                .instrument(span),
+        )
         .await
 }
 
