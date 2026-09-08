@@ -192,6 +192,16 @@ async fn retry_now(fixture: &Fixture) {
         .unwrap();
 }
 
+async fn run_worker_rounds(worker: LifecycleWorker<InterruptedLedger>) -> Result<(), PurgeError> {
+    // A tick can skip a locked root or exhaust its five-second stage budget.
+    // Drive the worker until the ledger's pause point; callers still bound the
+    // wait and assert the required intermediate state before releasing it.
+    for _ in 0..8 {
+        worker.tick().await?;
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn lost_ledger_ack_keeps_the_root_and_a_fresh_worker_resumes_idempotently() {
     let fixture = Fixture::new().await;
@@ -231,7 +241,7 @@ async fn verifier_blocks_completion_for_an_orphan_after_root_removal_and_process
     let ledger = InterruptedLedger::new(&fixture);
     ledger.pause_completion.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    let process = tokio::spawn(async move { worker.tick().await });
+    let process = tokio::spawn(run_worker_rounds(worker));
     tokio::time::timeout(Duration::from_secs(10), ledger.entered.notified())
         .await
         .unwrap();
@@ -297,7 +307,7 @@ async fn concurrent_workers_skip_locked_jobs_and_complete_exactly_once() {
     let ledger = InterruptedLedger::new(&fixture);
     ledger.pause_completion.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    let process = tokio::spawn(async move { worker.tick().await });
+    let process = tokio::spawn(run_worker_rounds(worker));
     tokio::time::timeout(Duration::from_secs(10), ledger.entered.notified())
         .await
         .unwrap();
@@ -511,7 +521,7 @@ async fn waiting_for_external_completion_does_not_block_a_command_in_another_gam
     let ledger = InterruptedLedger::new(&fixture);
     ledger.pause_completion.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    let process = tokio::spawn(async move { worker.tick().await });
+    let process = tokio::spawn(run_worker_rounds(worker));
     tokio::time::timeout(Duration::from_secs(10), ledger.entered.notified())
         .await
         .unwrap();
@@ -603,12 +613,17 @@ async fn concurrent_purges_remove_the_last_copy_of_a_shared_identity() {
     sqlx::query("UPDATE games SET last_game_action_at = clock_timestamp() - INTERVAL '8 days', expires_at = clock_timestamp() - INTERVAL '1 second'").execute(&fixture.room.database).await.unwrap();
     let uncertain = InterruptedLedger::new(&fixture);
     uncertain.lose_ack.store(true, Ordering::SeqCst);
-    assert_eq!(
-        LifecycleWorker::new(fixture.room.database.clone(), uncertain, [7; 32])
-            .tick()
-            .await,
-        Err(PurgeError::Ledger)
-    );
+    let preparation = LifecycleWorker::new(fixture.room.database.clone(), uncertain, [7; 32]);
+    // Enqueue uses SKIP LOCKED, so a sweep can make no progress while a root
+    // is locked. Still require the simulated lost acknowledgement before retry.
+    let mut acknowledgement = Ok(0);
+    for _ in 0..8 {
+        acknowledgement = preparation.tick().await;
+        if acknowledgement.is_err() {
+            break;
+        }
+    }
+    assert_eq!(acknowledgement, Err(PurgeError::Ledger));
     retry_now(&fixture).await;
     let ledger = RendezvousLedger {
         file: FileLedger::new(fixture.ledger_dir.clone()),
