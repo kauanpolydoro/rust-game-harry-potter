@@ -95,7 +95,7 @@ Os alarmes de disponibilidade usam a mesma fórmula em cinco minutos como prote�
 
 Para recuperação sem assistência, use `self_service / (self_service + host_assisted)` sobre `recovery_completions`.
 O contador registra somente consumo novo confirmado; retries idempotentes não acrescentam outro sucesso.
-Credenciais antigas têm origem desconhecida e impedem afirmar cobertura integral dessa proporção.
+Credenciais antigas ou emitidas pela reconciliação de desastre têm origem desconhecida e impedem afirmar cobertura integral dessa proporção.
 A credencial sucessora de uma recuperação assistida volta a ser própria.
 Esse SLI mede assistência pelo fluxo do produto; suporte externo deve complementar a avaliação do beta.
 

@@ -22,8 +22,11 @@ use tokio::{
 use tower::ServiceExt;
 
 mod game_one;
+mod game_three;
+mod game_two;
 mod lifecycle;
 mod observability;
+mod restore;
 
 struct ReadyRoom {
     app: axum::Router,
@@ -1618,7 +1621,10 @@ async fn start_ready_game(room: &ReadyRoom, key_prefix: &str) -> Value {
             &room.host_cookie,
             &unique_key(key_prefix),
             &room.manifest,
-            "adventure:001",
+            room.manifest
+                .game_setups
+                .first()
+                .map_or("adventure:001", |setup| setup.adventure_id.as_str()),
         ))
         .await
         .expect("game start must receive a response");
@@ -6914,17 +6920,26 @@ async fn device_session_revocation_closes_the_target_websocket_within_two_second
     })
     .await
     .expect("the remote close acknowledgement must be observed");
-    let tracking: String = sqlx::query_scalar("SHOW track_commit_timestamp")
-        .fetch_one(&room.database)
-        .await
-        .unwrap();
-    if tracking == "on" {
-        assert!(logs.text().lines().any(|line| {
-            let sample: Value = serde_json::from_str(line).unwrap();
-            sample["metric"] == "access_end_to_close_upper_bound_seconds"
-                && sample["value"].as_f64().unwrap() >= 0.04
-        }));
-    }
+    // The bounded duration query finishes after the close counter and can lack
+    // commit-time evidence even when timestamp tracking is enabled.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if logs.text().lines().any(|line| {
+                let sample: Value = serde_json::from_str(line).unwrap();
+                sample["operation"] == "revocation"
+                    && ((sample["metric"] == "access_end_to_close_upper_bound_seconds"
+                        && sample["outcome"] == "success"
+                        && sample["value"].as_f64().unwrap() >= 0.04)
+                        || (sample["metric"] == "access_end_time_observations"
+                            && sample["outcome"] == "unavailable"))
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the close duration must include the remote delay or report missing evidence");
     server.abort();
 }
 
@@ -6932,6 +6947,7 @@ async fn device_session_revocation_closes_the_target_websocket_within_two_second
 async fn device_session_revocation_closes_connections_within_p95_and_p99_targets() {
     const CONNECTION_COUNT: usize = 100;
 
+    let _logs = log_capture::LogCapture::start();
     let room = ready_room().await;
     start_ready_game(&room, "realtime-device-session-revocation-percentiles").await;
     let second_host_cookie = additional_session_for_participant(&room, "host").await;

@@ -7,7 +7,7 @@ test('a recovered participant emits anonymous timing without leaking the recover
   await page.getByRole('button', { name: 'Criar sala privada' }).click()
   await expect(page.getByRole('heading', { name: 'Sala pronta' })).toBeVisible()
   const link = await page.getByLabel('Link de recuperação').inputValue()
-  const device = await browser.newContext()
+  const device = await browser.newContext({ ignoreHTTPSErrors: true })
   const recovered = await device.newPage()
   const observations: { metric: string, value: number, outcome: string }[] = []
   const privateHeaders: string[] = []

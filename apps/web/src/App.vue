@@ -792,7 +792,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="shell">
+  <main class="shell" :class="{ 'shell--game': game }">
     <header class="masthead">
       <span class="cue-mark" aria-hidden="true"></span>
       <h1>Batalha de Hogwarts</h1>
@@ -823,7 +823,8 @@ onMounted(async () => {
       </div>
     </section>
 
-    <GameStage
+      <GameStage
+        @stale-command="resyncStaleGame"
       v-else-if="game"
       v-model:selected-choice-options="selectedChoiceOptions"
       :choice-input-disabled="choiceInputDisabled"
@@ -1424,14 +1425,19 @@ onMounted(async () => {
       >
         Sincronizando partida
       </button>
+      <template v-else-if="game && canEndHeroActions">
+      <p v-if="game.legal_intentions.play_cards.length || game.legal_intentions.assign_attack.length || game.legal_intentions.acquire_cards.length" class="turn-end-warning" id="turn-end-warning">
+        Ainda há cartas ou recursos que você pode usar neste turno.
+      </p>
       <button
-        v-else-if="game && canEndHeroActions"
         class="primary-button"
         type="button"
+        :aria-describedby="game.legal_intentions.play_cards.length || game.legal_intentions.assign_attack.length || game.legal_intentions.acquire_cards.length ? 'turn-end-warning' : undefined"
         @click="endHeroActions()"
       >
         Encerrar ações do Herói
       </button>
+      </template>
       <p
         v-else-if="game && pendingChoice && !isResponsibleForPendingChoice"
         class="continuity-note"

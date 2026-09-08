@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 
@@ -20,24 +20,23 @@ impl FileLedger {
 }
 
 impl TombstoneLedger for FileLedger {
-    async fn contains(&self, key: &str) -> Result<bool, PurgeError> {
-        if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(PurgeError::Ledger);
-        }
+    async fn lookup(&self, key: &str) -> Result<Option<PurgeProof>, PurgeError> {
+        validate_key(key)?;
         let directory = self.directory.clone();
         let name = format!("{key}.tombstone.json");
         tokio::task::spawn_blocking(move || {
-            if !directory.is_dir() {
-                return Err(PurgeError::Ledger);
-            }
-            match fs::metadata(directory.join(&name)) {
-                Ok(metadata) if metadata.len() <= 1024 => {
-                    let bytes = fs::read(directory.join(name)).map_err(|_| PurgeError::Ledger)?;
-                    validate_proof(&bytes)?;
-                    Ok(true)
+            // Missing storage is an outage, not an empty ledger.
+            fs::read_dir(&directory).map_err(|_| PurgeError::Ledger)?;
+            match File::open(directory.join(name)) {
+                Ok(file) => {
+                    let mut bytes = Vec::new();
+                    file.take(4097)
+                        .read_to_end(&mut bytes)
+                        .map_err(|_| PurgeError::Ledger)?;
+                    decode_proof(&bytes).map(Some)
                 }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-                _ => Err(PurgeError::Ledger),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(_) => Err(PurgeError::Ledger),
             }
         })
         .await
@@ -73,6 +72,29 @@ impl TombstoneLedger for FileLedger {
     }
 }
 
+fn validate_key(key: &str) -> Result<(), PurgeError> {
+    if key.len() == 64 && key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(PurgeError::Ledger)
+    }
+}
+
+fn decode_proof(bytes: &[u8]) -> Result<PurgeProof, PurgeError> {
+    if bytes.len() > 4096 {
+        return Err(PurgeError::Ledger);
+    }
+    let proof: PurgeProof = serde_json::from_slice(bytes).map_err(|_| PurgeError::Ledger)?;
+    if proof.version != 1
+        || proof.expires_at_ms < 0
+        || proof.detected_at_ms < proof.expires_at_ms
+        || proof.completed_at_ms.is_some()
+    {
+        return Err(PurgeError::Ledger);
+    }
+    Ok(proof)
+}
+
 fn durable_write(directory: &std::path::Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     fs::create_dir_all(directory)?;
     // Persist every newly created directory entry, including relative paths,
@@ -97,15 +119,32 @@ fn durable_write(directory: &std::path::Path, name: &str, bytes: &[u8]) -> io::R
         match fs::hard_link(&temporary, &path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                if fs::read(&path)? != bytes {
-                    return Err(io::Error::other("conflicting ledger proof"));
+                let existing = fs::read(&path)?;
+                if existing != bytes {
+                    let old: PurgeProof =
+                        serde_json::from_slice(&existing).map_err(io::Error::other)?;
+                    let new: PurgeProof =
+                        serde_json::from_slice(bytes).map_err(io::Error::other)?;
+                    if old.version != new.version
+                        || old.expires_at_ms != new.expires_at_ms
+                        || old.detected_at_ms != new.detected_at_ms
+                        || old.completed_at_ms.is_none()
+                        || new.completed_at_ms.is_none()
+                    {
+                        return Err(io::Error::other("conflicting ledger proof"));
+                    }
+                    // A restore repeats verification of the same deletion. Keep the
+                    // newest completion and its renewed retention, including retries.
+                    if new.completed_at_ms > old.completed_at_ms {
+                        fs::rename(&temporary, &path)?;
+                    }
                 }
             }
             Err(error) => return Err(error),
         }
         File::open(directory)?.sync_all()
     })();
-    let cleanup = fs::remove_file(&temporary);
+    let cleanup = remove_if_present(&temporary);
     result.and(cleanup)?;
     File::open(directory)?.sync_all()
 }
@@ -171,39 +210,43 @@ impl S3Ledger {
 }
 
 impl TombstoneLedger for S3Ledger {
-    async fn contains(&self, key: &str) -> Result<bool, PurgeError> {
-        if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(PurgeError::Ledger);
-        }
-        let object = match self
+    async fn lookup(&self, key: &str) -> Result<Option<PurgeProof>, PurgeError> {
+        validate_key(key)?;
+        let object = self
             .client
             .get_object()
             .bucket(&self.bucket)
             .key(format!("{key}.tombstone.json"))
             .send()
-            .await
-        {
-            Ok(object) => object,
+            .await;
+        match object {
+            Ok(object) => {
+                if object
+                    .content_length()
+                    .is_none_or(|length| !(1..=4096).contains(&length))
+                {
+                    return Err(PurgeError::Ledger);
+                }
+                let mut body = object.body;
+                let mut bytes = Vec::new();
+                while let Some(chunk) = body.next().await {
+                    let chunk = chunk.map_err(|_| PurgeError::Ledger)?;
+                    if bytes.len() + chunk.len() > 4096 {
+                        return Err(PurgeError::Ledger);
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                decode_proof(&bytes).map(Some)
+            }
             Err(error)
                 if error.as_service_error().is_some_and(
                     aws_sdk_s3::operation::get_object::GetObjectError::is_no_such_key,
                 ) =>
             {
-                return Ok(false);
+                Ok(None)
             }
-            Err(_) => return Err(PurgeError::Ledger),
-        };
-        let mut body = object.body;
-        let mut bytes = Vec::new();
-        while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|_| PurgeError::Ledger)?;
-            if bytes.len() + chunk.len() > 1024 {
-                return Err(PurgeError::Ledger);
-            }
-            bytes.extend_from_slice(&chunk);
+            Err(_) => Err(PurgeError::Ledger),
         }
-        validate_proof(&bytes)?;
-        Ok(true)
     }
 
     async fn record(&self, key: &str, proof: &PurgeProof) -> Result<(), PurgeError> {
@@ -233,19 +276,6 @@ impl TombstoneLedger for S3Ledger {
             .map_err(|_| PurgeError::Ledger)?;
         Ok(())
     }
-}
-
-fn validate_proof(bytes: &[u8]) -> Result<(), PurgeError> {
-    let proof: PurgeProof = serde_json::from_slice(bytes).map_err(|_| PurgeError::Ledger)?;
-    if proof.version != 1
-        || proof.detected_at_ms < proof.expires_at_ms
-        || proof
-            .completed_at_ms
-            .is_some_and(|completed| completed < proof.detected_at_ms)
-    {
-        return Err(PurgeError::Ledger);
-    }
-    Ok(())
 }
 
 fn expire_local_proofs(directory: &std::path::Path, now_ms: i64) -> io::Result<()> {

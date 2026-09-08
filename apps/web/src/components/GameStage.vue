@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 import type {
   CardAcquisitionDestination,
@@ -10,7 +10,7 @@ import type {
 import { useGameCommandStore } from '../stores/gameCommand'
 import { useGameSyncStore } from '../stores/gameSync'
 import { useRoomAccessStore } from '../stores/roomAccess'
-import GameTable from './GameTable.vue'
+import GameTable3D from './GameTable3D.vue'
 import RecoveryManagement from './RecoveryManagement.vue'
 
 const props = defineProps<{
@@ -22,6 +22,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   confirmChoice: []
+  staleCommand: []
   accessInvalidated: [reason: 'session_revoked' | 'participant_protected' | 'room_protected']
   'update:selectedChoiceOptions': [value: string[]]
 }>()
@@ -29,6 +30,8 @@ const emit = defineEmits<{
 const gameCommand = useGameCommandStore()
 const gameSync = useGameSyncStore()
 const roomAccess = useRoomAccessStore()
+const accessibleMode = ref(false)
+const attentionRequired = computed(() => ['uncertain', 'stale', 'failed', 'resyncing', 'not_committed'].includes(gameCommand.status) || gameSync.status === 'failed')
 
 const game = computed(() => roomAccess.game)
 const activeParticipant = computed(() =>
@@ -335,6 +338,7 @@ async function applyOfficialProjection(
 ): Promise<void> {
   const projection = await request
   if (!projection) {
+    if (gameCommand.status === 'stale') emit('staleCommand')
     return
   }
   roomAccess.advanceGameProjection(projection)
@@ -378,13 +382,28 @@ function acquireCard(cardId: string, destination: CardAcquisitionDestination): v
     </div>
 
     <div class="room-stage room-stage--success">
+      <h2 id="game-heading" tabindex="-1">
+        {{ game.game.status === 'won' ? 'Vitória da equipe' : game.game.status === 'lost' ? 'Derrota da equipe' : game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
+      </h2>
+        <GameTable3D
+          :presence="gameSync.participantPresence"
+          :decision-error="['failed', 'stale', 'resynced'].includes(gameCommand.status) ? commandError : null"
+        :commands-disabled="tableCommandsDisabled || game.turn.phase !== 'hero_actions' || game.choice.status === 'pending'"
+        :game="game"
+        :pending-overlay="gameCommand.pendingOverlay"
+        @acquire-card="acquireCard"
+        @assign-attack="assignAttack"
+        @play-card="playCard"
+        @mode-change="accessibleMode = $event"
+      />
+
+      <details class="game-information" :name="accessibleMode ? undefined : 'game-menu'" :open="accessibleMode || attentionRequired">
+        <summary>Partida e conexão</summary>
+        <div class="game-menu-content">
       <p class="service-confirmation" role="status">
         <span class="state-signal" aria-hidden="true"></span>
         {{ game.snapshot.sequence === 0 ? 'Snapshot inicial confirmado' : 'Estado oficial confirmado' }}
       </p>
-      <h2 id="game-heading" tabindex="-1">
-        {{ game.game.status === 'won' ? 'Vitória da equipe' : game.game.status === 'lost' ? 'Derrota da equipe' : game.snapshot.sequence === 0 ? 'Partida iniciada' : 'Partida em andamento' }}
-      </h2>
       <p class="stage-description">
         A sala está selada. Posições, Heróis, aventura e versões permanecem fixos nesta partida.
       </p>
@@ -536,6 +555,8 @@ function acquireCard(cardId: string, destination: CardAcquisitionDestination): v
         </p>
       </section>
 
+        </div>
+      </details>
       <section
         v-if="game.choice.status === 'pending'"
         class="effect-choice"
@@ -622,15 +643,9 @@ function acquireCard(cardId: string, destination: CardAcquisitionDestination): v
         </button>
       </section>
 
-      <GameTable
-        :commands-disabled="tableCommandsDisabled || game.turn.phase !== 'hero_actions' || game.choice.status === 'pending'"
-        :game="game"
-        :pending-overlay="gameCommand.pendingOverlay"
-        @acquire-card="acquireCard"
-        @assign-attack="assignAttack"
-        @play-card="playCard"
-      />
-
+      <details class="game-history" :name="accessibleMode ? undefined : 'game-menu'" :open="accessibleMode">
+      <summary>Histórico</summary>
+      <div class="game-menu-content">
       <section
         v-if="game.effects.outcomes.length > 0"
         class="effect-history"
@@ -644,7 +659,12 @@ function acquireCard(cardId: string, destination: CardAcquisitionDestination): v
           </li>
         </ol>
       </section>
+      </div>
+      </details>
 
+      <details class="game-management" :name="accessibleMode ? undefined : 'game-menu'" :open="accessibleMode">
+      <summary>Participantes e segurança</summary>
+      <div class="game-menu-content">
       <div class="participant-lineup">
         <h3>Posições seladas</h3>
         <ol>
@@ -701,6 +721,8 @@ function acquireCard(cardId: string, destination: CardAcquisitionDestination): v
         </dl>
       </details>
       <p class="seed-note">A seed permanece secreta enquanto a partida estiver em andamento.</p>
+      </div>
+      </details>
     </div>
   </section>
 </template>

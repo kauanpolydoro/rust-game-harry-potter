@@ -1,3 +1,5 @@
+mod game_three;
+
 use game_domain::{
     EffectChangeCause, EffectDie, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
     EffectResource, EffectZone, GameEngine, GameStatus, InitialGameState, LegalGameIntentions,
@@ -32,7 +34,7 @@ pub(crate) struct GameProjectionResponse {
 #[derive(Serialize)]
 pub(super) struct GameSummary {
     pub(super) id: String,
-    status: String,
+    pub(super) status: String,
     adventure: AdventureSummary,
     expires_at: String,
 }
@@ -402,7 +404,7 @@ fn effect_resolution_summary(state: &InitialGameState) -> EffectResolutionSummar
         outcomes: state
             .last_effects()
             .iter()
-            .map(effect_outcome_summary)
+            .filter_map(effect_outcome_summary)
             .collect(),
     }
 }
@@ -581,7 +583,7 @@ fn table_summary(
             .count()
     };
 
-    Ok(TableSummary {
+    let mut table = TableSummary {
         revealed_dark_arts: state
             .effect_world()
             .entities_in(EffectZone::DarkArtsDiscard)
@@ -614,7 +616,9 @@ fn table_summary(
             .effect_world()
             .entities_in(EffectZone::VillainDiscard)
             .len(),
-    })
+    };
+    game_three::describe_table(&mut table, state, content, manifest_digest);
+    Ok(table)
 }
 
 fn villain_summary(
@@ -802,8 +806,11 @@ fn choice_summary(
     }
 }
 
-fn effect_outcome_summary(outcome: &EffectOutcome) -> EffectOutcomeSummary {
-    match outcome {
+fn effect_outcome_summary(outcome: &EffectOutcome) -> Option<EffectOutcomeSummary> {
+    Some(match outcome {
+        EffectOutcome::AllyCopied { .. }
+        | EffectOutcome::TurnStateChanged { .. }
+        | EffectOutcome::TopCardRevealed { .. } => return None,
         EffectOutcome::DrawingBlocked {
             rule_id,
             target_id,
@@ -889,7 +896,7 @@ fn effect_outcome_summary(outcome: &EffectOutcome) -> EffectOutcomeSummary {
                 EffectGameOutcome::Won => "won",
             },
         },
-    }
+    })
 }
 
 fn effect_zone_name(zone: EffectZone) -> &'static str {

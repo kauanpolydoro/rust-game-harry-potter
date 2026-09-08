@@ -8,7 +8,7 @@ async fn real_game_one_starts_through_http_and_persists_preparation_evidence() {
             .fetch_one(&room.database)
             .await
             .expect("published schema version");
-    assert_eq!(schema, "22");
+    assert_eq!(schema, "24");
     let projection = start_ready_game(&room, "game-one").await;
     assert_eq!(projection["snapshot"]["snapshot_version"], 5);
     assert_eq!(projection["choice"]["source_name"], "Flipendo");
@@ -67,7 +67,13 @@ async fn real_game_one_starts_through_http_and_persists_preparation_evidence() {
 }
 
 async fn ready_game_one_room(count: usize) -> (ReadyRoom, Vec<String>) {
-    let manifest = harry_potter_server::game_one_manifest();
+    ready_adventure_room(count, harry_potter_server::game_one_manifest()).await
+}
+
+pub(super) async fn ready_adventure_room(
+    count: usize,
+    manifest: game_content::ContentManifest,
+) -> (ReadyRoom, Vec<String>) {
     let database = database().await;
     let state = AppState::with_content_manifests(database.clone(), vec![manifest.clone()])
         .with_game_seed_source(|| Ok([7; 32]));
@@ -145,7 +151,11 @@ async fn real_game_one_players_buy_play_and_defeat_every_villain_through_http() 
     }
 }
 
-async fn play_game_one(room: &ReadyRoom, cookies: &[String], seek_victory: bool) -> Value {
+pub(super) async fn play_game_one(
+    room: &ReadyRoom,
+    cookies: &[String],
+    seek_victory: bool,
+) -> Value {
     let mut projection = start_ready_game(room, "game-one-flow").await;
     for _ in 0..600 {
         if projection["game"]["status"] != "in_progress" {
@@ -158,20 +168,24 @@ async fn play_game_one(room: &ReadyRoom, cookies: &[String], seek_victory: bool)
         };
         let cookie = &cookies
             [usize::try_from(position.as_u64().expect("responsible position") - 1).expect("index")];
-        let response = room
-            .app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/session")
-                    .header(header::COOKIE, cookie)
-                    .body(Body::empty())
-                    .expect("projection request"),
-            )
-            .await
-            .expect("participant projection");
-        assert_eq!(response.status(), StatusCode::OK);
-        projection = response_json(response).await;
+        // Accepted commands already return the actor's current projection.
+        // Fetch another player's private state only when responsibility changes.
+        if &projection["participant"]["position"] != position {
+            let response = room
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/session")
+                        .header(header::COOKIE, cookie)
+                        .body(Body::empty())
+                        .expect("projection request"),
+                )
+                .await
+                .expect("participant projection");
+            assert_eq!(response.status(), StatusCode::OK);
+            projection = response_json(response).await;
+        }
         let mut command = game_one_command(&projection, seek_victory);
         command["command_id"] = json!(uuid::Uuid::new_v4().to_string());
         command["expected_state_version"] = projection["snapshot"]["state_version"].clone();
@@ -194,13 +208,12 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
     let choice = &projection["choice"];
     if choice["status"] == "pending" {
         let count = usize::try_from(choice["min"].as_u64().expect("choice count")).expect("count");
-        let options = choice["options"]
-            .as_array()
-            .expect("options")
-            .iter()
-            .take(count)
-            .cloned()
-            .collect::<Vec<_>>();
+        let options = super::game_three::scenario_targets(
+            projection,
+            choice["options"].as_array().expect("options"),
+            count,
+            choice["cause"].as_str().unwrap_or_default(),
+        );
         return json!({"type":"resolve_choice", "choice_id":choice["id"], "selected_options":options});
     }
     if !seek_victory {
@@ -218,13 +231,13 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
             .iter()
             .map(|slot| {
                 let count = usize::try_from(slot["min"].as_u64().expect("min")).expect("count");
-                let ids = slot["options"]
+                let options = slot["options"]
                     .as_array()
                     .expect("options")
                     .iter()
-                    .take(count)
                     .map(|option| option["target_id"].clone())
                     .collect::<Vec<_>>();
+                let ids = super::game_three::scenario_targets(projection, &options, count, "");
                 json!({"selector_id":slot["selector_id"], "target_ids":ids})
             })
             .collect::<Vec<_>>();
@@ -247,7 +260,9 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
                 .expect("market")
                 .iter()
                 .find(|item| item["instance_id"] == card["card_id"])
-                .map_or(0, |item| acquisition_priority(&item["catalog_id"]))
+                .map_or(0, |item| {
+                    acquisition_priority(&item["catalog_id"], projection)
+                })
         })
     {
         let destination = if card["destinations"]
@@ -264,7 +279,34 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
     json!({"type":"end_hero_actions"})
 }
 
-fn acquisition_priority(catalog: &Value) -> u8 {
+fn acquisition_priority(catalog: &Value, projection: &Value) -> u8 {
+    if matches!(
+        projection["snapshot"]["versions"]["content"].as_str(),
+        Some("game-two-en-v1" | "game-three-en-v1")
+    ) {
+        let policies: Value = serde_json::from_str(
+            if projection["snapshot"]["versions"]["content"] == "game-three-en-v1" {
+                include_str!("../fixtures/game-three/purchase-priority.json")
+            } else {
+                include_str!("../fixtures/game-two/purchase-priority.json")
+            },
+        )
+        .expect("scenario policies");
+        let count = projection["participants"]
+            .as_array()
+            .expect("participants")
+            .len()
+            .to_string();
+        let order = policies[&count].as_array().expect("policy");
+        return u8::try_from(
+            order.len()
+                - order
+                    .iter()
+                    .position(|id| id == catalog)
+                    .unwrap_or(order.len()),
+        )
+        .expect("priority");
+    }
     match catalog.as_str().expect("catalog ID") {
         "hogwarts-card:001" => 12,
         "hogwarts-card:005" => 11,

@@ -48,7 +48,15 @@ async fn run_application() -> Result<(), Box<dyn Error>> {
         .max_connections(2)
         .connect(&env::var("DATABASE_URL")?)
         .await?;
-    let state = AppState::new(database.clone()).with_migration_database(migrations);
+    let session_value = env::var("SESSION_TOKEN_KEY")?;
+    let session_key = session_value
+        .as_bytes()
+        .try_into()
+        .map_err(|_| io::Error::other("SESSION_TOKEN_KEY must contain exactly 32 bytes"))?;
+    let state = AppState::new(database.clone())
+        .with_migration_database(migrations)
+        .with_session_token_key(session_key)
+        .with_deployment_epoch(env::var("DEPLOYMENT_EPOCH")?.parse()?);
     if !audit_restore {
         initialize(&state)
             .await
@@ -69,12 +77,18 @@ async fn run_application() -> Result<(), Box<dyn Error>> {
                 .await;
             let ledger = S3Ledger::new(aws_sdk_s3::Client::new(&config), bucket);
             ledger.validate_retention().await?;
-            execute(LifecycleWorker::new(database, ledger, key), audit_restore).await?;
+            execute(
+                LifecycleWorker::new(database, ledger, key),
+                audit_restore,
+                &state,
+            )
+            .await?;
         }
         (Err(_), Ok(directory)) => {
             execute(
                 LifecycleWorker::new(database, FileLedger::new(directory.into()), key),
                 audit_restore,
+                &state,
             )
             .await?;
         }
@@ -103,6 +117,7 @@ fn audit_requested() -> Result<bool, io::Error> {
 async fn execute<L: TombstoneLedger>(
     worker: LifecycleWorker<L>,
     audit_restore: bool,
+    state: &AppState,
 ) -> Result<(), Box<dyn Error>> {
     if audit_restore {
         let report = worker.audit_restore().await?;
@@ -113,12 +128,12 @@ async fn execute<L: TombstoneLedger>(
             .into());
         }
     } else {
-        run(worker).await;
+        run(worker, state).await;
     }
     Ok(())
 }
 
-async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>) {
+async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>, state: &AppState) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let shutdown = shutdown_signal();
@@ -127,6 +142,10 @@ async fn run<L: TombstoneLedger>(worker: LifecycleWorker<L>) {
         tokio::select! {
             () = &mut shutdown => return,
             _ = interval.tick() => {
+                if !state.accepts_traffic().await {
+                    tracing::warn!("worker deployment gate closed");
+                    continue;
+                }
                 if let Err(_error) = worker.tick().await { tracing::warn!("purge batch failed; retry scheduled"); }
                 match worker.metrics().await {
                     Ok(metrics) => {

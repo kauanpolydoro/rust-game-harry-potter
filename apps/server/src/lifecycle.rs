@@ -7,13 +7,19 @@ use uuid::Uuid;
 
 mod ledger;
 mod postgres;
+pub(crate) mod recovery;
 pub use ledger::{FileLedger, S3Ledger};
+pub use recovery::{RestoreError, RestoredAccess, adopt_existing_source, reconcile_restore};
 
 /// External stores must acknowledge durable writes and tolerate duplicate calls.
 /// Neither keys nor bodies may contain operational identifiers or credentials.
 pub trait TombstoneLedger: Send + Sync {
-    /// Reads the independent deletion proof. Unsupported readers fail closed.
-    fn contains(&self, _key: &str) -> impl Future<Output = Result<bool, PurgeError>> + Send {
+    /// Absence is valid only after a successful read from the expected ledger.
+    /// Write-only adapters deliberately fail closed during restoration.
+    fn lookup(
+        &self,
+        _key: &str,
+    ) -> impl Future<Output = Result<Option<PurgeProof>, PurgeError>> + Send {
         async { Err(PurgeError::Ledger) }
     }
 
@@ -170,7 +176,12 @@ impl<L: TombstoneLedger> LifecycleWorker<L> {
                 return Ok(report);
             }
             for game_id in roots {
-                if self.ledger.contains(&self.opaque_key(game_id)).await? {
+                if self
+                    .ledger
+                    .lookup(&self.opaque_key(game_id))
+                    .await?
+                    .is_some()
+                {
                     report.resurrected += 1;
                     crate::telemetry::observe(
                         "p0_restore_resurrection",
@@ -214,6 +225,7 @@ impl<L: TombstoneLedger> LifecycleWorker<L> {
     }
 
     async fn process_batch(&self) -> Result<usize, PurgeError> {
+        recovery::record_ledger_witness(&self.database, &self.ledger, &self.key).await?;
         postgres::enqueue(&self.database).await?;
         let now_ms: i64 =
             sqlx::query_scalar("SELECT (extract(epoch FROM clock_timestamp()) * 1000)::BIGINT")

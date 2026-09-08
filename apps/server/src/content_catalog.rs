@@ -10,7 +10,7 @@ use sqlx::PgPool;
 
 mod descriptions;
 mod game_one;
-pub use game_one::game_one_manifest;
+pub use game_one::{game_one_manifest, game_three_manifest, game_two_manifest};
 
 #[derive(Clone)]
 pub(crate) struct ContentCatalog {
@@ -51,7 +51,11 @@ impl ContentCatalog {
                         .find(|entry| entry.catalog_id == setup_entity.catalog_id)?;
                     let effect_rule_id = entry
                         .functional_provenance
-                        .get(&FunctionalField::Effect)?
+                        .get(&if entry.kind == EntryKind::Hero {
+                            FunctionalField::Ability
+                        } else {
+                            FunctionalField::Effect
+                        })?
                         .rule_id
                         .as_ref()?
                         .as_str()
@@ -114,19 +118,7 @@ impl ContentCatalog {
             manifest_digest: manifest.digest.clone(),
             manifest_version: manifest.manifest_version,
             playable: manifest.playable && adventure.playable,
-            prepares_game_one: adventure
-                .functional_provenance
-                .get(&FunctionalField::Setup)
-                .and_then(|definition| definition.rule_id.as_ref())
-                .and_then(|id| manifest.rules.iter().find(|rule| rule.id == *id))
-                .is_some_and(|rule| {
-                    matches!(
-                        rule.effect,
-                        Effect::Structural {
-                            rule: game_content::StructuralRule::GameOneSetup,
-                        }
-                    )
-                }),
+            preparation: preparation(manifest, adventure),
             initial_entities,
         })
     }
@@ -259,7 +251,13 @@ impl ContentCatalog {
             .enumerate()
             .filter_map(|(index, effect)| {
                 descriptions::describe(effect, "Você")
-                    .filter(|text| !text.is_empty())
+                    .map(|text| {
+                        if text.is_empty() {
+                            "Não aplicar efeito.".to_owned()
+                        } else {
+                            text
+                        }
+                    })
                     .map(|label| (format!("option:{}", index + 1), label))
             })
             .collect()
@@ -304,6 +302,33 @@ struct AdventureOption {
     playable: bool,
 }
 
+fn preparation(manifest: &ContentManifest, adventure: &ManifestEntry) -> Option<GamePreparation> {
+    adventure
+        .functional_provenance
+        .get(&FunctionalField::Setup)
+        .and_then(|definition| definition.rule_id.as_ref())
+        .and_then(|id| manifest.rules.iter().find(|rule| rule.id == *id))
+        .and_then(|rule| match rule.effect {
+            Effect::Structural {
+                rule: game_content::StructuralRule::GameOneSetup,
+            } => Some(GamePreparation::One),
+            Effect::Structural {
+                rule: game_content::StructuralRule::GameTwoSetup,
+            } => Some(GamePreparation::Two),
+            Effect::Structural {
+                rule: game_content::StructuralRule::GameThreeSetup,
+            } => Some(GamePreparation::Three),
+            _ => None,
+        })
+}
+
+#[derive(Clone, Copy)]
+enum GamePreparation {
+    One,
+    Two,
+    Three,
+}
+
 #[derive(Clone)]
 pub(crate) struct SelectedContent {
     pub(crate) adventure_id: String,
@@ -313,7 +338,7 @@ pub(crate) struct SelectedContent {
     pub(crate) manifest_digest: String,
     pub(crate) manifest_version: u16,
     pub(crate) playable: bool,
-    pub(crate) prepares_game_one: bool,
+    preparation: Option<GamePreparation>,
     initial_entities: Vec<SelectedInitialEntity>,
 }
 
@@ -330,6 +355,72 @@ struct SelectedInitialEntity {
     reward_rule_id: Option<String>,
     control_limit: Option<u16>,
     dark_arts_count: Option<u8>,
+}
+
+impl SelectedInitialEntity {
+    fn instance(
+        &self,
+        instance_id: String,
+        owner_position: Option<u8>,
+    ) -> game_domain::EffectEntity {
+        match self.kind {
+            EntryKind::DarkArts => game_domain::EffectEntity::new(instance_id, None)
+                .with_kind(game_domain::EffectEntityKind::DarkArts)
+                .with_catalog_id(&self.catalog_id)
+                .with_effect_rule(&self.effect_rule_id),
+            EntryKind::StarterCard => game_domain::EffectEntity::card(
+                instance_id,
+                &self.catalog_id,
+                game_domain::EffectEntityKind::StarterCard,
+                owner_position,
+                &self.effect_rule_id,
+                None,
+            ),
+            EntryKind::HogwartsCard => game_domain::EffectEntity::card(
+                instance_id,
+                &self.catalog_id,
+                game_domain::EffectEntityKind::HogwartsCard,
+                owner_position,
+                &self.effect_rule_id,
+                self.influence_cost,
+            ),
+            EntryKind::Villain => game_domain::EffectEntity::villain(
+                instance_id,
+                &self.catalog_id,
+                &self.effect_rule_id,
+                self.health
+                    .expect("validated villain setup has positive health"),
+            )
+            .with_reward_rule(
+                self.reward_rule_id
+                    .as_deref()
+                    .expect("validated villain setup has a reward"),
+            ),
+            EntryKind::Location => game_domain::EffectEntity::location(
+                instance_id,
+                &self.catalog_id,
+                &self.effect_rule_id,
+                self.control_limit
+                    .expect("validated location has a control limit"),
+                self.dark_arts_count
+                    .expect("validated location has a Dark Arts count"),
+            ),
+            EntryKind::Hero => {
+                game_domain::EffectEntity::hero(owner_position.expect("validated Hero owner"))
+                    .with_catalog_id(&self.catalog_id)
+                    .with_effect_rule(&self.effect_rule_id)
+                    .with_turn_state(Some(game_domain::EffectTurnState::default()))
+            }
+            EntryKind::Adventure
+            | EntryKind::Catalog
+            | EntryKind::Horcrux
+            | EntryKind::Proficiency
+            | EntryKind::Ruleset
+            | EntryKind::TurnOrder => {
+                unreachable!("validated game setup has a supported entity kind")
+            }
+        }
+    }
 }
 
 impl SelectedContent {
@@ -355,10 +446,11 @@ impl SelectedContent {
             },
         };
         let engine = game_domain::GameEngine::new(rules);
-        if self.prepares_game_one {
-            engine.start_game_one(input, random)
-        } else {
-            engine.start(input, random)
+        match self.preparation {
+            Some(GamePreparation::One) => engine.start_game_one(input, random),
+            Some(GamePreparation::Two) => engine.start_game_two(input, random),
+            Some(GamePreparation::Three) => engine.start_game_three(input, random),
+            None => engine.start(input, random),
         }
     }
 
@@ -396,62 +488,22 @@ impl SelectedContent {
                 for _ in 0..template.copies {
                     let instance_id = format!("instance:{next_instance:08}");
                     next_instance += 1;
-                    let entity = match template.kind {
-                        EntryKind::DarkArts => game_domain::EffectEntity::new(instance_id, None)
-                            .with_kind(game_domain::EffectEntityKind::DarkArts)
-                            .with_catalog_id(&template.catalog_id)
-                            .with_effect_rule(&template.effect_rule_id),
-                        EntryKind::StarterCard => game_domain::EffectEntity::card(
-                            instance_id,
-                            &template.catalog_id,
-                            game_domain::EffectEntityKind::StarterCard,
-                            owner_position,
-                            &template.effect_rule_id,
-                            None,
-                        ),
-                        EntryKind::HogwartsCard => game_domain::EffectEntity::card(
-                            instance_id,
-                            &template.catalog_id,
-                            game_domain::EffectEntityKind::HogwartsCard,
-                            owner_position,
-                            &template.effect_rule_id,
-                            template.influence_cost,
-                        ),
-                        EntryKind::Villain => game_domain::EffectEntity::villain(
-                            instance_id,
-                            &template.catalog_id,
-                            &template.effect_rule_id,
-                            template
-                                .health
-                                .expect("validated villain setup has positive health"),
+                    let mut entity = template.instance(instance_id, owner_position);
+                    if template.kind == EntryKind::Villain
+                        && matches!(
+                            self.preparation,
+                            Some(GamePreparation::Two | GamePreparation::Three)
                         )
-                        .with_reward_rule(
-                            template
-                                .reward_rule_id
-                                .as_deref()
-                                .expect("validated villain setup has a reward"),
-                        ),
-                        EntryKind::Location => game_domain::EffectEntity::location(
-                            instance_id,
-                            &template.catalog_id,
-                            &template.effect_rule_id,
-                            template
-                                .control_limit
-                                .expect("validated location has a control limit"),
-                            template
-                                .dark_arts_count
-                                .expect("validated location has a Dark Arts count"),
-                        ),
-                        EntryKind::Adventure
-                        | EntryKind::Catalog
-                        | EntryKind::Hero
-                        | EntryKind::Horcrux
-                        | EntryKind::Proficiency
-                        | EntryKind::Ruleset
-                        | EntryKind::TurnOrder => {
-                            unreachable!("validated game setup has a supported entity kind")
-                        }
-                    };
+                    {
+                        entity = entity
+                            .with_max_health(template.health.expect("validated villain health"));
+                    }
+                    if template.kind == EntryKind::Villain
+                        && matches!(self.preparation, Some(GamePreparation::Three))
+                    {
+                        entity =
+                            entity.with_turn_state(Some(game_domain::EffectTurnState::default()));
+                    }
                     placements.push(game_domain::EffectEntityPlacement::new(
                         entity,
                         template.zone,
@@ -575,6 +627,38 @@ fn compile_effect(
     rules: &BTreeMap<&game_content::RuleId, &EffectRule>,
 ) -> Option<game_domain::EffectDefinition> {
     Some(match effect {
+        Effect::HeroAbility { strategy, effect } => game_domain::EffectDefinition::HeroAbility {
+            strategy: match strategy {
+                game_content::HeroAbilityStrategy::HarryGameThreeV1 => {
+                    game_domain::HeroAbilityStrategy::HarryGameThreeV1
+                }
+                game_content::HeroAbilityStrategy::HermioneGameThreeV1 => {
+                    game_domain::HeroAbilityStrategy::HermioneGameThreeV1
+                }
+                game_content::HeroAbilityStrategy::NevilleGameThreeV1 => {
+                    game_domain::HeroAbilityStrategy::NevilleGameThreeV1
+                }
+                game_content::HeroAbilityStrategy::RonGameThreeV1 => {
+                    game_domain::HeroAbilityStrategy::RonGameThreeV1
+                }
+            },
+            effect: Box::new(compile_effect(effect, rules)?),
+        },
+        Effect::RevealTopCard {
+            minimum_cost,
+            effect,
+        } => game_domain::EffectDefinition::RevealTopCard {
+            minimum_cost: *minimum_cost,
+            effect: Box::new(compile_effect(effect, rules)?),
+        },
+        Effect::LimitVillainAttack { maximum } => {
+            game_domain::EffectDefinition::LimitVillainAttack { maximum: *maximum }
+        }
+        Effect::PreventExtraDrawing => game_domain::EffectDefinition::PreventExtraDrawing,
+        Effect::ForEachTarget { target, effect } => game_domain::EffectDefinition::ForEachTarget {
+            target: effect_selector(target),
+            effect: Box::new(compile_effect(effect, rules)?),
+        },
         Effect::TopDeckAcquisition { card_type } => {
             game_domain::EffectDefinition::TopDeckAcquisition {
                 card_type: effect_card_type(*card_type),
@@ -587,23 +671,7 @@ fn compile_effect(
             game_domain::EffectDefinition::HandDamageLimit { maximum: *maximum }
         }
         Effect::Reaction { trigger, effect } => game_domain::EffectDefinition::Reaction {
-            trigger: match trigger {
-                game_content::ReactionTrigger::OwnerPlaysAlly => {
-                    game_domain::EffectReactionTrigger::OwnerPlaysAlly
-                }
-                game_content::ReactionTrigger::ControlAdded => {
-                    game_domain::EffectReactionTrigger::ControlAdded
-                }
-                game_content::ReactionTrigger::HeroForcedDiscard => {
-                    game_domain::EffectReactionTrigger::HeroForcedDiscard
-                }
-                game_content::ReactionTrigger::SelfForcedDiscard => {
-                    game_domain::EffectReactionTrigger::SelfForcedDiscard
-                }
-                game_content::ReactionTrigger::OwnerDefeatsVillain => {
-                    game_domain::EffectReactionTrigger::OwnerDefeatsVillain
-                }
-            },
+            trigger: effect_reaction_trigger(*trigger),
             effect: Box::new(compile_effect(effect, rules)?),
         },
         Effect::RevealDarkArts => game_domain::EffectDefinition::RevealDarkArts,
@@ -660,8 +728,34 @@ fn compile_effect(
     })
 }
 
+const fn effect_reaction_trigger(
+    trigger: game_content::ReactionTrigger,
+) -> game_domain::EffectReactionTrigger {
+    match trigger {
+        game_content::ReactionTrigger::OwnerPlaysAlly => {
+            game_domain::EffectReactionTrigger::OwnerPlaysAlly
+        }
+        game_content::ReactionTrigger::ControlAdded => {
+            game_domain::EffectReactionTrigger::ControlAdded
+        }
+        game_content::ReactionTrigger::HeroForcedDiscard => {
+            game_domain::EffectReactionTrigger::HeroForcedDiscard
+        }
+        game_content::ReactionTrigger::SelfHarmfulDiscard => {
+            game_domain::EffectReactionTrigger::SelfHarmfulDiscard
+        }
+        game_content::ReactionTrigger::SelfForcedDiscard => {
+            game_domain::EffectReactionTrigger::SelfForcedDiscard
+        }
+        game_content::ReactionTrigger::OwnerDefeatsVillain => {
+            game_domain::EffectReactionTrigger::OwnerDefeatsVillain
+        }
+    }
+}
+
 fn effect_condition(condition: &Condition) -> game_domain::EffectCondition {
     match condition {
+        Condition::DrawingAllowed => game_domain::EffectCondition::DrawingAllowed,
         Condition::HasEligibleTarget { target } => {
             game_domain::EffectCondition::HasEligibleTarget {
                 target: effect_selector(target),
@@ -685,6 +779,7 @@ fn effect_selector(selector: &Selector) -> game_domain::EffectSelector {
         zone: effect_zone(selector.zone),
         owner: match selector.owner {
             TargetOwner::Actor => game_domain::EffectTargetOwner::Actor,
+            TargetOwner::Other => game_domain::EffectTargetOwner::Other,
             TargetOwner::Any => game_domain::EffectTargetOwner::Any,
         },
         min: selector.cardinality.min,
@@ -693,6 +788,9 @@ fn effect_selector(selector: &Selector) -> game_domain::EffectSelector {
             .eligibility
             .iter()
             .map(|eligibility| match eligibility {
+                Eligibility::CardType { card_type } => game_domain::EffectEligibility::CardType {
+                    card_type: effect_card_type(*card_type),
+                },
                 Eligibility::ResourceAtLeast { resource, amount } => {
                     game_domain::EffectEligibility::ResourceAtLeast {
                         resource: effect_resource(*resource),
@@ -714,6 +812,20 @@ fn effect_card_type(card_type: game_content::CardType) -> game_domain::EffectCar
 
 fn effect_operation(operation: &Operation) -> game_domain::EffectOperation {
     match operation {
+        Operation::SuppressVillain => game_domain::EffectOperation::SuppressVillain,
+        Operation::GainInfluenceAndHealth { influence, health } => {
+            game_domain::EffectOperation::GainInfluenceAndHealth {
+                influence: *influence,
+                health: *health,
+            }
+        }
+        Operation::DiscardForSpellBonus { influence } => {
+            game_domain::EffectOperation::DiscardForSpellBonus {
+                influence: *influence,
+            }
+        }
+        Operation::DiscardVoluntarily => game_domain::EffectOperation::DiscardVoluntarily,
+        Operation::CopyPlayedAlly => game_domain::EffectOperation::CopyPlayedAlly,
         Operation::GainAttackPerAllyPlayed { amount } => {
             game_domain::EffectOperation::GainAttackPerAllyPlayed { amount: *amount }
         }
@@ -859,6 +971,29 @@ mod tests {
                 .as_deref(),
             Some("Cada Herói compra 1 carta.")
         );
+    }
+
+    #[test]
+    fn game_three_descriptions_identify_nevilles_recipient_and_optional_discard() {
+        let manifest = super::game_three_manifest();
+        let digest = manifest.digest.clone();
+        let catalog = super::ContentCatalog::new(vec![manifest]);
+        assert_eq!(
+            catalog
+                .entity_description(&digest, "hero:008", game_content::FunctionalField::Ability)
+                .as_deref(),
+            Some(
+                "No seu turno, a primeira vez que cada Herói recuperar Vida: Esse Herói recebe 1 de Vida."
+            )
+        );
+        let crystal = catalog
+            .entity_description(
+                &digest,
+                "hogwarts-card:026",
+                game_content::FunctionalField::Effect,
+            )
+            .expect("Crystal Ball description");
+        assert!(crystal.ends_with("Ou: Não realizar esta ação."));
     }
 
     #[test]

@@ -43,6 +43,9 @@ pub(crate) async fn protect_request(
     request: Request,
     next: Next,
 ) -> Response {
+    if request.uri().path().starts_with("/api/") && !state.accepts_traffic().await {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if request
         .uri()
         .path_and_query()

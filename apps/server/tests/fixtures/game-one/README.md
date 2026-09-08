@@ -1,7 +1,7 @@
 # Goldens do Jogo 1
 
 Os seis cenários registram comandos enviados pela interface real, com 2, 3 e 4 participantes, até vitória ou derrota.
-A captura vem de `apps/web/e2e/game-one.spec.ts`, executado contra o servidor Rust, WebSocket e PostgreSQL.
+A captura vem de `apps/web/e2e/adventures.spec.ts`, executado contra o servidor Rust, WebSocket e PostgreSQL.
 O harness usa a seed de teste composta por 32 bytes de valor 7, por meio da configuração de construção da aplicação.
 A aplicação de produção continua obtendo a seed de um CSPRNG do sistema operacional.
 

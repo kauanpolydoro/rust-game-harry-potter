@@ -178,6 +178,7 @@ const IDENTITY_TABLES: &[&str] = &[
 const GLOBAL_TABLES: &[&str] = &[
     "_sqlx_migrations",
     "application_metadata",
+    "runtime_deployment",
     "content_manifests",
     "lifecycle_purge_jobs",
     "lifecycle_purge_observations",
@@ -243,7 +244,7 @@ pub(super) async fn purge(tx: &mut Tx<'_>, job: &Job) -> Result<(), PurgeError> 
     Ok(())
 }
 
-async fn inventory(tx: &mut Tx<'_>) -> Result<Vec<String>, PurgeError> {
+pub(super) async fn inventory(tx: &mut Tx<'_>) -> Result<Vec<String>, PurgeError> {
     let tables: Vec<String> = sqlx::query_scalar(
         r"
         SELECT c.relname::TEXT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

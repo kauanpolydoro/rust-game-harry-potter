@@ -82,9 +82,7 @@ async fn purge_removes_operational_data_and_leaves_only_opaque_external_proof() 
         "live games must remain intact"
     );
     fixture.expire().await;
-    for _ in 0..8 {
-        worker.tick().await.unwrap();
-    }
+    tick_until_attempt(&worker).await.unwrap();
     let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM games")
         .fetch_one(&fixture.room.database)
         .await
@@ -185,6 +183,23 @@ impl TombstoneLedger for InterruptedLedger {
     }
 }
 
+// An expiration scanner may hold the root during an otherwise eligible tick.
+// Only empty cycles are retried; the first attempted purge must match the test.
+async fn tick_until_attempt<L: TombstoneLedger>(
+    worker: &LifecycleWorker<L>,
+) -> Result<usize, PurgeError> {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match worker.tick().await {
+                Ok(0) => tokio::time::sleep(Duration::from_millis(10)).await,
+                outcome => return outcome,
+            }
+        }
+    })
+    .await
+    .expect("an eligible purge must be attempted after the root becomes available")
+}
+
 async fn retry_now(fixture: &Fixture) {
     sqlx::query("UPDATE lifecycle_purge_jobs SET next_attempt_at = clock_timestamp()")
         .execute(&fixture.room.database)
@@ -199,7 +214,7 @@ async fn lost_ledger_ack_keeps_the_root_and_a_fresh_worker_resumes_idempotently(
     let ledger = InterruptedLedger::new(&fixture);
     ledger.lose_ack.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    assert_eq!(worker.tick().await, Err(PurgeError::Ledger));
+    assert_eq!(tick_until_attempt(&worker).await, Err(PurgeError::Ledger));
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM games")
             .fetch_one(&fixture.room.database)
@@ -213,8 +228,8 @@ async fn lost_ledger_ack_keeps_the_root_and_a_fresh_worker_resumes_idempotently(
     ledger.lose_ack.store(false, Ordering::SeqCst);
     retry_now(&fixture).await;
     let restarted = LifecycleWorker::new(fixture.room.database.clone(), ledger, [7; 32]);
-    restarted.tick().await.unwrap();
-    restarted.tick().await.unwrap();
+    tick_until_attempt(&restarted).await.unwrap();
+    assert_eq!(restarted.tick().await.unwrap(), 0);
     assert_eq!(restarted.metrics().await.unwrap().completed, 1);
     assert_eq!(std::fs::read_dir(&fixture.ledger_dir).unwrap().count(), 2);
     fixture.cleanup().await;
@@ -232,7 +247,10 @@ async fn restore_audit_reports_roots_with_external_tombstones_without_mutating_t
     let ledger = InterruptedLedger::new(&fixture);
     ledger.lose_ack.store(true, Ordering::SeqCst);
     let interrupted = LifecycleWorker::new(fixture.room.database.clone(), ledger, [7; 32]);
-    assert_eq!(interrupted.tick().await, Err(PurgeError::Ledger));
+    assert_eq!(
+        tick_until_attempt(&interrupted).await,
+        Err(PurgeError::Ledger)
+    );
     // This is the forbidden post-reconciliation state: a durable tombstone
     // exists in the independent ledger while its operational root is present.
     let audit = fixture.worker().audit_restore().await.unwrap();
@@ -298,7 +316,7 @@ async fn verifier_blocks_completion_for_an_orphan_after_root_removal_and_process
     let ledger = InterruptedLedger::new(&fixture);
     ledger.pause_completion.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    let process = tokio::spawn(async move { worker.tick().await });
+    let process = tokio::spawn(async move { tick_until_attempt(&worker).await });
     tokio::time::timeout(Duration::from_secs(10), ledger.entered.notified())
         .await
         .unwrap();
@@ -318,7 +336,10 @@ async fn verifier_blocks_completion_for_an_orphan_after_root_removal_and_process
         .await
         .unwrap();
     let restarted = fixture.worker();
-    assert_eq!(restarted.tick().await, Err(PurgeError::Orphans));
+    assert_eq!(
+        tick_until_attempt(&restarted).await,
+        Err(PurgeError::Orphans)
+    );
     assert_eq!(restarted.metrics().await.unwrap().completed, 0);
     assert_eq!(std::fs::read_dir(&fixture.ledger_dir).unwrap().count(), 1);
     sqlx::query("DELETE FROM guest_identities WHERE id = $1")
@@ -327,7 +348,7 @@ async fn verifier_blocks_completion_for_an_orphan_after_root_removal_and_process
         .await
         .unwrap();
     retry_now(&fixture).await;
-    restarted.tick().await.unwrap();
+    tick_until_attempt(&restarted).await.unwrap();
     assert_eq!(restarted.metrics().await.unwrap().completed, 1);
     fixture.cleanup().await;
 }
@@ -345,14 +366,22 @@ async fn an_unregistered_blob_or_telemetry_store_prevents_false_completion() {
         .unwrap();
     fixture.expire().await;
     let worker = fixture.worker();
-    assert_eq!(worker.tick().await, Err(PurgeError::Orphans));
+    // A scanner can hold the root while the worker skips it for this cycle.
+    let mut scanner = fixture.room.database.begin().await.unwrap();
+    sqlx::query("SELECT id FROM games FOR UPDATE")
+        .execute(&mut *scanner)
+        .await
+        .unwrap();
+    assert_eq!(worker.tick().await, Ok(0));
+    scanner.rollback().await.unwrap();
+    assert_eq!(tick_until_attempt(&worker).await, Err(PurgeError::Orphans));
     assert_eq!(worker.metrics().await.unwrap().completed, 0);
     sqlx::query("DROP TABLE forgotten_blobs")
         .execute(&fixture.room.database)
         .await
         .unwrap();
     retry_now(&fixture).await;
-    worker.tick().await.unwrap();
+    tick_until_attempt(&worker).await.unwrap();
     assert_eq!(worker.metrics().await.unwrap().completed, 1);
     fixture.cleanup().await;
 }
@@ -364,7 +393,7 @@ async fn concurrent_workers_skip_locked_jobs_and_complete_exactly_once() {
     let ledger = InterruptedLedger::new(&fixture);
     ledger.pause_completion.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    let process = tokio::spawn(async move { worker.tick().await });
+    let process = tokio::spawn(async move { tick_until_attempt(&worker).await });
     tokio::time::timeout(Duration::from_secs(10), ledger.entered.notified())
         .await
         .unwrap();
@@ -397,7 +426,7 @@ async fn metrics_include_stalled_and_undetected_games_instead_of_only_successes(
     let ledger = InterruptedLedger::new(&fixture);
     ledger.lose_ack.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    assert_eq!(worker.tick().await, Err(PurgeError::Ledger));
+    assert_eq!(tick_until_attempt(&worker).await, Err(PurgeError::Ledger));
     let metrics = worker.metrics().await.unwrap();
     assert_eq!(metrics.pending, 1);
     assert_eq!(metrics.overdue, 1);
@@ -405,7 +434,7 @@ async fn metrics_include_stalled_and_undetected_games_instead_of_only_successes(
     assert!(metrics.oldest_pending_seconds >= 90000.0);
     ledger.lose_ack.store(false, Ordering::SeqCst);
     retry_now(&fixture).await;
-    worker.tick().await.unwrap();
+    tick_until_attempt(&worker).await.unwrap();
     let metrics = worker.metrics().await.unwrap();
     assert_eq!(metrics.completed, 1);
     assert!(metrics.purge_max_seconds >= 90000.0);
@@ -458,7 +487,17 @@ async fn purge_removes_consumed_credentials_security_history_and_open_connection
     let (address, server) = start_network_server(room.app.clone()).await;
     let mut socket = connect_current_game(address, &room.host_cookie).await;
     fixture.expire().await;
-    fixture.worker().tick().await.unwrap();
+    let mut locked = room.database.begin().await.unwrap();
+    sqlx::query("SELECT id FROM games FOR UPDATE")
+        .execute(&mut *locked)
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.worker().tick().await.unwrap(),
+        0,
+        "a locked game is skipped until a later batch"
+    );
+    locked.commit().await.unwrap();
     let close = tokio::time::timeout(Duration::from_secs(5), socket.read_close_code())
         .await
         .unwrap();
@@ -466,6 +505,14 @@ async fn purge_removes_consumed_credentials_security_history_and_open_connection
         matches!(close, 4001 | 1008),
         "expired or already purged sessions must close"
     );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let worker = fixture.worker();
+        while worker.metrics().await.unwrap().completed != 1 {
+            worker.tick().await.unwrap();
+        }
+    })
+    .await
+    .expect("later batches must complete the purge after the root is unlocked");
     for table in tables.into_iter().chain([
         "game_realtime_connections",
         "guest_sessions",
@@ -560,7 +607,7 @@ async fn waiting_for_external_completion_does_not_block_a_command_in_another_gam
     let ledger = InterruptedLedger::new(&fixture);
     ledger.pause_completion.store(true, Ordering::SeqCst);
     let worker = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
-    let process = tokio::spawn(async move { worker.tick().await });
+    let process = tokio::spawn(async move { tick_until_attempt(&worker).await });
     tokio::time::timeout(Duration::from_secs(10), ledger.entered.notified())
         .await
         .unwrap();
@@ -653,9 +700,12 @@ async fn concurrent_purges_remove_the_last_copy_of_a_shared_identity() {
     let uncertain = InterruptedLedger::new(&fixture);
     uncertain.lose_ack.store(true, Ordering::SeqCst);
     assert_eq!(
-        LifecycleWorker::new(fixture.room.database.clone(), uncertain, [7; 32])
-            .tick()
-            .await,
+        tick_until_attempt(&LifecycleWorker::new(
+            fixture.room.database.clone(),
+            uncertain,
+            [7; 32],
+        ))
+        .await,
         Err(PurgeError::Ledger)
     );
     retry_now(&fixture).await;
@@ -666,7 +716,7 @@ async fn concurrent_purges_remove_the_last_copy_of_a_shared_identity() {
     };
     let first = LifecycleWorker::new(fixture.room.database.clone(), ledger.clone(), [7; 32]);
     let second = LifecycleWorker::new(fixture.room.database.clone(), ledger, [7; 32]);
-    let (a, b) = tokio::join!(first.tick(), second.tick());
+    let (a, b) = tokio::join!(tick_until_attempt(&first), tick_until_attempt(&second));
     a.unwrap();
     b.unwrap();
     assert_eq!(first.metrics().await.unwrap().completed, 2);
@@ -687,7 +737,10 @@ async fn slow_sql_is_cancelled_in_postgres_and_the_job_can_resume() {
         .execute(&fixture.room.database).await.unwrap();
     fixture.expire().await;
     let started = Instant::now();
-    assert_eq!(fixture.worker().tick().await, Err(PurgeError::Database));
+    assert_eq!(
+        tick_until_attempt(&fixture.worker()).await,
+        Err(PurgeError::Database)
+    );
     assert!(
         started.elapsed() < Duration::from_secs(8),
         "server-side work must be cancelled too"
@@ -697,7 +750,7 @@ async fn slow_sql_is_cancelled_in_postgres_and_the_job_can_resume() {
         .await
         .unwrap();
     retry_now(&fixture).await;
-    fixture.worker().tick().await.unwrap();
+    tick_until_attempt(&fixture.worker()).await.unwrap();
     assert_eq!(fixture.worker().metrics().await.unwrap().completed, 1);
     fixture.cleanup().await;
 }

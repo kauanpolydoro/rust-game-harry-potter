@@ -1,0 +1,64 @@
+Validation of issue #28
+Completed: 2026-09-07T21:24:30.560245+00:00
+Command: RUST_TEST_THREADS=4 make check
+Exit code: 0
+Environment: Linux container with isolated bridge network; PostgreSQL forwarded to local port 55432.
+Rust: 353 passed; 2 pre-existing SLO profiles ignored by the ordinary suite.
+Node scripts: 9 passed.
+Web unit tests: 118 passed across 9 files.
+E2E: 51 passed (8.4m); Chromium, WebKit, Firefox; 24 table scenarios.
+Gates: cargo fmt, clippy, cargo test, module boundaries, generated contracts, lint, types, tests, production build, real HTTP/WebSocket E2E, secret scan.
+Remote CI remains disabled.
+
+Browser results:
+✓   1 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 2 players reaches lost through the browser and WebSocket (19.9s)
+✓   3 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 3 players reaches lost through the browser and WebSocket (10.8s)
+✓   2 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 2 players reaches won through the browser and WebSocket (41.8s)
+✓   5 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 4 players reaches lost through the browser and WebSocket (11.4s)
+✓   4 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 3 players reaches won through the browser and WebSocket (39.7s)
+✓   6 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 1 with 4 players reaches won through the browser and WebSocket (45.5s)
+✓   7 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 2 players reaches lost through the browser and WebSocket (36.6s)
+✓   9 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 3 players reaches lost through the browser and WebSocket (22.0s)
+✓   8 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 2 players reaches won through the browser and WebSocket (1.2m)
+✓  11 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 4 players reaches lost through the browser and WebSocket (26.9s)
+✓  10 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 3 players reaches won through the browser and WebSocket (1.5m)
+✓  13 [mobile-chromium] › e2e/game-expiration.spec.ts:12:1 › expiration clears private data, pending commands and channels in every connected browser (3.3s)
+✓  14 [mobile-chromium] › e2e/health-shell.spec.ts:364:1 › a player sees when the authoritative service is ready (491ms)
+✓  15 [mobile-chromium] › e2e/health-shell.spec.ts:374:1 › a player can retry when the authoritative service is unavailable (542ms)
+✓  16 [mobile-chromium] › e2e/health-shell.spec.ts:389:1 › a guest creates a private room and becomes its host (633ms)
+✓  17 [mobile-chromium] › e2e/health-shell.spec.ts:405:1 › a participant revokes the current session and the browser removes private state (834ms)
+✓  18 [mobile-chromium] › e2e/health-shell.spec.ts:430:1 › a guest joins with an available hero and keeps the same position after reload (1.4s)
+✓  19 [mobile-chromium] › e2e/health-shell.spec.ts:467:1 › a participant explicitly replaces one of two sessions when recovering on a third device (2.8s)
+✓  20 [mobile-chromium] › e2e/health-shell.spec.ts:564:1 › recovery rotation preserves sessions and replaces direct and assisted credentials (3.3s)
+✓  21 [mobile-chromium] › e2e/health-shell.spec.ts:661:1 › a player replays a missed event and falls back to Snapshot within recovery SLOs (4.8s)
+✓  22 [mobile-chromium] › e2e/health-shell.spec.ts:889:1 › the current interface reflows at an effective 200 percent zoom (780ms)
+✓  23 [mobile-chromium] › e2e/health-shell.spec.ts:909:1 › a targeted card stays in the official hand until its command is accepted (724ms)
+✓  24 [mobile-chromium] › e2e/health-shell.spec.ts:974:1 › a stale command resynchronizes before the player can decide again (664ms)
+✓  25 [mobile-chromium] › e2e/security-boundaries.spec.ts:3:1 › a modified browser cannot bypass CSRF, strict schemas or server session identity (837ms)
+✓  26 [mobile-chromium] › e2e/security-boundaries.spec.ts:56:1 › recovery document enforces CSP and clears its credential before application requests (469ms)
+✓  27 [mobile-chromium] › e2e/security-boundaries.spec.ts:80:1 › recovery tells the player when to retry after the real credential budget is exhausted (2.0s)
+✓  28 [mobile-chromium] › e2e/table3d.spec.ts:12:1 › prototype completes selection, target, damage, acquisition and a turn (7.9s)
+✓  29 [mobile-chromium] › e2e/table3d.spec.ts:45:1 › long hands remain inspectable and rotation cancels a local gesture (6.2s)
+✓  30 [mobile-chromium] › e2e/table3d.spec.ts:76:1 › keyboard, invalid drops and pointer cancellation preserve explicit decisions (4.8s)
+✓  31 [mobile-chromium] › e2e/table3d.spec.ts:106:1 › seven played cards remain individually reachable by touch (13.0s)
+✓  32 [mobile-chromium] › e2e/table3d.spec.ts:127:1 › real pending, remote, stale and rejected commands require a fresh decision (20.8s)
+✓  12 [mobile-chromium] › e2e/adventures.spec.ts:69:7 › Game 2 with 4 players reaches won through the browser and WebSocket (2.0m)
+✓  33 [mobile-chromium] › e2e/table3d.spec.ts:231:3 › 2 participants finish a real Game 1 turn through the 3D table (30.8s)
+✓  34 [mobile-chromium] › e2e/table3d.spec.ts:231:3 › 3 participants finish a real Game 1 turn through the 3D table (43.7s)
+✓  36 [table-webkit] › e2e/table3d.spec.ts:12:1 › prototype completes selection, target, damage, acquisition and a turn (7.9s)
+✓  37 [table-webkit] › e2e/table3d.spec.ts:45:1 › long hands remain inspectable and rotation cancels a local gesture (6.9s)
+✓  35 [mobile-chromium] › e2e/table3d.spec.ts:231:3 › 4 participants finish a real Game 1 turn through the 3D table (55.3s)
+✓  38 [table-webkit] › e2e/table3d.spec.ts:76:1 › keyboard, invalid drops and pointer cancellation preserve explicit decisions (2.5s)
+✓  39 [table-webkit] › e2e/table3d.spec.ts:106:1 › seven played cards remain individually reachable by touch (6.4s)
+✓  40 [table-webkit] › e2e/table3d.spec.ts:127:1 › real pending, remote, stale and rejected commands require a fresh decision (19.7s)
+✓  41 [table-webkit] › e2e/table3d.spec.ts:231:3 › 2 participants finish a real Game 1 turn through the 3D table (30.7s)
+✓  42 [table-webkit] › e2e/table3d.spec.ts:231:3 › 3 participants finish a real Game 1 turn through the 3D table (27.6s)
+✓  44 [table-firefox] › e2e/table3d.spec.ts:12:1 › prototype completes selection, target, damage, acquisition and a turn (7.3s)
+✓  45 [table-firefox] › e2e/table3d.spec.ts:45:1 › long hands remain inspectable and rotation cancels a local gesture (5.2s)
+✓  46 [table-firefox] › e2e/table3d.spec.ts:76:1 › keyboard, invalid drops and pointer cancellation preserve explicit decisions (3.7s)
+✓  47 [table-firefox] › e2e/table3d.spec.ts:106:1 › seven played cards remain individually reachable by touch (8.0s)
+✓  43 [table-webkit] › e2e/table3d.spec.ts:231:3 › 4 participants finish a real Game 1 turn through the 3D table (37.6s)
+✓  48 [table-firefox] › e2e/table3d.spec.ts:127:1 › real pending, remote, stale and rejected commands require a fresh decision (16.9s)
+✓  49 [table-firefox] › e2e/table3d.spec.ts:231:3 › 2 participants finish a real Game 1 turn through the 3D table (19.4s)
+✓  50 [table-firefox] › e2e/table3d.spec.ts:231:3 › 3 participants finish a real Game 1 turn through the 3D table (16.4s)
+✓  51 [table-firefox] › e2e/table3d.spec.ts:231:3 › 4 participants finish a real Game 1 turn through the 3D table (18.9s)

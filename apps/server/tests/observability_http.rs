@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use harry_potter_server::{AppState, build_router};
+use harry_potter_server::{AppState, build_router, initialize};
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
@@ -70,11 +70,13 @@ async fn http_observations_are_exportable_and_private_fields_never_reach_the_wri
 #[tokio::test]
 async fn browser_observations_have_a_closed_numeric_schema_and_cannot_raise_p0() {
     let logs = log_capture::LogCapture::start();
-    let app = build_router(AppState::new(
-        PgPoolOptions::new()
-            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
-            .unwrap(),
-    ));
+    let database = PgPoolOptions::new()
+        .connect(&std::env::var("TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let state = AppState::new(database);
+    initialize(&state).await.unwrap();
+    let app = build_router(state);
     for (body, expected) in [
         (
             r#"{"metric":"web_lcp_seconds","value":1.2,"outcome":"success"}"#,

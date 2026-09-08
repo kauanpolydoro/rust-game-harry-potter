@@ -96,6 +96,7 @@ Alterações destrutivas, mudanças de credenciais ou permissões e ações em p
    Falta de evidência sobre ledger ou retenção mantém o ambiente isolado.
 
 Após a reconciliação, execute `lifecycle-worker --audit-restore` com `DATABASE_URL` apontando exclusivamente para o banco isolado e a configuração do ledger original.
+Configure também `DEPLOYMENT_EPOCH` e `SESSION_TOKEN_KEY` do destino, conforme o [procedimento de restore](restore.md).
 Esse modo não aplica migrations nem inicia o purge: percorre as raízes restauradas, verifica seus HMACs no ledger independente e falha se alguma raiz conflitar com um comprovante.
 O adapter S3 precisa de `s3:GetObject` para essa leitura, além das permissões já descritas no runbook do lifecycle.
 Saída zero é somente a verificação de Tombstones; não substitui reconciliação de expirações, revogações, versões e cópias externas.

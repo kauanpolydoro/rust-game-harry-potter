@@ -27,6 +27,7 @@ pub(super) const ROUTES: &[&str] = &[
 ];
 
 pub(super) const MESSAGES: &[&str] = &[
+    "worker deployment gate closed",
     "process panicked",
     "process terminated after an operational failure",
     "HTTP request completed",

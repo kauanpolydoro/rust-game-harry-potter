@@ -52,9 +52,11 @@ fn contains_revelation(effect: &Effect) -> bool {
         Effect::Condition {
             then, otherwise, ..
         } => contains_revelation(then) || otherwise.as_deref().is_some_and(contains_revelation),
-        Effect::Repeat { effect, .. } | Effect::Reaction { effect, .. } => {
-            contains_revelation(effect)
-        }
+        Effect::HeroAbility { effect, .. }
+        | Effect::RevealTopCard { effect, .. }
+        | Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. }
+        | Effect::Reaction { effect, .. } => contains_revelation(effect),
         _ => false,
     }
 }

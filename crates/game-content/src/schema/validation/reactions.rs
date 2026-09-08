@@ -12,6 +12,7 @@ pub(super) fn validate_reactive_definitions(bundle: &CandidateBundle) -> Result<
         .map(|rule| &rule.id)
         .collect::<BTreeSet<_>>();
     for rule in &bundle.rules {
+        validate_copy_declaration(rule)?;
         let declarations_valid = declarations_are_valid(&rule.effect, rule.trigger, true);
         let references_valid = !rule
             .effect
@@ -60,7 +61,8 @@ fn category_count(effect: &Effect) -> usize {
 
 fn contains_reaction(effect: &Effect) -> bool {
     match effect {
-        Effect::Reaction { .. }
+        Effect::PreventExtraDrawing
+        | Effect::Reaction { .. }
         | Effect::HandDamageLimit { .. }
         | Effect::CardType { .. }
         | Effect::TopDeckAcquisition { .. } => true,
@@ -74,13 +76,17 @@ fn contains_reaction(effect: &Effect) -> bool {
         Effect::Condition {
             then, otherwise, ..
         } => contains_reaction(then) || otherwise.as_deref().is_some_and(contains_reaction),
-        Effect::Repeat { effect, .. } => contains_reaction(effect),
+        Effect::HeroAbility { effect, .. }
+        | Effect::RevealTopCard { effect, .. }
+        | Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. } => contains_reaction(effect),
         _ => false,
     }
 }
 
 fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) -> bool {
     match effect {
+        Effect::PreventExtraDrawing => allowed && phase == EffectTrigger::Villains,
         Effect::CardType { .. } | Effect::TopDeckAcquisition { .. } => {
             allowed && phase == EffectTrigger::Manual
         }
@@ -97,6 +103,7 @@ fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) 
                     ) | (
                         EffectTrigger::Manual,
                         ReactionTrigger::SelfForcedDiscard
+                            | ReactionTrigger::SelfHarmfulDiscard
                             | ReactionTrigger::OwnerDefeatsVillain
                             | ReactionTrigger::OwnerPlaysAlly
                     )
@@ -120,23 +127,84 @@ fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) 
                     .as_deref()
                     .is_none_or(|effect| declarations_are_valid(effect, phase, false))
         }
-        Effect::Repeat { effect, .. } => declarations_are_valid(effect, phase, false),
+        Effect::HeroAbility { effect, .. }
+        | Effect::RevealTopCard { effect, .. }
+        | Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. } => declarations_are_valid(effect, phase, false),
         _ => true,
     }
 }
 
-// The initial reaction vocabulary only changes hero resources.
-// Health loss can cause at most one stun per hero per turn, which bounds cascades.
+// Reactions may change hero resources, heal villains or draw one card.
+// None adds control or discards cards; health loss causes at most one stun per hero per turn.
 fn reaction_effect_is_bounded(effect: &Effect) -> bool {
     match effect {
         Effect::Apply {
             target,
-            operation: Operation::ModifyResource { resource, .. },
-        } => target.zone == crate::Zone::Heroes && *resource != Resource::Control,
+            operation: Operation::ModifyResource { resource, amount },
+        } => {
+            (target.zone == crate::Zone::Heroes && *resource != Resource::Control)
+                || (target.zone == crate::Zone::ActiveVillains
+                    && *resource == Resource::Health
+                    && *amount > 0)
+        }
+        Effect::Apply {
+            target,
+            operation: Operation::GainInfluenceAndHealth { .. } | Operation::Draw { amount: 1 },
+        } => target.zone == crate::Zone::Heroes,
         Effect::Sequence { effects }
         | Effect::Choice {
             options: effects, ..
         } => effects.iter().all(reaction_effect_is_bounded),
         _ => false,
+    }
+}
+
+fn validate_copy_declaration(rule: &crate::EffectRule) -> Result<(), ImportFailure> {
+    fn copies(effect: &Effect) -> usize {
+        match effect {
+            Effect::Apply {
+                operation: Operation::CopyPlayedAlly,
+                ..
+            } => 1,
+            Effect::Sequence { effects }
+            | Effect::Choice {
+                options: effects, ..
+            }
+            | Effect::Roll {
+                outcomes: effects, ..
+            } => effects.iter().map(copies).sum(),
+            Effect::Condition {
+                then, otherwise, ..
+            } => copies(then) + otherwise.as_deref().map_or(0, copies),
+            Effect::Repeat { effect, .. }
+            | Effect::HeroAbility { effect, .. }
+            | Effect::RevealTopCard { effect, .. }
+            | Effect::ForEachTarget { effect, .. }
+            | Effect::Reaction { effect, .. } => copies(effect),
+            _ => 0,
+        }
+    }
+    if copies(&rule.effect) == 0 {
+        return Ok(());
+    }
+    let valid = matches!(&rule.effect, Effect::Sequence { effects } if matches!(effects.as_slice(), [
+        Effect::CardType { card_type: crate::CardType::Item },
+        Effect::Apply { target, operation: Operation::CopyPlayedAlly },
+    ] if target.zone == crate::Zone::HeroPlayArea
+        && target.owner == crate::TargetOwner::Actor
+        && target.cardinality == crate::Cardinality { min: 1, max: 1 }
+        && target.eligibility == vec![crate::Eligibility::CardType { card_type: crate::CardType::Ally }]))
+        && rule.trigger == EffectTrigger::Manual
+        && rule.cost.is_empty();
+    if valid {
+        Ok(())
+    } else {
+        Err(ImportFailure {
+            message: format!(
+                "rule {} must copy exactly one owned played Ally from an Item",
+                rule.id
+            ),
+        })
     }
 }

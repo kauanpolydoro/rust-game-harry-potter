@@ -609,6 +609,8 @@ describe('application shell', () => {
   })
 
   beforeEach(() => {
+    // Existing shell journeys exercise semantic controls; table3d.spec.ts covers the visual path.
+    localStorage.setItem('hogwarts.table-mode', 'accessible')
     SynchronizedWebSocket.instances = []
     vi.stubGlobal('WebSocket', SynchronizedWebSocket)
   })
@@ -2388,6 +2390,34 @@ describe('application shell', () => {
     expect(screen.getByText(guidance)).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Encerrar ações do Herói' })).toBeNull()
     expect(screen.getByText('O servidor está resolvendo esta fase automaticamente.')).toBeVisible()
+  })
+
+  it('explains Game 3 Villain limits and revelations through existing card descriptions', async () => {
+    localStorage.setItem('hogwarts.session.expected', 'true')
+    const projection = heroActionGameProjectionResponse()
+    const gameThreeProjection = {
+      ...projection,
+      table: {
+        ...projection.table,
+        active_villains: projection.table.active_villains.map((villain) => ({
+          ...villain,
+          description: 'Bloqueio ativo até o início do próximo turno de Harry. Pode receber mais 0 de Ataque neste turno.',
+        })),
+        revealed_dark_arts: { instance_id: 'revealed:opugno', catalog_id: 'dark-arts:010', name: 'Opugno', description: 'Opugno: Harry revelou Sapo de Chocolate.' },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ready' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(gameThreeProjection), { status: 200 })))
+
+    render(App, { global: { plugins: [createPinia()] } })
+
+    const villains = await screen.findByRole('region', { name: 'Vilões ativos' })
+    expect(within(villains).getByText(/Bloqueio ativo até o início do próximo turno de Harry/)).toBeVisible()
+    expect(within(villains).getByText(/Pode receber mais 0 de Ataque neste turno/)).toBeVisible()
+    expect(within(villains).queryByRole('button')).not.toBeInTheDocument()
+    const revealed = screen.getByRole('region', { name: 'Arte das Trevas revelada' })
+    expect(within(revealed).getByText('Opugno: Harry revelou Sapo de Chocolate.')).toBeVisible()
   })
 
   it('does not offer the active player intent to another participant', async () => {

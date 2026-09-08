@@ -22,6 +22,7 @@ async fn main() -> std::process::ExitCode {
 async fn run_application() -> Result<(), Box<dyn Error>> {
     let database_url = env::var("DATABASE_URL")?;
     let session_token_key = session_token_key()?;
+    let deployment_epoch = env::var("DEPLOYMENT_EPOCH")?.parse()?;
     let bind_address = env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
     let bind_address: SocketAddr = bind_address.parse()?;
     let migration_database = PgPoolOptions::new()
@@ -47,7 +48,8 @@ async fn run_application() -> Result<(), Box<dyn Error>> {
         .connect_lazy(&database_url)?;
     let mut state = AppState::new(database)
         .with_migration_database(migration_database)
-        .with_session_token_key(session_token_key);
+        .with_session_token_key(session_token_key)
+        .with_deployment_epoch(deployment_epoch);
     if let Ok(origin) = env::var("APPLICATION_ORIGIN") {
         state = state.with_application_origin(origin);
     }

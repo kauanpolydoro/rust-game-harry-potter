@@ -48,6 +48,7 @@ services:
       CARGO_TARGET_DIR: /target
       DATABASE_URL: postgres://hogwarts:local-development-only@postgres:5432/hogwarts
       SESSION_TOKEN_KEY: local-development-session-key-v1
+      DEPLOYMENT_EPOCH: 00000000-0000-4000-8000-000000000001
     healthcheck:
       test:
         - CMD
@@ -82,6 +83,8 @@ services:
     environment:
       CARGO_TARGET_DIR: /target
       DATABASE_URL: postgres://hogwarts:local-development-only@postgres:5432/hogwarts
+      SESSION_TOKEN_KEY: local-development-session-key-v1
+      DEPLOYMENT_EPOCH: 00000000-0000-4000-8000-000000000001
       TOMBSTONE_HMAC_KEY: development-tombstone-key-000001
       TOMBSTONE_LOCAL_DIRECTORY: /tombstones
     volumes:

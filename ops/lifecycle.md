@@ -6,7 +6,8 @@ O CI remoto continua desativado.
 
 ## Execução e armazenamento externo
 
-Em produção, configure `DATABASE_URL`, `TOMBSTONE_HMAC_KEY` com 32 bytes estáveis e `TOMBSTONE_BUCKET`.
+Em produção, configure `DATABASE_URL`, `DEPLOYMENT_EPOCH`, `SESSION_TOKEN_KEY`, `TOMBSTONE_HMAC_KEY` com 32 bytes estáveis e `TOMBSTONE_BUCKET`.
+O epoch e a chave de Sessão devem corresponder aos do servidor e ao deployment registrado no banco.
 O SDK usa a cadeia padrão de credenciais AWS, incluindo a identidade da tarefa ECS.
 A chave HMAC deve ser um segredo independente das chaves de Sessão e recuperação, preservado durante toda a janela de restauração e de Tombstones.
 Não troque essa chave enquanto houver Partidas ou comprovantes recuperáveis sem um procedimento de reconciliação.
@@ -20,7 +21,9 @@ cargo run -p harry-potter-server --bin lifecycle-worker
 O bucket deve ser exclusivo para os comprovantes, separado dos dados operacionais e do procedimento de restore do PostgreSQL.
 Ele não pode ter versionamento e deve ter a regra de expiração de 14 dias de [tombstone-lifecycle.json](tombstone-lifecycle.json).
 O worker verifica essa configuração antes de processar a fila e falha se não puder confirmá-la.
-A role precisa de `s3:PutObject`, `s3:GetLifecycleConfiguration` e `s3:GetBucketVersioning` nesse bucket.
+A role precisa de `s3:PutObject` e `s3:GetObject` nos objetos, além de `s3:ListBucket`, `s3:GetLifecycleConfiguration` e `s3:GetBucketVersioning` no bucket.
+`s3:ListBucket` permite distinguir um Tombstone ausente (`404`) de acesso negado (`403`), conforme a [documentação de GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html).
+O reconciliador mantém o gate fechado diante de `403`.
 A configuração do bucket e o deploy não são feitos por este executável.
 O TTL do S3 torna os objetos elegíveis para remoção após 14 dias; a remoção física do serviço é assíncrona.
 
@@ -68,6 +71,9 @@ O corpo guarda somente versão e instantes de expiração, detecção e verifica
 O campo `completed_at_ms` é o instante da verificação durável; a confirmação externa e a remoção final da fila podem ocorrer depois em caso de retry.
 A gravação S3 usa criptografia SSE-S3 e renova a retenção antes da remoção da raiz.
 Perda de resposta após uma gravação durável é segura: o próximo worker publica a mesma prova.
+O Tombstone permanece imutável; uma nova verificação de exclusão depois de restore pode avançar o instante do comprovante de conclusão.
+O worker também publica uma prova opaca do deployment para que um ledger incorreto ou vazio não seja confundido com ausência de exclusões.
+A [reconciliação de restore](restore.md) consulta essas evidências antes de liberar readiness.
 O ledger fornece a informação necessária à reconciliação de restore.
 Após reconciliar os dados restaurados, execute `lifecycle-worker --audit-restore` para detectar jogos que ainda constem no ledger, conforme o [runbook de restore](runbooks.md).
 
@@ -128,4 +134,4 @@ A preparação representa clientes distintos e conserva os limites de admissão 
 Ele publica os percentis medidos e exige detecção p95 de até cinco minutos, purge p95 de até uma hora e máximo de 24 horas.
 Na execução local de 07/09/2026 com PostgreSQL 18.6, as 100 Partidas concluíram sem falhas ou órfãos: detecção p95 de 1,174 s, purge p95 de 21,798 s e máximo de 22,552 s.
 O perfil mede o ambiente local; não constitui uma medição de produção.
-Backups, WAL/MVCC e reconciliação antes de readiness após restore continuam sob a política e os tickets próprios de recuperação de desastre.
+Backups, WAL/MVCC e reconciliação antes de readiness após restore seguem a [política e o runbook de recuperação de desastre](restore.md).
