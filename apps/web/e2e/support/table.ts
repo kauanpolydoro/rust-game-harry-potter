@@ -1,5 +1,6 @@
 import { expect, type Browser, type Page } from '@playwright/test'
 import { isGameProjectionResponse, isRealtimeEventBatchMessage, type GameProjectionResponse } from '../../src/contracts/identity-access.generated'
+import { isGameProjectionResponse as isPreviousGameProjectionResponse, isRealtimeEventBatchMessage as isPreviousRealtimeEventBatchMessage } from '../fixtures/game-two-client-contract'
 
 export class ObservedPlayer {
   projection?: GameProjectionResponse
@@ -17,6 +18,7 @@ export class ObservedPlayer {
       const message: unknown = JSON.parse(String(payload))
       if (message && typeof message === 'object' && 'type' in message && message.type === 'events' && 'projection' in message) {
         expect(isRealtimeEventBatchMessage(message), JSON.stringify(message)).toBe(true)
+        expect(isPreviousRealtimeEventBatchMessage(message), 'previous client accepts the WebSocket event and projection').toBe(true)
         this.eventBatches += 1
       }
       this.observe(message)
@@ -26,6 +28,7 @@ export class ObservedPlayer {
   private observe(message: unknown) {
     const candidate = message && typeof message === 'object' && 'projection' in message ? message.projection : message
     if (isGameProjectionResponse(candidate) && (!this.projection || candidate.snapshot.sequence >= this.projection.snapshot.sequence)) {
+      expect(isPreviousGameProjectionResponse(candidate), 'previous client accepts the HTTP and WebSocket projection').toBe(true)
       this.projection = candidate
     }
   }
@@ -41,7 +44,7 @@ export class ObservedPlayer {
   }
 }
 
-export async function startTable(browser: Browser, host: ObservedPlayer, count: number, game: 'one' | 'two', mode: 'accessible' | 'visual' = 'accessible') {
+export async function startTable(browser: Browser, host: ObservedPlayer, count: number, game: 'one' | 'two' | 'three', mode: 'accessible' | 'visual' = 'accessible') {
   const players = [host]
   await host.page.goto('/')
   await host.page.getByLabel('Seu nome').fill('Harry')
@@ -89,6 +92,11 @@ export async function startTable(browser: Browser, host: ObservedPlayer, count: 
     const state = player.current()
     expect(state.snapshot.versions.content).toBe(`game-${game}-en-v1`)
     expect(state.table.market).toHaveLength(6)
+    if (game === 'three') {
+      expect(state.snapshot.snapshot_version).toBe(7)
+      expect(state.table.active_villains).toHaveLength(2)
+      expect(new Set(state.participants.map((hero) => hero.hero.id)).size).toBe(count)
+    }
     expect(state.table.hand.every((card) => Boolean(card.description))).toBe(true)
   }
   return players

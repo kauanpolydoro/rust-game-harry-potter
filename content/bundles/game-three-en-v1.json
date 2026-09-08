@@ -1,0 +1,8149 @@
+{
+  "schema_version": 5,
+  "content_version": "game-three-en-v1",
+  "ruleset_version": "game-three-v1",
+  "locale": "en",
+  "sources": [
+    {
+      "id": "project-spec",
+      "uri": "https://github.com/kauanpolydoro/rust-game-harry-potter/issues/1",
+      "kind": "adaptation"
+    },
+    {
+      "id": "official-product",
+      "uri": "https://theop.games/products/harry-potter-hogwarts-battle-a-cooperative-deck-building-game",
+      "kind": "official"
+    },
+    {
+      "id": "xanderman-config",
+      "uri": "https://github.com/xanderman/hogwarts-battle/tree/4cf4e2547e4ba399c8f24e021317e78dd047e5e5/config",
+      "kind": "candidate"
+    },
+    {
+      "id": "xanderman-implementation",
+      "uri": "https://github.com/xanderman/hogwarts-battle/tree/4cf4e2547e4ba399c8f24e021317e78dd047e5e5",
+      "kind": "candidate"
+    },
+    {
+      "id": "eccabay-cards",
+      "uri": "https://github.com/eccabay/hp-text-game/blob/b32d78bbccf3f204723568a0f7ff08980f4d3bbb/cards/hogwarts/hogwarts_deck.py",
+      "kind": "candidate"
+    },
+    {
+      "id": "game-one-adaptation-v1",
+      "uri": "https://github.com/kauanpolydoro/rust-game-harry-potter/blob/main/content/game-one-rules-v1.md",
+      "kind": "adaptation"
+    },
+    {
+      "id": "game-two-adaptation-v1",
+      "uri": "https://github.com/kauanpolydoro/rust-game-harry-potter/blob/main/content/game-two-rules-v1.md",
+      "kind": "adaptation"
+    },
+    {
+      "id": "pt-br-editorial-glossary",
+      "uri": "https://github.com/kauanpolydoro/rust-game-harry-potter/blob/main/content/localization-pt-BR.md",
+      "kind": "adaptation"
+    },
+    {
+      "id": "game-three-adaptation-v1",
+      "uri": "https://github.com/kauanpolydoro/rust-game-harry-potter/blob/main/content/game-three-rules-v1.md",
+      "kind": "adaptation"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rule:g1-precedence",
+      "trigger": "manual",
+      "order": 1,
+      "effect": {
+        "type": "structural",
+        "rule": "game_one_precedence"
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-location",
+      "trigger": "manual",
+      "order": 3,
+      "effect": {
+        "type": "structural",
+        "rule": "no_location_effect"
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-dark-phase",
+      "trigger": "dark_arts",
+      "order": 4,
+      "effect": {
+        "type": "reveal_dark_arts"
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-001",
+      "trigger": "manual",
+      "order": 5,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "draw",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-002",
+      "trigger": "manual",
+      "order": 6,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 2
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-003",
+      "trigger": "manual",
+      "order": 7,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "id": "target:hero"
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 2
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-004",
+      "trigger": "manual",
+      "order": 8,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 2
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "draw",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-005",
+      "trigger": "manual",
+      "order": 9,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "draw",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-006",
+      "trigger": "manual",
+      "order": 10,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "draw",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-008",
+      "trigger": "manual",
+      "order": 11,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-009",
+      "trigger": "manual",
+      "order": 12,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "influence",
+                  "amount": 2
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "draw",
+                  "amount": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-010",
+      "trigger": "manual",
+      "order": 13,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-001",
+      "trigger": "manual",
+      "order": 14,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-004",
+      "trigger": "manual",
+      "order": 15,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-007",
+      "trigger": "manual",
+      "order": 16,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-009",
+      "trigger": "manual",
+      "order": 17,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "influence",
+                  "amount": 2
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "any",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 4
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "influence",
+                  "amount": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-010",
+      "trigger": "manual",
+      "order": 18,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-012",
+      "trigger": "manual",
+      "order": 19,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "any",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  },
+                  "id": "target:hero"
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-013",
+      "trigger": "manual",
+      "order": 20,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-dark-001",
+      "trigger": "manual",
+      "order": 21,
+      "effect": {
+        "type": "apply",
+        "target": {
+          "zone": "heroes",
+          "owner": "actor",
+          "cardinality": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "operation": {
+          "type": "modify_resource",
+          "resource": "health",
+          "amount": -2
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-dark-002",
+      "trigger": "manual",
+      "order": 22,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "hero_hand",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "discard"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-dark-003",
+      "trigger": "manual",
+      "order": 23,
+      "effect": {
+        "type": "apply",
+        "target": {
+          "zone": "active_location",
+          "owner": "any",
+          "cardinality": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "operation": {
+          "type": "modify_resource",
+          "resource": "control",
+          "amount": 1
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-reward-001",
+      "trigger": "villain_reward",
+      "order": 24,
+      "effect": {
+        "type": "apply",
+        "target": {
+          "zone": "heroes",
+          "owner": "any",
+          "cardinality": {
+            "min": 1,
+            "max": 4
+          }
+        },
+        "operation": {
+          "type": "draw",
+          "amount": 1
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-reward-002",
+      "trigger": "villain_reward",
+      "order": 25,
+      "effect": {
+        "type": "apply",
+        "target": {
+          "zone": "active_location",
+          "owner": "any",
+          "cardinality": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "operation": {
+          "type": "modify_resource",
+          "resource": "control",
+          "amount": -1
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-reward-003",
+      "trigger": "villain_reward",
+      "order": 26,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-villain-003",
+      "trigger": "villains",
+      "order": 3,
+      "effect": {
+        "type": "apply",
+        "target": {
+          "zone": "heroes",
+          "owner": "actor",
+          "cardinality": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "operation": {
+          "type": "modify_resource",
+          "resource": "health",
+          "amount": -1
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-dark-004",
+      "trigger": "manual",
+      "order": 28,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "prevent_drawing"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-002",
+      "trigger": "manual",
+      "order": 2,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "hand_damage_limit",
+            "maximum": 1
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-003",
+      "trigger": "manual",
+      "order": 3,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "owner_defeats_villain",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": []
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "influence",
+                "amount": 1
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-006",
+      "trigger": "manual",
+      "order": 6,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "owner_defeats_villain",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": []
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "influence",
+                "amount": 1
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-005",
+      "trigger": "manual",
+      "order": 5,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "gain_attack_per_ally_played",
+              "amount": 1
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "owner_plays_ally",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": []
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "attack",
+                "amount": 1
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-011",
+      "trigger": "manual",
+      "order": 11,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "self_forced_discard",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": []
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "influence",
+                "amount": 2
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-007",
+      "trigger": "manual",
+      "order": 7,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "owner_defeats_villain",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "any",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": []
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "health",
+                "amount": 2
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-villain-001",
+      "trigger": "villains",
+      "order": 1,
+      "cost": [],
+      "effect": {
+        "type": "reaction",
+        "trigger": "hero_forced_discard",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "heroes",
+            "owner": "actor",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            },
+            "eligibility": []
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "health",
+            "amount": -1
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-villain-002",
+      "trigger": "villains",
+      "order": 2,
+      "cost": [],
+      "effect": {
+        "type": "reaction",
+        "trigger": "control_added",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "heroes",
+            "owner": "actor",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            },
+            "eligibility": []
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "health",
+            "amount": -2
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-011",
+      "trigger": "manual",
+      "order": 11,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 2
+            }
+          },
+          {
+            "type": "top_deck_acquisition",
+            "card_type": "ally"
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-hogwarts-013",
+      "trigger": "manual",
+      "order": 13,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "top_deck_acquisition",
+            "card_type": "item"
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g1-starter-008",
+      "trigger": "manual",
+      "order": 8,
+      "cost": [],
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": []
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "top_deck_acquisition",
+            "card_type": "spell"
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-one-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-014",
+      "trigger": "manual",
+      "order": 140,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 2
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-015",
+      "trigger": "manual",
+      "order": 141,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "sequence",
+            "effects": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "active_location",
+                  "owner": "any",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "control",
+                  "amount": -1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "draw",
+                  "amount": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-016",
+      "trigger": "manual",
+      "order": 142,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "sequence",
+            "effects": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 2
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "draw",
+                  "amount": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-017",
+      "trigger": "manual",
+      "order": 143,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 2
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "any",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 4
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-018",
+      "trigger": "manual",
+      "order": 144,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-019",
+      "trigger": "manual",
+      "order": 145,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "sequence",
+            "effects": [
+              {
+                "type": "for_each_target",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 0,
+                    "max": 1
+                  }
+                },
+                "effect": {
+                  "type": "condition",
+                  "condition": {
+                    "type": "drawing_allowed"
+                  },
+                  "then": {
+                    "type": "sequence",
+                    "effects": [
+                      {
+                        "type": "apply",
+                        "target": {
+                          "zone": "heroes",
+                          "owner": "actor",
+                          "cardinality": {
+                            "min": 1,
+                            "max": 1
+                          }
+                        },
+                        "operation": {
+                          "type": "draw",
+                          "amount": 1
+                        }
+                      },
+                      {
+                        "type": "apply",
+                        "target": {
+                          "zone": "hero_hand",
+                          "owner": "actor",
+                          "cardinality": {
+                            "min": 1,
+                            "max": 1
+                          }
+                        },
+                        "operation": {
+                          "type": "discard_voluntarily"
+                        }
+                      }
+                    ]
+                  },
+                  "otherwise": {
+                    "type": "choice",
+                    "options": [
+                      {
+                        "type": "apply",
+                        "target": {
+                          "zone": "hero_hand",
+                          "owner": "actor",
+                          "cardinality": {
+                            "min": 1,
+                            "max": 1
+                          }
+                        },
+                        "operation": {
+                          "type": "discard_voluntarily"
+                        }
+                      },
+                      {
+                        "type": "no_op"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "reaction",
+                "trigger": "self_forced_discard",
+                "effect": {
+                  "type": "apply",
+                  "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    }
+                  },
+                  "operation": {
+                    "type": "draw",
+                    "amount": 1
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-020",
+      "trigger": "manual",
+      "order": 146,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "sequence",
+            "effects": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "influence",
+                  "amount": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-021",
+      "trigger": "manual",
+      "order": 147,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "sequence",
+            "effects": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "any",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 4
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "influence",
+                  "amount": 1
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "any",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 4
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-022",
+      "trigger": "manual",
+      "order": 148,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "sequence",
+            "effects": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "attack",
+                  "amount": 2
+                }
+              },
+              {
+                "type": "reaction",
+                "trigger": "owner_defeats_villain",
+                "effect": {
+                  "type": "apply",
+                  "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    }
+                  },
+                  "operation": {
+                    "type": "modify_resource",
+                    "resource": "influence",
+                    "amount": 2
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-hogwarts-card-023",
+      "trigger": "manual",
+      "order": 149,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "hero_play_area",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": [
+                {
+                  "type": "card_type",
+                  "card_type": "ally"
+                }
+              ],
+              "id": "copied-ally"
+            },
+            "operation": {
+              "type": "copy_played_ally"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-dark-arts-005",
+      "trigger": "manual",
+      "order": 150,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-dark-arts-006",
+      "trigger": "manual",
+      "order": 151,
+      "effect": {
+        "type": "for_each_target",
+        "target": {
+          "zone": "heroes",
+          "owner": "any",
+          "cardinality": {
+            "min": 0,
+            "max": 4
+          }
+        },
+        "effect": {
+          "type": "condition",
+          "condition": {
+            "type": "resource_at_least",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "resource": "health",
+            "amount": 1
+          },
+          "then": {
+            "type": "condition",
+            "condition": {
+              "type": "has_eligible_target",
+              "target": {
+                "zone": "hero_hand",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": [
+                  {
+                    "type": "card_type",
+                    "card_type": "spell"
+                  }
+                ]
+              }
+            },
+            "then": {
+              "type": "choice",
+              "options": [
+                {
+                  "type": "apply",
+                  "target": {
+                    "zone": "hero_hand",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    },
+                    "eligibility": [
+                      {
+                        "type": "card_type",
+                        "card_type": "spell"
+                      }
+                    ]
+                  },
+                  "operation": {
+                    "type": "discard"
+                  }
+                },
+                {
+                  "type": "apply",
+                  "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    }
+                  },
+                  "operation": {
+                    "type": "modify_resource",
+                    "resource": "health",
+                    "amount": -2
+                  }
+                }
+              ]
+            },
+            "otherwise": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                }
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "health",
+                "amount": -2
+              }
+            }
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-dark-arts-007",
+      "trigger": "manual",
+      "order": 152,
+      "effect": {
+        "type": "for_each_target",
+        "target": {
+          "zone": "heroes",
+          "owner": "any",
+          "cardinality": {
+            "min": 0,
+            "max": 4
+          }
+        },
+        "effect": {
+          "type": "condition",
+          "condition": {
+            "type": "resource_at_least",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "resource": "health",
+            "amount": 1
+          },
+          "then": {
+            "type": "condition",
+            "condition": {
+              "type": "has_eligible_target",
+              "target": {
+                "zone": "hero_hand",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": [
+                  {
+                    "type": "card_type",
+                    "card_type": "ally"
+                  }
+                ]
+              }
+            },
+            "then": {
+              "type": "choice",
+              "options": [
+                {
+                  "type": "apply",
+                  "target": {
+                    "zone": "hero_hand",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    },
+                    "eligibility": [
+                      {
+                        "type": "card_type",
+                        "card_type": "ally"
+                      }
+                    ]
+                  },
+                  "operation": {
+                    "type": "discard"
+                  }
+                },
+                {
+                  "type": "apply",
+                  "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    }
+                  },
+                  "operation": {
+                    "type": "modify_resource",
+                    "resource": "health",
+                    "amount": -2
+                  }
+                }
+              ]
+            },
+            "otherwise": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                }
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "health",
+                "amount": -2
+              }
+            }
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-dark-arts-008",
+      "trigger": "manual",
+      "order": 153,
+      "effect": {
+        "type": "for_each_target",
+        "target": {
+          "zone": "heroes",
+          "owner": "any",
+          "cardinality": {
+            "min": 0,
+            "max": 4
+          }
+        },
+        "effect": {
+          "type": "condition",
+          "condition": {
+            "type": "resource_at_least",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "resource": "health",
+            "amount": 1
+          },
+          "then": {
+            "type": "condition",
+            "condition": {
+              "type": "has_eligible_target",
+              "target": {
+                "zone": "hero_hand",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "eligibility": [
+                  {
+                    "type": "card_type",
+                    "card_type": "item"
+                  }
+                ]
+              }
+            },
+            "then": {
+              "type": "choice",
+              "options": [
+                {
+                  "type": "apply",
+                  "target": {
+                    "zone": "hero_hand",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    },
+                    "eligibility": [
+                      {
+                        "type": "card_type",
+                        "card_type": "item"
+                      }
+                    ]
+                  },
+                  "operation": {
+                    "type": "discard"
+                  }
+                },
+                {
+                  "type": "apply",
+                  "target": {
+                    "zone": "heroes",
+                    "owner": "actor",
+                    "cardinality": {
+                      "min": 1,
+                      "max": 1
+                    }
+                  },
+                  "operation": {
+                    "type": "modify_resource",
+                    "resource": "health",
+                    "amount": -2
+                  }
+                }
+              ]
+            },
+            "otherwise": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                }
+              },
+              "operation": {
+                "type": "modify_resource",
+                "resource": "health",
+                "amount": -2
+              }
+            }
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-villain-004",
+      "trigger": "villains",
+      "order": 154,
+      "effect": {
+        "type": "prevent_extra_drawing"
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-villain-004-reward",
+      "trigger": "villain_reward",
+      "order": 155,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "draw",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-villain-005",
+      "trigger": "villains",
+      "order": 156,
+      "effect": {
+        "type": "reaction",
+        "trigger": "control_added",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "active_villains",
+            "owner": "any",
+            "cardinality": {
+              "min": 1,
+              "max": 4
+            }
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "health",
+            "amount": 1
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-villain-005-reward",
+      "trigger": "villain_reward",
+      "order": 157,
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-villain-006",
+      "trigger": "villains",
+      "order": 158,
+      "effect": {
+        "type": "for_each_target",
+        "target": {
+          "zone": "hero_hand",
+          "owner": "actor",
+          "cardinality": {
+            "min": 0,
+            "max": 32
+          },
+          "eligibility": [
+            {
+              "type": "card_type",
+              "card_type": "ally"
+            }
+          ]
+        },
+        "effect": {
+          "type": "condition",
+          "condition": {
+            "type": "resource_at_least",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "resource": "health",
+            "amount": 1
+          },
+          "then": {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": -2
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "hero_hand",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "discard"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g2-villain-006-reward",
+      "trigger": "villain_reward",
+      "order": 159,
+      "effect": {
+        "type": "for_each_target",
+        "target": {
+          "zone": "heroes",
+          "owner": "any",
+          "cardinality": {
+            "min": 0,
+            "max": 4
+          }
+        },
+        "effect": {
+          "type": "condition",
+          "condition": {
+            "type": "has_eligible_target",
+            "target": {
+              "zone": "hero_discard_pile",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "eligibility": [
+                {
+                  "type": "card_type",
+                  "card_type": "ally"
+                }
+              ]
+            }
+          },
+          "then": {
+            "type": "choice",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "heroes",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "operation": {
+                  "type": "modify_resource",
+                  "resource": "health",
+                  "amount": 2
+                }
+              },
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "hero_discard_pile",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  },
+                  "eligibility": [
+                    {
+                      "type": "card_type",
+                      "card_type": "ally"
+                    }
+                  ]
+                },
+                "operation": {
+                  "type": "move",
+                  "to": "hero_hand"
+                }
+              }
+            ]
+          },
+          "otherwise": {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 2
+            }
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-two-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-024-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 2,
+                "max": 2
+              },
+              "id": "heroes"
+            },
+            "operation": {
+              "type": "gain_influence_and_health",
+              "influence": 1,
+              "health": 1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-025-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "id": "hero"
+            },
+            "operation": {
+              "type": "gain_influence_and_health",
+              "influence": 1,
+              "health": 1
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "self_harmful_discard",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "actor",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                }
+              },
+              "operation": {
+                "type": "gain_influence_and_health",
+                "influence": 1,
+                "health": 1
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-026-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "for_each_target",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 0,
+                "max": 1
+              }
+            },
+            "effect": {
+              "type": "condition",
+              "condition": {
+                "type": "drawing_allowed"
+              },
+              "then": {
+                "type": "sequence",
+                "effects": [
+                  {
+                    "type": "apply",
+                    "target": {
+                      "zone": "heroes",
+                      "owner": "actor",
+                      "cardinality": {
+                        "min": 1,
+                        "max": 1
+                      }
+                    },
+                    "operation": {
+                      "type": "draw",
+                      "amount": 2
+                    }
+                  },
+                  {
+                    "type": "apply",
+                    "target": {
+                      "zone": "hero_hand",
+                      "owner": "actor",
+                      "cardinality": {
+                        "min": 1,
+                        "max": 1
+                      }
+                    },
+                    "operation": {
+                      "type": "discard_voluntarily"
+                    }
+                  }
+                ]
+              },
+              "otherwise": {
+                "type": "choice",
+                "options": [
+                  {
+                    "type": "apply",
+                    "target": {
+                      "zone": "hero_hand",
+                      "owner": "actor",
+                      "cardinality": {
+                        "min": 1,
+                        "max": 1
+                      }
+                    },
+                    "operation": {
+                      "type": "discard_voluntarily"
+                    }
+                  },
+                  {
+                    "type": "no_op"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-027-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-028-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "item"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "draw",
+              "amount": 2
+            }
+          },
+          {
+            "type": "reaction",
+            "trigger": "self_harmful_discard",
+            "effect": {
+              "type": "apply",
+              "target": {
+                "zone": "heroes",
+                "owner": "any",
+                "cardinality": {
+                  "min": 0,
+                  "max": 4
+                }
+              },
+              "operation": {
+                "type": "draw",
+                "amount": 1
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-029-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "spell"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_villains",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "id": "villain"
+            },
+            "operation": {
+              "type": "suppress_villain"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-030-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 1
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "id": "hero"
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 3
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-031-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "for_each_target",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 0,
+                "max": 1
+              }
+            },
+            "effect": {
+              "type": "condition",
+              "condition": {
+                "type": "drawing_allowed"
+              },
+              "then": {
+                "type": "sequence",
+                "effects": [
+                  {
+                    "type": "apply",
+                    "target": {
+                      "zone": "heroes",
+                      "owner": "actor",
+                      "cardinality": {
+                        "min": 1,
+                        "max": 1
+                      }
+                    },
+                    "operation": {
+                      "type": "draw",
+                      "amount": 2
+                    }
+                  },
+                  {
+                    "type": "apply",
+                    "target": {
+                      "zone": "hero_hand",
+                      "owner": "actor",
+                      "cardinality": {
+                        "min": 1,
+                        "max": 1
+                      }
+                    },
+                    "operation": {
+                      "type": "discard_for_spell_bonus",
+                      "influence": 2
+                    }
+                  }
+                ]
+              },
+              "otherwise": {
+                "type": "choice",
+                "options": [
+                  {
+                    "type": "apply",
+                    "target": {
+                      "zone": "hero_hand",
+                      "owner": "actor",
+                      "cardinality": {
+                        "min": 1,
+                        "max": 1
+                      }
+                    },
+                    "operation": {
+                      "type": "discard_for_spell_bonus",
+                      "influence": 2
+                    }
+                  },
+                  {
+                    "type": "no_op"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hogwarts-card-061-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "card_type",
+            "card_type": "ally"
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "attack",
+              "amount": 2
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "influence",
+              "amount": 2
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-dark-arts-009-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -2
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "other",
+              "cardinality": {
+                "min": 0,
+                "max": 3
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-dark-arts-010-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "for_each_target",
+        "target": {
+          "zone": "heroes",
+          "owner": "any",
+          "cardinality": {
+            "min": 0,
+            "max": 4
+          }
+        },
+        "effect": {
+          "type": "reveal_top_card",
+          "minimum_cost": 1,
+          "effect": {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -2
+            }
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-dark-arts-011-effect",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "actor",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": -1
+            }
+          },
+          {
+            "type": "limit_villain_attack",
+            "maximum": 1
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-villain-007-effect",
+      "order": 107,
+      "trigger": "villains",
+      "effect": {
+        "type": "apply",
+        "target": {
+          "zone": "heroes",
+          "owner": "actor",
+          "cardinality": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "operation": {
+          "type": "modify_resource",
+          "resource": "health",
+          "amount": -2
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-villain-007-reward",
+      "order": 0,
+      "trigger": "villain_reward",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "apply",
+            "target": {
+              "zone": "heroes",
+              "owner": "any",
+              "cardinality": {
+                "min": 0,
+                "max": 4
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "health",
+              "amount": 2
+            }
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-villain-008-effect",
+      "order": 108,
+      "trigger": "villains",
+      "effect": {
+        "type": "reveal_top_card",
+        "minimum_cost": 1,
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "active_location",
+            "owner": "any",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            }
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "control",
+            "amount": 1
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-villain-008-reward",
+      "order": 0,
+      "trigger": "villain_reward",
+      "effect": {
+        "type": "sequence",
+        "effects": [
+          {
+            "type": "choice",
+            "audience": "each_hero",
+            "options": [
+              {
+                "type": "apply",
+                "target": {
+                  "zone": "hero_discard_pile",
+                  "owner": "actor",
+                  "cardinality": {
+                    "min": 1,
+                    "max": 1
+                  },
+                  "eligibility": [
+                    {
+                      "type": "card_type",
+                      "card_type": "spell"
+                    }
+                  ]
+                },
+                "operation": {
+                  "type": "move",
+                  "to": "hero_hand"
+                }
+              },
+              {
+                "type": "no_op"
+              }
+            ]
+          },
+          {
+            "type": "apply",
+            "target": {
+              "zone": "active_location",
+              "owner": "any",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "operation": {
+              "type": "modify_resource",
+              "resource": "control",
+              "amount": -1
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hero-002-ability",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "hero_ability",
+        "strategy": "harry_game_three_v1",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "heroes",
+            "owner": "any",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            }
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "attack",
+            "amount": 1
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hero-005-ability",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "hero_ability",
+        "strategy": "hermione_game_three_v1",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "heroes",
+            "owner": "any",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            }
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "influence",
+            "amount": 1
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hero-008-ability",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "hero_ability",
+        "strategy": "neville_game_three_v1",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "heroes",
+            "owner": "actor",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            }
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "health",
+            "amount": 1
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-hero-011-ability",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "hero_ability",
+        "strategy": "ron_game_three_v1",
+        "effect": {
+          "type": "apply",
+          "target": {
+            "zone": "heroes",
+            "owner": "any",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            }
+          },
+          "operation": {
+            "type": "modify_resource",
+            "resource": "health",
+            "amount": 2
+          }
+        }
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    },
+    {
+      "id": "rule:g3-adventure-003-setup",
+      "order": 0,
+      "trigger": "manual",
+      "effect": {
+        "type": "structural",
+        "rule": "game_three_setup"
+      },
+      "provenance": {
+        "confidence": "adaptation",
+        "sources": [
+          "game-three-adaptation-v1"
+        ]
+      }
+    }
+  ],
+  "entries": [
+    {
+      "id": "hogwarts-card:001",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Albus Dumbledore"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 8
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-001"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:002",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Descendo"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 5
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-002"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:003",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 1,
+      "names": {
+        "en": "Essence of Dittany"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 2
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-003"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:004",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Golden Snitch"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 5
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-004"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:005",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 1,
+      "names": {
+        "en": "Incendio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 4
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-005"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:006",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Lumos"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 4
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-006"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:007",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Oliver Wood"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 3
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-007"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:008",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 4,
+      "introduced_in": 1,
+      "names": {
+        "en": "Quidditch Gear"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 3
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-008"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:009",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 6,
+      "introduced_in": 1,
+      "names": {
+        "en": "Reparo"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 3
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-009"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:010",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Rubeus Hagrid"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 4
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-010"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:011",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Sorting Hat"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 4
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-011"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:013",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 1,
+      "names": {
+        "en": "Wingardium Leviosa"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 2
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-hogwarts-013"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:001",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 1,
+      "names": {
+        "en": "Expulso"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-dark-001"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:002",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Flipendo"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-dark-002"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:003",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 1,
+      "names": {
+        "en": "He Who Must Not Be Named"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-dark-003"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:004",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 1,
+      "names": {
+        "en": "Petrification"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-dark-004"
+        }
+      }
+    },
+    {
+      "id": "villain:001",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Crabbe & Goyle"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 5
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-reward-001"
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-villain-001"
+        }
+      }
+    },
+    {
+      "id": "villain:002",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Draco Malfoy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-reward-002"
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-villain-002"
+        }
+      }
+    },
+    {
+      "id": "villain:003",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Quirinus Quirrell"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-reward-003"
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-villain-003"
+        }
+      }
+    },
+    {
+      "id": "starter:001",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 28,
+      "introduced_in": 1,
+      "names": {
+        "en": "Alohomora"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-001"
+        }
+      }
+    },
+    {
+      "id": "starter:002",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Invisibility Cloak"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-002"
+        }
+      }
+    },
+    {
+      "id": "starter:003",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Firebolt"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-003"
+        }
+      }
+    },
+    {
+      "id": "starter:004",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Hedwig"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-004"
+        }
+      }
+    },
+    {
+      "id": "starter:005",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Every Flavour Beans"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-005"
+        }
+      }
+    },
+    {
+      "id": "starter:006",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Cleansweep 11"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-006"
+        }
+      }
+    },
+    {
+      "id": "starter:007",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Pigwidgeon"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-007"
+        }
+      }
+    },
+    {
+      "id": "starter:008",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Time-Turner"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-008"
+        }
+      }
+    },
+    {
+      "id": "starter:009",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "The Tales of Beedle the Bard"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-009"
+        }
+      }
+    },
+    {
+      "id": "starter:010",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Crookshanks"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-010"
+        }
+      }
+    },
+    {
+      "id": "starter:011",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Remembrall"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-011"
+        }
+      }
+    },
+    {
+      "id": "starter:012",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Mandrake"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-012"
+        }
+      }
+    },
+    {
+      "id": "starter:013",
+      "kind": "starter_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Trevor"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "eccabay-cards"
+        ],
+        "names.en": [
+          "eccabay-cards"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "eccabay-cards"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-starter-013"
+        }
+      }
+    },
+    {
+      "id": "turn-order:001",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 1"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "turn-order:002",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 2"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "turn-order:003",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "turn-order:004",
+      "kind": "turn_order",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 1,
+      "names": {
+        "en": "Turn Order 4"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "hogwarts-card:014",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Arthur Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-014"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 6
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:015",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Dobby"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-015"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 4
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:016",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Expelliarmus"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-016"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 6
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:017",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Fawkes"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-017"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 5
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:018",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Finite"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-018"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 3
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:019",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Gilderoy Lockhart"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-019"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 2
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:020",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Ginny Weasley",
+        "pt-BR": "Gina Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-020"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 4
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:021",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Molly Weasley"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-021"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 6
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:022",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Nimbus 2001"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-022"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 5
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:023",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Polyjuice Potion",
+        "pt-BR": "Poção Polissuco"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-hogwarts-card-023"
+        },
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 3
+        }
+      }
+    },
+    {
+      "id": "dark-arts:005",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 2,
+      "names": {
+        "en": "Hand of Glory",
+        "pt-BR": "Mão da Glória"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-dark-arts-005"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:006",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Obliviate"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-dark-arts-006"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:007",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Poison",
+        "pt-BR": "Veneno"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-dark-arts-007"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:008",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Relashio"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-dark-arts-008"
+        }
+      }
+    },
+    {
+      "id": "villain:004",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Basilisk",
+        "pt-BR": "Basilisco"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-villain-004"
+        },
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 8
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-villain-004-reward"
+        }
+      }
+    },
+    {
+      "id": "villain:005",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Lucius Malfoy",
+        "pt-BR": "Lúcio Malfoy"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-villain-005"
+        },
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 7
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-villain-005-reward"
+        }
+      }
+    },
+    {
+      "id": "villain:006",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 2,
+      "names": {
+        "en": "Tom Riddle"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-villain-006"
+        },
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-two-adaptation-v1"
+          ],
+          "rule": "rule:g2-villain-006-reward"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:024",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 3,
+      "names": {
+        "en": "Butterbeer",
+        "pt-BR": "Cerveja Amanteigada"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 3
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-024-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:025",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 3,
+      "introduced_in": 3,
+      "names": {
+        "en": "Chocolate Frog",
+        "pt-BR": "Sapo de Chocolate"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 2
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-025-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:026",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Crystal Ball",
+        "pt-BR": "Bola de Cristal"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 3
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-026-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:027",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Expecto Patronum"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 5
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-027-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:028",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Marauder's Map",
+        "pt-BR": "Mapa do Maroto"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 5
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-028-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:029",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Petrificus Totalus"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-029-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:030",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Remus Lupin",
+        "pt-BR": "Remo Lupin"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 4
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-030-effect"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:031",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Sybill Trelawney",
+        "pt-BR": "Sibila Trelawney"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 4
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-031-effect"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:009",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 2,
+      "introduced_in": 3,
+      "names": {
+        "en": "Dementor's Kiss",
+        "pt-BR": "Beijo do Dementador"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-dark-arts-009-effect"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:010",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Opugno"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-dark-arts-010-effect"
+        }
+      }
+    },
+    {
+      "id": "dark-arts:011",
+      "kind": "dark_arts",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Tarantallegra"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ]
+      },
+      "required_functional_fields": [
+        "effect"
+      ],
+      "functional": {
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-dark-arts-011-effect"
+        }
+      }
+    },
+    {
+      "id": "villain:007",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Dementor",
+        "pt-BR": "Dementador"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 8
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-villain-007-effect"
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-villain-007-reward"
+        }
+      }
+    },
+    {
+      "id": "villain:008",
+      "kind": "villain",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Peter Pettigrew",
+        "pt-BR": "Pedro Pettigrew"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "health",
+        "effect",
+        "reward"
+      ],
+      "functional": {
+        "health": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 7
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-villain-008-effect"
+        },
+        "reward": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-villain-008-reward"
+        }
+      }
+    },
+    {
+      "id": "location:006",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Hogwarts Express",
+        "pt-BR": "Expresso de Hogwarts"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ],
+      "functional": {
+        "control_limit": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 5
+        },
+        "dark_arts_count": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 1
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g1-location"
+        }
+      }
+    },
+    {
+      "id": "location:007",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Hogsmeade Village",
+        "pt-BR": "Vila de Hogsmeade"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ],
+      "functional": {
+        "control_limit": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "dark_arts_count": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 2
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g1-location"
+        }
+      }
+    },
+    {
+      "id": "location:008",
+      "kind": "location",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Shrieking Shack",
+        "pt-BR": "Casa dos Gritos"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-config"
+        ],
+        "names.en": [
+          "xanderman-config"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-config"
+        ],
+        "names.pt-BR": [
+          "pt-br-editorial-glossary"
+        ]
+      },
+      "required_functional_fields": [
+        "control_limit",
+        "dark_arts_count",
+        "effect"
+      ],
+      "functional": {
+        "control_limit": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "dark_arts_count": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 2
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g1-location"
+        }
+      }
+    },
+    {
+      "id": "hero:002",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Harry - Game 3",
+        "pt-BR": "Harry - Jogo 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ],
+      "functional": {
+        "ability": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hero-002-ability"
+        }
+      }
+    },
+    {
+      "id": "hero:005",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Hermione - Game 3",
+        "pt-BR": "Hermione - Jogo 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ],
+      "functional": {
+        "ability": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hero-005-ability"
+        }
+      }
+    },
+    {
+      "id": "hero:008",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Neville - Game 3",
+        "pt-BR": "Neville - Jogo 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ],
+      "functional": {
+        "ability": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hero-008-ability"
+        }
+      }
+    },
+    {
+      "id": "hero:011",
+      "kind": "hero",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Ron - Game 3",
+        "pt-BR": "Rony - Jogo 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "xanderman-implementation"
+        ],
+        "names.en": [
+          "xanderman-implementation"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "xanderman-implementation"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "ability"
+      ],
+      "functional": {
+        "ability": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hero-011-ability"
+        }
+      }
+    },
+    {
+      "id": "adventure:003",
+      "kind": "adventure",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 3,
+      "names": {
+        "en": "Game 3",
+        "pt-BR": "Jogo 3"
+      },
+      "provenance": {
+        "id": [
+          "project-spec"
+        ],
+        "set": [
+          "project-spec"
+        ],
+        "copies": [
+          "project-spec"
+        ],
+        "names.en": [
+          "project-spec"
+        ],
+        "kind": [
+          "project-spec"
+        ],
+        "introduced_in": [
+          "project-spec"
+        ],
+        "names.pt-BR": [
+          "project-spec"
+        ]
+      },
+      "required_functional_fields": [
+        "setup",
+        "precedence"
+      ],
+      "functional": {
+        "setup": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-adventure-003-setup"
+        },
+        "precedence": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g1-precedence"
+        }
+      }
+    },
+    {
+      "id": "catalog:game-three-v1",
+      "kind": "catalog",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 3,
+      "names": {
+        "en": "Game 3 Catalog"
+      },
+      "provenance": {
+        "id": [
+          "game-three-adaptation-v1"
+        ],
+        "set": [
+          "game-three-adaptation-v1"
+        ],
+        "copies": [
+          "game-three-adaptation-v1"
+        ],
+        "names.en": [
+          "game-three-adaptation-v1"
+        ],
+        "kind": [
+          "game-three-adaptation-v1"
+        ],
+        "introduced_in": [
+          "game-three-adaptation-v1"
+        ]
+      },
+      "required_functional_fields": []
+    },
+    {
+      "id": "ruleset:game-three-v1",
+      "kind": "ruleset",
+      "set": "base",
+      "copies": 0,
+      "introduced_in": 3,
+      "names": {
+        "en": "Game 3 Rules"
+      },
+      "provenance": {
+        "id": [
+          "game-three-adaptation-v1"
+        ],
+        "set": [
+          "game-three-adaptation-v1"
+        ],
+        "copies": [
+          "game-three-adaptation-v1"
+        ],
+        "names.en": [
+          "game-three-adaptation-v1"
+        ],
+        "kind": [
+          "game-three-adaptation-v1"
+        ],
+        "introduced_in": [
+          "game-three-adaptation-v1"
+        ]
+      },
+      "required_functional_fields": [
+        "precedence"
+      ],
+      "functional": {
+        "precedence": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-one-adaptation-v1"
+          ],
+          "rule": "rule:g1-precedence"
+        }
+      }
+    },
+    {
+      "id": "hogwarts-card:061",
+      "kind": "hogwarts_card",
+      "set": "base",
+      "copies": 1,
+      "introduced_in": 3,
+      "names": {
+        "en": "Sirius Black"
+      },
+      "provenance": {
+        "id": [
+          "game-three-adaptation-v1"
+        ],
+        "set": [
+          "game-three-adaptation-v1"
+        ],
+        "copies": [
+          "game-three-adaptation-v1"
+        ],
+        "names.en": [
+          "game-three-adaptation-v1"
+        ],
+        "kind": [
+          "game-three-adaptation-v1"
+        ],
+        "introduced_in": [
+          "game-three-adaptation-v1"
+        ]
+      },
+      "required_functional_fields": [
+        "cost",
+        "effect"
+      ],
+      "functional": {
+        "cost": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "value": 6
+        },
+        "effect": {
+          "confidence": "adaptation",
+          "sources": [
+            "game-three-adaptation-v1"
+          ],
+          "rule": "rule:g3-hogwarts-card-061-effect"
+        }
+      }
+    }
+  ],
+  "game_setups": [
+    {
+      "adventure_id": "adventure:003",
+      "confidence": "adaptation",
+      "sources": [
+        "game-three-adaptation-v1"
+      ],
+      "entities": [
+        {
+          "catalog_id": "hogwarts-card:001",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:002",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:003",
+          "copies": 4,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:004",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:005",
+          "copies": 4,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:006",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:007",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:008",
+          "copies": 4,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:009",
+          "copies": 6,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:010",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:011",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:013",
+          "copies": 3,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:001",
+          "copies": 3,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:002",
+          "copies": 2,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:003",
+          "copies": 3,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:004",
+          "copies": 2,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:001",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:002",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:003",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "starter:001",
+          "copies": 7,
+          "zone": "hero_draw_pile",
+          "owner": "each_participant"
+        },
+        {
+          "catalog_id": "starter:002",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "harry"
+        },
+        {
+          "catalog_id": "starter:003",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "harry"
+        },
+        {
+          "catalog_id": "starter:004",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "harry"
+        },
+        {
+          "catalog_id": "starter:005",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "ron"
+        },
+        {
+          "catalog_id": "starter:006",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "ron"
+        },
+        {
+          "catalog_id": "starter:007",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "ron"
+        },
+        {
+          "catalog_id": "starter:008",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "hermione"
+        },
+        {
+          "catalog_id": "starter:009",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "hermione"
+        },
+        {
+          "catalog_id": "starter:010",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "hermione"
+        },
+        {
+          "catalog_id": "starter:011",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "neville"
+        },
+        {
+          "catalog_id": "starter:012",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "neville"
+        },
+        {
+          "catalog_id": "starter:013",
+          "copies": 1,
+          "zone": "hero_draw_pile",
+          "owner": "neville"
+        },
+        {
+          "catalog_id": "hogwarts-card:014",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:015",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:016",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:017",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:018",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:019",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:020",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:021",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:022",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:023",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:005",
+          "copies": 2,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:006",
+          "copies": 1,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:007",
+          "copies": 1,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:008",
+          "copies": 1,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:004",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:005",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:006",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:024",
+          "copies": 3,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:025",
+          "copies": 3,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:026",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:027",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:028",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:029",
+          "copies": 2,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:030",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hogwarts-card:031",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:009",
+          "copies": 2,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:010",
+          "copies": 1,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "dark-arts:011",
+          "copies": 1,
+          "zone": "dark_arts_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:007",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "villain:008",
+          "copies": 1,
+          "zone": "villain_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "location:006",
+          "copies": 1,
+          "zone": "active_location",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "location:007",
+          "copies": 1,
+          "zone": "location_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "location:008",
+          "copies": 1,
+          "zone": "location_deck",
+          "owner": "none"
+        },
+        {
+          "catalog_id": "hero:002",
+          "copies": 1,
+          "zone": "heroes",
+          "owner": "harry"
+        },
+        {
+          "catalog_id": "hero:005",
+          "copies": 1,
+          "zone": "heroes",
+          "owner": "hermione"
+        },
+        {
+          "catalog_id": "hero:008",
+          "copies": 1,
+          "zone": "heroes",
+          "owner": "neville"
+        },
+        {
+          "catalog_id": "hero:011",
+          "copies": 1,
+          "zone": "heroes",
+          "owner": "ron"
+        },
+        {
+          "catalog_id": "hogwarts-card:061",
+          "copies": 1,
+          "zone": "hogwarts_deck",
+          "owner": "none"
+        }
+      ]
+    }
+  ]
+}

@@ -94,7 +94,8 @@ export default defineConfig({
         E2E_TLS_DIRECTORY: process.env.E2E_TLS_DIRECTORY,
       },
       reuseExistingServer: false,
-      timeout: 30_000,
+      // The production build includes type checks and the WebGL engine.
+      timeout: 120_000,
       url: frontendOrigin,
       ignoreHTTPSErrors: true,
     },

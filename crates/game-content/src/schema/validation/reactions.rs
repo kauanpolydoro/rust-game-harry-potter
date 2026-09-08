@@ -76,9 +76,10 @@ fn contains_reaction(effect: &Effect) -> bool {
         Effect::Condition {
             then, otherwise, ..
         } => contains_reaction(then) || otherwise.as_deref().is_some_and(contains_reaction),
-        Effect::ForEachTarget { effect, .. } | Effect::Repeat { effect, .. } => {
-            contains_reaction(effect)
-        }
+        Effect::HeroAbility { effect, .. }
+        | Effect::RevealTopCard { effect, .. }
+        | Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. } => contains_reaction(effect),
         _ => false,
     }
 }
@@ -102,6 +103,7 @@ fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) 
                     ) | (
                         EffectTrigger::Manual,
                         ReactionTrigger::SelfForcedDiscard
+                            | ReactionTrigger::SelfHarmfulDiscard
                             | ReactionTrigger::OwnerDefeatsVillain
                             | ReactionTrigger::OwnerPlaysAlly
                     )
@@ -125,9 +127,10 @@ fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) 
                     .as_deref()
                     .is_none_or(|effect| declarations_are_valid(effect, phase, false))
         }
-        Effect::ForEachTarget { effect, .. } | Effect::Repeat { effect, .. } => {
-            declarations_are_valid(effect, phase, false)
-        }
+        Effect::HeroAbility { effect, .. }
+        | Effect::RevealTopCard { effect, .. }
+        | Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. } => declarations_are_valid(effect, phase, false),
         _ => true,
     }
 }
@@ -147,7 +150,7 @@ fn reaction_effect_is_bounded(effect: &Effect) -> bool {
         }
         Effect::Apply {
             target,
-            operation: Operation::Draw { amount: 1 },
+            operation: Operation::GainInfluenceAndHealth { .. } | Operation::Draw { amount: 1 },
         } => target.zone == crate::Zone::Heroes,
         Effect::Sequence { effects }
         | Effect::Choice {
@@ -175,6 +178,8 @@ fn validate_copy_declaration(rule: &crate::EffectRule) -> Result<(), ImportFailu
                 then, otherwise, ..
             } => copies(then) + otherwise.as_deref().map_or(0, copies),
             Effect::Repeat { effect, .. }
+            | Effect::HeroAbility { effect, .. }
+            | Effect::RevealTopCard { effect, .. }
             | Effect::ForEachTarget { effect, .. }
             | Effect::Reaction { effect, .. } => copies(effect),
             _ => 0,

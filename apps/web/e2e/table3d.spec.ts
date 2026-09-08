@@ -3,6 +3,8 @@ import { writeFile } from 'node:fs/promises'
 import { ObservedPlayer, startTable } from './support/table'
 
 test.use({ viewport: { width: 844, height: 390 }, video: 'on' })
+// Software WebGL, video and traces share the host with the other browser worker.
+test.setTimeout(90_000)
 
 async function inspect(page: Page, zone: string, name: string) {
   await page.getByRole('group', { name: zone, exact: true }).getByRole('button', { name: `Inspecionar ${name}`, exact: true }).first().click()
@@ -125,7 +127,7 @@ test('seven played cards remain individually reachable by touch', async ({ page 
 })
 
 test('real pending, remote, stale and rejected commands require a fresh decision', async ({ browser, page }) => {
-  test.setTimeout(120_000)
+  test.setTimeout(180_000)
   const host = new ObservedPlayer(page)
   const players = await startTable(browser, host, 2, 'one', 'visual')
   const commandPath = '**/api/games/current/commands'
@@ -229,7 +231,8 @@ test('real pending, remote, stale and rejected commands require a fresh decision
 
 for (const count of [2, 3, 4]) {
   test(`${count} participants finish a real Game 1 turn through the 3D table`, async ({ browser, page }, testInfo) => {
-    test.setTimeout(count === 2 ? 180_000 : 120_000)
+    // Each participant renders a separate scene; allow the complete turn and trace cleanup.
+    test.setTimeout(300_000)
     const host = new ObservedPlayer(page)
     const players = await startTable(browser, host, count, 'one', 'visual')
     try {

@@ -2,7 +2,8 @@
 
 Fatia executável mobile-first do jogo cooperativo descrito na [spec #1](https://github.com/kauanpolydoro/rust-game-harry-potter/issues/1).
 
-Este primeiro incremento entrega PostgreSQL, backend Rust e shell Vue sob um único fluxo reproduzível.
+Os Jogos 1, 2 e 3 estão jogáveis com 2, 3 ou 4 participantes, usando PostgreSQL, backend Rust e cliente Vue sob um único fluxo reproduzível.
+O [catálogo de conteúdo](content/README.md) documenta inventários, fontes e regras da adaptação.
 
 ## Pré-requisitos
 
@@ -58,7 +59,7 @@ O perfil `dev` não é necessário para executar o gate.
 Instale o Chromium do Playwright uma vez no ambiente local:
 
 ```bash
-npx playwright install chromium
+npx playwright install --with-deps chromium firefox webkit
 ```
 
 Depois execute todos os gates:

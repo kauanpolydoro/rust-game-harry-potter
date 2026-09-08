@@ -1,12 +1,28 @@
 import { expect, test } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import gameTwoPurchasePriority from '../../server/tests/fixtures/game-two/purchase-priority.json' with { type: 'json' }
+import gameThreePurchasePriority from '../../server/tests/fixtures/game-three/purchase-priority.json' with { type: 'json' }
 
+import { type GameProjectionResponse } from '../src/contracts/identity-access.generated'
 import { ObservedPlayer, startTable } from './support/table'
 
 test.use({ actionTimeout: 10_000 })
 
 const purchasePriority = ['001', '005', '010', '008', '002', '007', '004', '006', '011', '009', '013', '003']
+
+function scenarioTargets(projection: GameProjectionResponse, options: string[], min: number, cause: string): string[] {
+  const targets = [...options]
+  if (projection.snapshot.versions.content === 'game-three-en-v1' && targets.every((id) => id.startsWith('hero:'))) {
+    const priority = (id: string) => {
+      const position = Number(id.slice('hero:'.length))
+      return ['rule:g3-hero-002-ability', 'rule:g3-hero-005-ability'].includes(cause)
+        ? Number(position !== projection.turn.active_position)
+        : projection.participants.find((hero) => hero.position === position)?.resources.health ?? 10
+    }
+    targets.sort((a, b) => priority(a) - priority(b))
+  }
+  return targets.slice(0, min)
+}
 
 async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean) {
   const projection = player.current()
@@ -22,7 +38,9 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
       await expect(page.getByRole('region', { name: 'Escolha oficial pendente' })).toContainText(choice.instruction ?? '')
     }
     const inputs = page.locator('.effect-choice input')
-    for (let index = 0; index < choice.min; index += 1) await inputs.nth(index).check()
+    for (const id of scenarioTargets(projection, choice.options, choice.min, choice.cause)) {
+      await inputs.nth(choice.options.indexOf(id)).check()
+    }
     await page.getByRole('button', { name: 'Confirmar escolha' }).click()
     return
   }
@@ -33,7 +51,8 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
     const row = page.getByRole('region', { name: 'Sua mão', exact: true }).getByRole('listitem').nth(handIndex)
     for (const [index, slot] of card.target_slots.entries()) {
       const inputs = row.locator('fieldset').nth(index).locator('input')
-      for (let target = 0; target < slot.min; target += 1) await inputs.nth(target).check()
+      const ids = slot.options.map((option) => option.target_id)
+      for (const id of scenarioTargets(projection, ids, slot.min, '')) await inputs.nth(ids.indexOf(id)).check()
     }
     await row.getByRole('button', { name: /^Jogar / }).click()
   } else if (seekVictory && legal.assign_attack.length) {
@@ -46,7 +65,9 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
     })).sort((a, b) => {
       const priority = (index: number) => {
         const catalog = projection.table.market[index].catalog_id
-        const order = projection.snapshot.versions.content === 'game-two-en-v1'
+        const order = projection.snapshot.versions.content === 'game-three-en-v1'
+          ? gameThreePurchasePriority[String(projection.participants.length) as keyof typeof gameThreePurchasePriority]
+          : projection.snapshot.versions.content === 'game-two-en-v1'
           ? gameTwoPurchasePriority[String(projection.participants.length) as keyof typeof gameTwoPurchasePriority]
           : purchasePriority.map((id) => `hogwarts-card:${id}`)
         const rank = order.indexOf(catalog)
@@ -63,19 +84,20 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
   }
 }
 
-for (const game of ['one', 'two'] as const) {
+for (const game of ['one', 'two', 'three'] as const) {
   for (const count of [2, 3, 4]) {
     for (const outcome of ['lost', 'won'] as const) {
-      test(`Game ${game === 'one' ? 1 : 2} with ${count} players reaches ${outcome} through the browser and WebSocket`, async ({ browser, page }, testInfo) => {
-        test.setTimeout(240_000)
+      test(`Game ${game === 'one' ? 1 : game === 'two' ? 2 : 3} with ${count} players reaches ${outcome} through the browser and WebSocket`, async ({ browser, page }, testInfo) => {
+        // Later adventures replay hundreds of commands and close traces for every participant.
+        test.setTimeout(game === 'one' ? 240_000 : 600_000)
         const host = new ObservedPlayer(page)
         const players = await startTable(browser, host, count, game)
         const commands: unknown[] = []
         try {
           if (count === 2 && outcome === 'lost') {
-            await page.screenshot({ path: testInfo.outputPath(`game-${game}-mobile.png`), fullPage: true })
+            await page.screenshot({ path: testInfo.outputPath(`game-${game}-mobile.png`), fullPage: true, animations: 'disabled', timeout: 30_000 })
             await page.setViewportSize({ width: 1440, height: 1000 })
-            await page.screenshot({ path: testInfo.outputPath(`game-${game}-desktop.png`), fullPage: true })
+            await page.screenshot({ path: testInfo.outputPath(`game-${game}-desktop.png`), fullPage: true, animations: 'disabled', timeout: 30_000 })
             await page.setViewportSize({ width: 393, height: 851 })
           }
           for (let command = 0; command < 600 && host.current().game.status === 'in_progress'; command += 1) {

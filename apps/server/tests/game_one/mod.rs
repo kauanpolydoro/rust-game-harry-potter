@@ -208,13 +208,12 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
     let choice = &projection["choice"];
     if choice["status"] == "pending" {
         let count = usize::try_from(choice["min"].as_u64().expect("choice count")).expect("count");
-        let options = choice["options"]
-            .as_array()
-            .expect("options")
-            .iter()
-            .take(count)
-            .cloned()
-            .collect::<Vec<_>>();
+        let options = super::game_three::scenario_targets(
+            projection,
+            choice["options"].as_array().expect("options"),
+            count,
+            choice["cause"].as_str().unwrap_or_default(),
+        );
         return json!({"type":"resolve_choice", "choice_id":choice["id"], "selected_options":options});
     }
     if !seek_victory {
@@ -232,13 +231,13 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
             .iter()
             .map(|slot| {
                 let count = usize::try_from(slot["min"].as_u64().expect("min")).expect("count");
-                let ids = slot["options"]
+                let options = slot["options"]
                     .as_array()
                     .expect("options")
                     .iter()
-                    .take(count)
                     .map(|option| option["target_id"].clone())
                     .collect::<Vec<_>>();
+                let ids = super::game_three::scenario_targets(projection, &options, count, "");
                 json!({"selector_id":slot["selector_id"], "target_ids":ids})
             })
             .collect::<Vec<_>>();
@@ -281,10 +280,18 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
 }
 
 fn acquisition_priority(catalog: &Value, projection: &Value) -> u8 {
-    if projection["snapshot"]["versions"]["content"] == "game-two-en-v1" {
-        let policies: Value =
-            serde_json::from_str(include_str!("../fixtures/game-two/purchase-priority.json"))
-                .expect("scenario policies");
+    if matches!(
+        projection["snapshot"]["versions"]["content"].as_str(),
+        Some("game-two-en-v1" | "game-three-en-v1")
+    ) {
+        let policies: Value = serde_json::from_str(
+            if projection["snapshot"]["versions"]["content"] == "game-three-en-v1" {
+                include_str!("../fixtures/game-three/purchase-priority.json")
+            } else {
+                include_str!("../fixtures/game-two/purchase-priority.json")
+            },
+        )
+        .expect("scenario policies");
         let count = projection["participants"]
             .as_array()
             .expect("participants")

@@ -14,7 +14,13 @@ O arquivo `bundles/game-two-en-v1.json` contém o Jogo 2 cumulativo, com 63 regi
 Ele usa schema 4 e manifesto 5, com 44 cartas de Hogwarts, 15 Artes das Trevas, seis Vilões e três Locais que substituem os do Jogo 1.
 As [regras do Jogo 2 v1](game-two-rules-v1.md) registram fontes, decisões da adaptação e efeitos completos.
 A preparação valida a sequência dos Locais e mantém uma única vaga de Vilão ativo.
-A confiança nas fontes dos dois Jogos é concedida externamente pelo servidor; uma lacuna funcional continua bloqueando a entrada e a publicação da Aventura.
+A confiança nas fontes é concedida externamente pelo servidor; uma lacuna funcional continua bloqueando a entrada e a publicação da Aventura.
+
+O arquivo `bundles/game-three-en-v1.json` contém o Jogo 3 cumulativo, com 77 registros e 138 cartas físicas.
+Ele usa schema 5 e manifesto 6, com 60 cartas de Hogwarts, 19 Artes das Trevas, oito Vilões e três Locais substitutos.
+Cada identidade de Herói aparece somente na versão do Jogo 3, com sua habilidade implementada por uma Strategy Rust versionada.
+A preparação mantém duas vagas de Vilão ativo e valida o vínculo entre identidade, versão e habilidade de cada participante.
+As [regras do Jogo 3 v1](game-three-rules-v1.md) documentam as fontes, incluindo a correção do inventário comunitário que omitia Sirius Black, e as decisões funcionais.
 
 O arquivo `bundles/base-en-candidate-2026-09-02.json` é o catálogo candidato em inglês para o jogo-base.
 Ele fecha o inventário declarado em 171 registros e 252 cartas físicas.
@@ -52,7 +58,16 @@ O vínculo interno de cópia não integra os resumos HTTP e WebSocket; alvos, ef
 A migração `0023_game_two.sql` valida a preparação cumulativa, as cópias e as transições correspondentes.
 O Jogo 1 conserva seu bundle, manifesto, digest, snapshot 5 e evento 6.
 Os codecs anteriores rejeitam campos exclusivos do Jogo 2.
-Os cenários de navegador dos dois Jogos exercitam vitória e derrota com 2, 3 e 4 participantes, e suas transcrições possuem goldens de eventos e Snapshots.
+O Jogo 3 usa snapshot 7 e evento 8, com limites das habilidades, Ataque atribuído e bloqueios de Vilões persistidos explicitamente.
+A migração `0025_game_three.sql` valida esses estados, as revelações do topo e suas transições, preservando os validadores das versões anteriores.
+O transporte conserva o evento público 6 e a forma da projeção aceita pelo cliente anterior.
+Descrições dos Vilões apresentam os bloqueios e a cota de Ataque; a descrição da fonte identifica o Herói e a carta revelada.
+As Escolhas das habilidades usam os campos existentes de origem e instrução, enquanto o estado consumido permanece no snapshot canônico.
+O início do Turno renova os limites e expira os bloqueios correspondentes antes das Artes das Trevas.
+Os Jogos 1 e 2 conservam seus bundles, manifestos, digests e codecs.
+
+Os cenários de navegador dos três Jogos exercitam vitória e derrota com 2, 3 e 4 participantes, e suas transcrições possuem goldens de eventos e Snapshots.
+O Jogo 3 também percorre 36 partidas com seeds variadas, verificando conservação do inventário, limites de recursos, unicidade das Escolhas e equivalência de execução, restauração e replay a cada Comando.
 
 Aplicações de teste podem substituir a fonte de seed na construção de `AppState` para reproduzir uma Partida pelo caminho HTTP real.
 A aplicação de produção usa a entropia do sistema operacional e não recebe uma seed em requisições.

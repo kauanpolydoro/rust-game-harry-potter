@@ -19,13 +19,14 @@ pub use effects::{
     EffectEntityPlacement, EffectExecutionError, EffectGameOutcome, EffectNoOpReason,
     EffectOperation, EffectOutcome, EffectPathSegment, EffectReactionTrigger, EffectResource,
     EffectResourceCost, EffectRoller, EffectRule, EffectSelector, EffectStop, EffectTargetBinding,
-    EffectTargetOwner, EffectTrigger, EffectWorld, EffectZone, HERO_MAX_HEALTH,
-    MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, PendingEffectChoice,
-    PendingEffectChoiceKind, QueuedEffect, effect_action_is_affordable,
+    EffectTargetOwner, EffectTrigger, EffectTurnState, EffectWorld, EffectZone, HERO_MAX_HEALTH,
+    HeroAbilityStrategy, MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX,
+    PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect, effect_action_is_affordable,
 };
 
 pub const SNAPSHOT_VERSION: u16 = 5;
 pub const GAME_TWO_SNAPSHOT_VERSION: u16 = 6;
+pub const GAME_THREE_SNAPSHOT_VERSION: u16 = 7;
 const TERMINAL_SNAPSHOT_VERSION: u16 = 4;
 const HERO_ACTION_SNAPSHOT_VERSION: u16 = 3;
 const PARTICIPANT_CHOICE_SNAPSHOT_VERSION: u16 = 2;
@@ -63,6 +64,16 @@ impl HeroId {
             Self::Hermione => "hermione",
             Self::Neville => "neville",
             Self::Ron => "ron",
+        }
+    }
+
+    #[must_use]
+    pub const fn game_three_catalog_id(self) -> &'static str {
+        match self {
+            Self::Harry => "hero:002",
+            Self::Hermione => "hero:005",
+            Self::Neville => "hero:008",
+            Self::Ron => "hero:011",
         }
     }
 
@@ -408,6 +419,20 @@ impl<'rules> GameEngine<'rules> {
     ) -> Result<InitialGameState, StartGameError> {
         let mut state = initialize_game(input)?;
         preparation::prepare_game_two(&mut state, roller)?;
+        settle_initial_turn(state, self.rules.effect_rules(), roller)
+    }
+
+    /// Prepares the cumulative Game 3 decks and resolves its opening turn.
+    ///
+    /// # Errors
+    /// Returns an error for invalid lobby, inventory, or entropy.
+    pub fn start_game_three(
+        &self,
+        input: StartGameInput<'_>,
+        roller: &mut dyn EffectRoller,
+    ) -> Result<InitialGameState, StartGameError> {
+        let mut state = initialize_game(input)?;
+        preparation::prepare_game_three(&mut state, roller)?;
         settle_initial_turn(state, self.rules.effect_rules(), roller)
     }
 
@@ -1143,15 +1168,7 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         return Err(StartGameError::InvalidContentIdentity);
     }
 
-    let effect_world = EffectWorld::new(
-        players
-            .iter()
-            .map(|player| {
-                EffectEntityPlacement::new(EffectEntity::hero(player.position), EffectZone::Heroes)
-            })
-            .chain(input.content.initial_entities.iter().cloned())
-            .collect(),
-    );
+    let effect_world = initial_effect_world(&players, input.content.initial_entities);
     let active_villain_limit =
         u8::try_from(effect_world.entities_in(EffectZone::ActiveVillains).len())
             .map_err(|_| StartGameError::InvalidInitialEntities)?;
@@ -1164,7 +1181,9 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
     }
 
     Ok(InitialGameState {
-        snapshot_version: if input.content.manifest_version >= 5 {
+        snapshot_version: if input.content.manifest_version == 6 {
+            GAME_THREE_SNAPSHOT_VERSION
+        } else if input.content.manifest_version >= 5 {
             GAME_TWO_SNAPSHOT_VERSION
         } else {
             SNAPSHOT_VERSION
@@ -1199,6 +1218,27 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         last_turn_steps: Vec::new(),
         players,
     })
+}
+
+fn initial_effect_world(
+    players: &[InitialPlayer],
+    placements: &[EffectEntityPlacement],
+) -> EffectWorld {
+    EffectWorld::new(
+        players
+            .iter()
+            .filter(|player| {
+                !placements.iter().any(|placement| {
+                    placement.entity().kind() == EffectEntityKind::Hero
+                        && placement.entity().owner_position() == Some(player.position)
+                })
+            })
+            .map(|player| {
+                EffectEntityPlacement::new(EffectEntity::hero(player.position), EffectZone::Heroes)
+            })
+            .chain(placements.iter().cloned())
+            .collect(),
+    )
 }
 
 fn initial_players(
@@ -1574,6 +1614,13 @@ pub fn restore_game_state(
     {
         return Err(GameStateRestoreError::InvalidPlayers);
     }
+    if input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION
+        && (input.manifest_version != 6
+            || input.adventure_id != "adventure:003"
+            || !preparation::valid_game_three_entities(&input.effect_world, &input.players))
+    {
+        return Err(GameStateRestoreError::InvalidPlayers);
+    }
     if !restored_control_is_valid(&input)
         || !preparation::valid_samples(
             &input.preparation_samples,
@@ -1589,7 +1636,9 @@ pub fn restore_game_state(
     players.sort_by_key(InitialPlayer::position);
 
     Ok(InitialGameState {
-        snapshot_version: if input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION {
+        snapshot_version: if input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION {
+            GAME_THREE_SNAPSHOT_VERSION
+        } else if input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION {
             GAME_TWO_SNAPSHOT_VERSION
         } else {
             SNAPSHOT_VERSION
@@ -1625,7 +1674,8 @@ pub fn restore_game_state(
 fn validate_restore_metadata(
     input: &GameStateRestoreInput<'_>,
 ) -> Result<(), GameStateRestoreError> {
-    let supported_snapshot = input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION
+    let supported_snapshot = input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION
+        || input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION
         || input.snapshot_version == SNAPSHOT_VERSION
         || input.snapshot_version == TERMINAL_SNAPSHOT_VERSION
         || input.snapshot_version == HERO_ACTION_SNAPSHOT_VERSION
@@ -2129,7 +2179,10 @@ fn decide_assign_attack(
         })
         .ok_or(GameCommandError::CommandNotLegal)?;
     let villain_health = villain.resource(EffectResource::Health);
-    if amount > available_attack || amount > villain_health {
+    if amount > available_attack
+        || amount > villain_health
+        || amount > villain.available_attack_capacity()
+    {
         return Err(GameCommandError::CommandNotLegal);
     }
     let reward_rule_id = villain.reward_rule_id().map(str::to_owned);
@@ -2272,7 +2325,7 @@ fn attack_assignment_effects(
 ) -> Vec<EffectOutcome> {
     let available_attack = hero.resource(EffectResource::Attack);
     let villain_health = villain.resource(EffectResource::Health);
-    vec![
+    let mut outcomes = vec![
         EffectOutcome::ResourceChanged {
             rule_id: "system:assign-attack".to_owned(),
             target_id: hero.id().to_owned(),
@@ -2291,7 +2344,10 @@ fn attack_assignment_effects(
             after: villain_health - amount,
             cause: EffectChangeCause::Effect,
         },
-    ]
+    ];
+    outcomes.extend(hero.assigned_attack_outcome(amount));
+    outcomes.extend(villain.assigned_attack_outcome(amount));
+    outcomes
 }
 
 fn card_acquisition_effects(
@@ -2546,7 +2602,9 @@ fn legal_attack_targets(state: &InitialGameState, actor_position: u8) -> Vec<Leg
         .filter(|entity| entity.kind() == EffectEntityKind::Villain)
         .filter_map(|villain| {
             let health = villain.resource(EffectResource::Health);
-            let max_amount = available_attack.min(health);
+            let max_amount = available_attack
+                .min(health)
+                .min(villain.available_attack_capacity());
             (max_amount > 0).then(|| LegalAttackTarget {
                 villain_id: villain.id().to_owned(),
                 max_amount,
@@ -3617,7 +3675,10 @@ fn apply_attack_assigned_event(
         })
         .ok_or(GameEventError::EventNotApplicable)?;
     let villain_health = villain.resource(EffectResource::Health);
-    if amount > available_attack || amount > villain_health {
+    if amount > available_attack
+        || amount > villain_health
+        || amount > villain.available_attack_capacity()
+    {
         return Err(GameEventError::EffectTransitionInvalid);
     }
     let reward_rule_id = villain.reward_rule_id().map(str::to_owned);
@@ -3651,7 +3712,10 @@ fn apply_attack_assigned_event(
                 reward_effects,
                 reward_rule_id.as_deref().unwrap_or("system:defeat-villain"),
             ))
-        || (!defeated && !reward_effects.is_empty())
+        || (!defeated
+            && !reward_effects
+                .iter()
+                .all(|effect| hero.effect_rule_id() == Some(effect.rule_id())))
         || !effects::effect_transition_is_valid(event_effects, stop, &participant_positions)
     {
         return Err(GameEventError::EffectTransitionInvalid);
@@ -3844,9 +3908,9 @@ fn outcomes_belong_to_window(
         })
         .collect::<BTreeSet<_>>();
     let reaction_sources = world.entities().filter(|(zone, entity)| {
-        matches!(zone, EffectZone::ActiveVillains | EffectZone::HeroPlayArea)
+        matches!(zone, EffectZone::Heroes | EffectZone::ActiveVillains | EffectZone::HeroPlayArea)
             || outcomes.iter().any(|outcome| matches!(outcome,
-                EffectOutcome::Moved { target_id, from: EffectZone::HeroHand, to: EffectZone::HeroDiscardPile, .. }
+                EffectOutcome::Moved { target_id, from: EffectZone::HeroHand | EffectZone::HeroDrawPile, to: EffectZone::HeroDiscardPile, .. }
                 if target_id == entity.id()))
     }).filter_map(|(_, entity)| entity.effect_rule_id()).collect::<BTreeSet<_>>();
     outcomes.iter().all(|outcome| outcome_belongs_to_rule(outcome, primary_rule)
@@ -3855,6 +3919,9 @@ fn outcomes_belong_to_window(
         || matches!(outcome,
             EffectOutcome::Moved { rule_id, from: EffectZone::ActiveVillains, to: EffectZone::VillainDiscard, target_position: None, .. }
                 if rule_id == "system:defeat-villain")
+        || matches!(outcome,
+            EffectOutcome::Moved { rule_id, from: EffectZone::HeroHand, to: EffectZone::HeroDiscardPile, target_position: Some(_), .. }
+                if rule_id == "system:voluntary-discard")
         || matches!(outcome, EffectOutcome::Terminal { rule_id, .. } if rule_id == STRUCTURAL_OUTCOME_RULE_ID))
 }
 

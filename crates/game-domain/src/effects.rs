@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+mod game_three;
 mod game_two;
 mod reactions;
 pub(crate) use reactions::can_acquire_on_deck;
@@ -80,6 +81,7 @@ impl EffectZone {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectTargetOwner {
+    Other,
     Actor,
     Any,
 }
@@ -126,6 +128,14 @@ pub enum EffectCondition {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOperation {
+    SuppressVillain,
+    DiscardForSpellBonus {
+        influence: u8,
+    },
+    GainInfluenceAndHealth {
+        influence: u8,
+        health: u8,
+    },
     DiscardVoluntarily,
     CopyPlayedAlly,
     GainAttackPerAllyPlayed {
@@ -171,6 +181,17 @@ pub enum EffectGameOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectDefinition {
+    LimitVillainAttack {
+        maximum: u8,
+    },
+    HeroAbility {
+        strategy: HeroAbilityStrategy,
+        effect: Box<Self>,
+    },
+    RevealTopCard {
+        minimum_cost: u16,
+        effect: Box<Self>,
+    },
     ForEachTarget {
         target: EffectSelector,
         effect: Box<Self>,
@@ -222,6 +243,7 @@ pub enum EffectDefinition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectReactionTrigger {
+    SelfHarmfulDiscard,
     OwnerPlaysAlly,
     ControlAdded,
     HeroForcedDiscard,
@@ -277,6 +299,24 @@ pub enum EffectEntityKind {
     Villain,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeroAbilityStrategy {
+    HarryGameThreeV1,
+    HermioneGameThreeV1,
+    NevilleGameThreeV1,
+    RonGameThreeV1,
+}
+
+/// Transient Game 3 counters and suppressions, persisted for deterministic continuations.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectTurnState {
+    pub ability_used: bool,
+    pub healed_positions: Vec<u8>,
+    pub attack_assigned: u16,
+    pub attack_limit: Option<u8>,
+    pub suppressed_by: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectEntity {
     id: String,
@@ -291,6 +331,7 @@ pub struct EffectEntity {
     dark_arts_count: Option<u8>,
     drawing_blocked: bool,
     copied_ally_id: Option<String>,
+    turn_state: Option<EffectTurnState>,
 }
 
 impl EffectEntity {
@@ -309,6 +350,7 @@ impl EffectEntity {
             dark_arts_count: None,
             drawing_blocked: false,
             copied_ally_id: None,
+            turn_state: None,
         }
     }
 
@@ -344,6 +386,7 @@ impl EffectEntity {
             dark_arts_count: None,
             drawing_blocked: false,
             copied_ally_id: None,
+            turn_state: None,
         }
     }
 
@@ -368,6 +411,7 @@ impl EffectEntity {
             dark_arts_count: Some(dark_arts_count),
             drawing_blocked: false,
             copied_ally_id: None,
+            turn_state: None,
         }
     }
 
@@ -391,6 +435,7 @@ impl EffectEntity {
             dark_arts_count: None,
             drawing_blocked: false,
             copied_ally_id: None,
+            turn_state: None,
         }
     }
 
@@ -505,6 +550,49 @@ impl EffectEntity {
         self.drawing_blocked
     }
 
+    pub(crate) fn assigned_attack_outcome(&self, amount: u16) -> Option<EffectOutcome> {
+        let before = self.turn_state.as_ref()?;
+        let mut after = before.clone();
+        after.attack_assigned = after.attack_assigned.saturating_add(amount);
+        Some(EffectOutcome::TurnStateChanged {
+            rule_id: "system:assign-attack".to_owned(),
+            target_id: self.id.clone(),
+            before: before.clone(),
+            after,
+        })
+    }
+
+    pub(crate) fn available_attack_capacity(&self) -> u16 {
+        self.turn_state
+            .as_ref()
+            .and_then(|state| {
+                state
+                    .attack_limit
+                    .map(|limit| u16::from(limit).saturating_sub(state.attack_assigned))
+            })
+            .unwrap_or(u16::MAX)
+    }
+
+    #[must_use]
+    pub fn villain_ability_suppressed(&self) -> bool {
+        self.kind == EffectEntityKind::Villain
+            && self
+                .turn_state
+                .as_ref()
+                .is_some_and(|state| !state.suppressed_by.is_empty())
+    }
+
+    #[must_use]
+    pub fn turn_state(&self) -> Option<&EffectTurnState> {
+        self.turn_state.as_ref()
+    }
+
+    #[must_use]
+    pub fn with_turn_state(mut self, state: Option<EffectTurnState>) -> Self {
+        self.turn_state = state;
+        self
+    }
+
     #[must_use]
     pub fn copied_ally_id(&self) -> Option<&str> {
         self.copied_ally_id.as_deref()
@@ -560,6 +648,9 @@ impl EffectWorld {
                 .entry(placement.zone)
                 .or_default()
                 .push(placement.entity);
+        }
+        if let Some(heroes) = zones.get_mut(&EffectZone::Heroes) {
+            heroes.sort_by_key(EffectEntity::owner_position);
         }
         Self { zones }
     }
@@ -938,6 +1029,9 @@ impl EffectWorld {
                             .resource_limit(*resource)
                             .is_some_and(|limit| *value > limit)
                     })
+                    || entity.turn_state.as_ref().is_some_and(|state| {
+                        !game_three::valid_turn_state(entity.kind, state, positions)
+                    })
                     || !entity_is_valid_in_zone(entity, zone)
                     || !self.valid_copied_ally(entity)
             })
@@ -969,8 +1063,18 @@ impl EffectWorld {
 fn valid_hero_entity(entity: &EffectEntity, zone: EffectZone) -> bool {
     zone == EffectZone::Heroes
         && entity.owner_position.is_some()
-        && entity.catalog_id.is_none()
-        && entity.effect_rule_id.is_none()
+        && if entity.turn_state.is_some() {
+            entity
+                .catalog_id
+                .as_deref()
+                .is_some_and(|id| matches!(id, "hero:002" | "hero:005" | "hero:008" | "hero:011"))
+                && entity
+                    .effect_rule_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+        } else {
+            entity.catalog_id.is_none() && entity.effect_rule_id.is_none()
+        }
         && entity.reward_rule_id.is_none()
         && entity.influence_cost.is_none()
         && entity.dark_arts_count.is_none()
@@ -1165,6 +1269,17 @@ pub enum EffectNoOpReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOutcome {
+    TurnStateChanged {
+        rule_id: String,
+        target_id: String,
+        before: EffectTurnState,
+        after: EffectTurnState,
+    },
+    TopCardRevealed {
+        rule_id: String,
+        card_id: String,
+        owner_position: u8,
+    },
     AllyCopied {
         rule_id: String,
         card_id: String,
@@ -1246,6 +1361,8 @@ pub struct EffectCursor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectPathSegment {
+    HeroAbilityEffect,
+    RevealedCardEffect,
     ReactionEffect,
     ChoiceOption(u16),
     ConditionThen,
@@ -1338,6 +1455,7 @@ impl EffectExecutor<'_> {
     fn run(mut self) -> Result<EffectResolution, EffectExecutionError> {
         self.enqueue_copied_effects(0)?;
         self.enqueue_reactions(0)?;
+        self.enqueue_hero_abilities(0)?;
         self.enqueue_defeated_villains(self.actor_position)?;
         while let Some(queued) = self.queue.pop_front() {
             let outcome_start = self.outcomes.len();
@@ -1384,6 +1502,7 @@ impl EffectExecutor<'_> {
             self.enqueue_defeated_villains(actor_position)?;
             self.enqueue_copied_effects(outcome_start)?;
             self.enqueue_reactions(outcome_start)?;
+            self.enqueue_hero_abilities(outcome_start)?;
             self.ensure_outcome_limit()?;
             if let Some(stop) = stop {
                 return Ok(self.finish(stop));
@@ -1456,7 +1575,14 @@ impl EffectExecutor<'_> {
         effect: EffectDefinition,
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
         match effect {
-            EffectDefinition::PreventExtraDrawing
+            EffectDefinition::LimitVillainAttack { maximum } => {
+                self.limit_villain_attack(&cursor, maximum)
+            }
+            EffectDefinition::RevealTopCard { minimum_cost, .. } => {
+                self.reveal_top_card(&cursor, actor_position, minimum_cost)
+            }
+            EffectDefinition::HeroAbility { .. }
+            | EffectDefinition::PreventExtraDrawing
             | EffectDefinition::Reaction { .. }
             | EffectDefinition::HandDamageLimit { .. }
             | EffectDefinition::TopDeckAcquisition { .. }
@@ -1465,24 +1591,9 @@ impl EffectExecutor<'_> {
             EffectDefinition::Apply { target, operation } => {
                 self.execute_apply(&cursor, actor_position, &target, &operation)
             }
-            EffectDefinition::Choice { audience, options } => match audience {
-                EffectChoiceAudience::Actor => {
-                    self.execute_choice(&cursor, actor_position, options.len())
-                }
-                EffectChoiceAudience::EachHero => {
-                    let positions = hero_positions(self.world);
-                    let Some((&first, remaining)) = positions.split_first() else {
-                        return Err(EffectExecutionError::InvalidDefinition);
-                    };
-                    for responsible_position in remaining.iter().rev() {
-                        self.queue.push_front(QueuedEffect::EffectChoice {
-                            cursor: cursor.clone(),
-                            responsible_position: *responsible_position,
-                        });
-                    }
-                    self.execute_choice(&cursor, first, options.len())
-                }
-            },
+            EffectDefinition::Choice { audience, options } => {
+                self.execute_choice_audience(&cursor, actor_position, audience, options.len())
+            }
             EffectDefinition::Condition {
                 condition,
                 then: _,
@@ -1556,6 +1667,33 @@ impl EffectExecutor<'_> {
         }
     }
 
+    fn execute_choice_audience(
+        &mut self,
+        cursor: &EffectCursor,
+        actor_position: u8,
+        audience: EffectChoiceAudience,
+        option_count: usize,
+    ) -> Result<Option<EffectStop>, EffectExecutionError> {
+        match audience {
+            EffectChoiceAudience::Actor => {
+                self.execute_choice(cursor, actor_position, option_count)
+            }
+            EffectChoiceAudience::EachHero => {
+                let positions = hero_positions(self.world);
+                let Some((&first, remaining)) = positions.split_first() else {
+                    return Err(EffectExecutionError::InvalidDefinition);
+                };
+                for responsible_position in remaining.iter().rev() {
+                    self.queue.push_front(QueuedEffect::EffectChoice {
+                        cursor: cursor.clone(),
+                        responsible_position: *responsible_position,
+                    });
+                }
+                self.execute_choice(cursor, first, option_count)
+            }
+        }
+    }
+
     fn execute_apply(
         &mut self,
         cursor: &EffectCursor,
@@ -1605,6 +1743,7 @@ impl EffectExecutor<'_> {
                     self.world,
                     entity_id,
                     EffectSource {
+                        actor_position,
                         rule_id: &cursor.rule_id,
                         rules: self.rules,
                     },
@@ -1636,6 +1775,7 @@ impl EffectExecutor<'_> {
                     self.world,
                     &entity_id,
                     EffectSource {
+                        actor_position,
                         rule_id: &cursor.rule_id,
                         rules: self.rules,
                     },
@@ -1858,9 +1998,20 @@ fn effect_at_cursor<'a>(
     let mut effect = &rule.effect;
     for segment in &cursor.path {
         effect = match (effect, segment) {
-            (EffectDefinition::Reaction { effect, .. }, EffectPathSegment::ReactionEffect) => {
-                effect
-            }
+            (
+                EffectDefinition::HeroAbility { effect, .. },
+                EffectPathSegment::HeroAbilityEffect,
+            )
+            | (
+                EffectDefinition::RevealTopCard { effect, .. },
+                EffectPathSegment::RevealedCardEffect,
+            )
+            | (EffectDefinition::Reaction { effect, .. }, EffectPathSegment::ReactionEffect)
+            | (
+                EffectDefinition::Repeat { effect, .. }
+                | EffectDefinition::ForEachTarget { effect, .. },
+                EffectPathSegment::RepeatEffect,
+            ) => effect,
             (EffectDefinition::Choice { options, .. }, EffectPathSegment::ChoiceOption(index)) => {
                 options.get(usize::from(*index))?
             }
@@ -1872,11 +2023,6 @@ fn effect_at_cursor<'a>(
                 },
                 EffectPathSegment::ConditionOtherwise,
             ) => otherwise,
-            (
-                EffectDefinition::Repeat { effect, .. }
-                | EffectDefinition::ForEachTarget { effect, .. },
-                EffectPathSegment::RepeatEffect,
-            ) => effect,
             (EffectDefinition::Roll { outcomes, .. }, EffectPathSegment::RollOutcome(index)) => {
                 outcomes.get(usize::from(*index))?
             }
@@ -2023,6 +2169,7 @@ pub(crate) fn resume_effects(
                     &mut next_world,
                     option,
                     EffectSource {
+                        actor_position: pending.responsible_position,
                         rule_id: &pending.cause,
                         rules,
                     },
@@ -2113,6 +2260,7 @@ pub(crate) fn execute_effects(
     let active_villain_rules = world
         .entities_in(EffectZone::ActiveVillains)
         .iter()
+        .filter(|entity| !entity.villain_ability_suppressed())
         .filter_map(|entity| entity.effect_rule_id.clone())
         .collect::<BTreeSet<_>>();
     let selection = if trigger == EffectTrigger::Villains
@@ -2284,6 +2432,9 @@ fn execute_effects_with_targets(
     let mut costs = pay_costs(&mut next_world, actor_position, rules, selection)?;
     resolve_cost_stun(&mut next_world, actor_position, &mut costs, &mut queue)?;
     let mut outcomes = initial_outcomes;
+    if matches!(selection, RuleSelection::Trigger(EffectTrigger::DarkArts)) {
+        game_three::begin_turn(&mut next_world, actor_position, &mut outcomes)?;
+    }
     outcomes.extend(costs);
     if outcomes.len() > MAX_EFFECT_OUTCOMES {
         return Err(EffectExecutionError::StepLimitExceeded);
@@ -2398,6 +2549,17 @@ pub(crate) fn apply_effect_outcomes(
 ) -> Result<(), EffectExecutionError> {
     for outcome in outcomes {
         match outcome {
+            EffectOutcome::TurnStateChanged {
+                target_id,
+                before,
+                after,
+                ..
+            } => game_three::apply_turn_state(world, target_id, before, after)?,
+            EffectOutcome::TopCardRevealed {
+                card_id,
+                owner_position,
+                ..
+            } => game_three::validate_revealed_top(world, card_id, *owner_position)?,
             EffectOutcome::AllyCopied {
                 rule_id,
                 card_id,
@@ -2518,7 +2680,9 @@ impl EffectOutcome {
     #[must_use]
     pub fn rule_id(&self) -> &str {
         match self {
-            Self::AllyCopied { rule_id, .. }
+            Self::TurnStateChanged { rule_id, .. }
+            | Self::TopCardRevealed { rule_id, .. }
+            | Self::AllyCopied { rule_id, .. }
             | Self::DrawingBlocked { rule_id, .. }
             | Self::RandomSampled { rule_id, .. }
             | Self::DieRolled { rule_id, .. }
@@ -2532,6 +2696,26 @@ impl EffectOutcome {
     fn is_valid(&self) -> bool {
         let valid_id = |value: &str| !value.is_empty() && value.len() <= MAX_CHOICE_VALUE_LENGTH;
         match self {
+            Self::TurnStateChanged {
+                rule_id,
+                target_id,
+                before,
+                after,
+            } => {
+                valid_id(rule_id)
+                    && valid_id(target_id)
+                    && before != after
+                    && [before, after].iter().all(|state| {
+                        [EffectEntityKind::Hero, EffectEntityKind::Villain]
+                            .iter()
+                            .any(|kind| game_three::valid_turn_state(*kind, state, &[1, 2, 3, 4]))
+                    })
+            }
+            Self::TopCardRevealed {
+                rule_id,
+                card_id,
+                owner_position,
+            } => valid_id(rule_id) && valid_id(card_id) && (1..=4).contains(owner_position),
             Self::AllyCopied {
                 rule_id,
                 card_id,
@@ -2633,7 +2817,9 @@ impl EffectCursor {
                 EffectPathSegment::ChoiceOption(index)
                 | EffectPathSegment::SequenceEffect(index) => *index <= MAX_EFFECT_BRANCH_INDEX,
                 EffectPathSegment::RollOutcome(index) => *index <= MAX_EFFECT_ROLL_INDEX,
-                EffectPathSegment::ConditionThen
+                EffectPathSegment::HeroAbilityEffect
+                | EffectPathSegment::RevealedCardEffect
+                | EffectPathSegment::ConditionThen
                 | EffectPathSegment::ConditionOtherwise
                 | EffectPathSegment::ReactionEffect
                 | EffectPathSegment::RepeatEffect => true,
@@ -2742,6 +2928,13 @@ fn condition_is_valid(condition: &EffectCondition) -> bool {
 
 fn operation_is_valid_for_zone(operation: &EffectOperation, zone: EffectZone) -> bool {
     match operation {
+        EffectOperation::SuppressVillain => zone == EffectZone::ActiveVillains,
+        EffectOperation::DiscardForSpellBonus { influence } => {
+            zone == EffectZone::HeroHand && (1..=16).contains(influence)
+        }
+        EffectOperation::GainInfluenceAndHealth { influence, health } => {
+            zone == EffectZone::Heroes && (1..=16).contains(influence) && (1..=10).contains(health)
+        }
         EffectOperation::CopyPlayedAlly => zone == EffectZone::HeroPlayArea,
         EffectOperation::PreventDrawing => zone == EffectZone::Heroes,
         EffectOperation::Draw { amount } | EffectOperation::GainAttackPerAllyPlayed { amount } => {
@@ -2785,9 +2978,12 @@ pub(crate) fn eligible_entity_ids(
     world
         .entities_in(selector.zone)
         .iter()
-        .filter(|entity| {
-            selector.owner == EffectTargetOwner::Any
-                || entity.owner_position == Some(actor_position)
+        .filter(|entity| match selector.owner {
+            EffectTargetOwner::Any => true,
+            EffectTargetOwner::Actor => entity.owner_position == Some(actor_position),
+            EffectTargetOwner::Other => entity
+                .owner_position
+                .is_some_and(|owner| owner != actor_position),
         })
         .filter(|entity| {
             selector
@@ -2871,7 +3067,8 @@ fn collect_atomic_target_slots(
                 Some(true)
             }
         }
-        EffectDefinition::ForEachTarget { .. }
+        EffectDefinition::RevealTopCard { .. }
+        | EffectDefinition::ForEachTarget { .. }
         | EffectDefinition::Choice { .. }
         | EffectDefinition::Terminal { .. } => Some(false),
         EffectDefinition::Condition {
@@ -2889,7 +3086,9 @@ fn collect_atomic_target_slots(
             })?;
             Some(then_continues || otherwise_continues)
         }
-        EffectDefinition::PreventExtraDrawing
+        EffectDefinition::LimitVillainAttack { .. }
+        | EffectDefinition::HeroAbility { .. }
+        | EffectDefinition::PreventExtraDrawing
         | EffectDefinition::NoOp
         | EffectDefinition::TopDeckAcquisition { .. }
         | EffectDefinition::CardType { .. }
@@ -3055,6 +3254,7 @@ fn draw_cards(
 
 #[derive(Clone, Copy)]
 struct EffectSource<'a> {
+    actor_position: u8,
     rule_id: &'a str,
     rules: &'a [EffectRule],
 }
@@ -3070,6 +3270,17 @@ fn apply_operation(
 ) -> Result<Option<u8>, EffectExecutionError> {
     let rule_id = source.rule_id;
     match operation {
+        EffectOperation::SuppressVillain => {
+            game_three::suppress_villain(world, entity_id, source, outcomes)
+        }
+        EffectOperation::DiscardForSpellBonus { influence } => {
+            game_three::discard_for_spell_bonus(world, entity_id, source, *influence, outcomes)
+        }
+        EffectOperation::GainInfluenceAndHealth { influence, health } => {
+            game_three::gain_influence_and_health(
+                world, entity_id, source, *influence, *health, outcomes,
+            )
+        }
         EffectOperation::DiscardVoluntarily => move_entity(
             world,
             entity_id,

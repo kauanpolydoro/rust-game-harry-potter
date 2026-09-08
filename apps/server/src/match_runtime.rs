@@ -34,6 +34,10 @@ mod realtime;
 #[cfg(test)]
 mod game_one_tests;
 #[cfg(test)]
+mod game_three_scenarios;
+#[cfg(test)]
+mod game_three_tests;
+#[cfg(test)]
 mod game_two_tests;
 
 use codec::{
@@ -605,6 +609,8 @@ impl PersistedEffects {
 #[serde(deny_unknown_fields)]
 struct PersistedEffectEntity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn_state: Option<PersistedEffectTurnState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     copied_ally_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     drawing_blocked: Option<bool>,
@@ -633,8 +639,29 @@ struct PersistedEffectEntity {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedEffectTurnState {
+    ability_used: bool,
+    healed_positions: Vec<u8>,
+    attack_assigned: u16,
+    attack_limit: Option<u8>,
+    suppressed_by: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectOutcome {
+    TurnStateChanged {
+        rule_id: String,
+        target_id: String,
+        before: PersistedEffectTurnState,
+        after: PersistedEffectTurnState,
+    },
+    TopCardRevealed {
+        rule_id: String,
+        card_id: String,
+        owner_position: u8,
+    },
     AllyCopied {
         rule_id: String,
         card_id: String,
@@ -715,6 +742,8 @@ struct PersistedEffectCursor {
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum PersistedEffectPathSegment {
+    HeroAbilityEffect,
+    RevealedCardEffect,
     ReactionEffect,
     ChoiceOption { index: u16 },
     ConditionThen,
@@ -1153,7 +1182,9 @@ async fn execute_game_command(
     validate_persisted_json_size(&snapshot_json)?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
     let (event_version, event_type, event_json) =
-        if decision.state.snapshot_version() == game_domain::GAME_TWO_SNAPSHOT_VERSION {
+        if decision.state.snapshot_version() == game_domain::GAME_THREE_SNAPSHOT_VERSION {
+            codec::persisted_game_three_event(decision.event)?
+        } else if decision.state.snapshot_version() == game_domain::GAME_TWO_SNAPSHOT_VERSION {
             codec::persisted_game_two_event(decision.event)?
         } else {
             persisted_event(decision.event)?

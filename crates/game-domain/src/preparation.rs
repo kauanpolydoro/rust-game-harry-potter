@@ -7,22 +7,84 @@ pub(crate) fn prepare_game_one(
     state: &mut InitialGameState,
     random: &mut dyn EffectRoller,
 ) -> Result<(), StartGameError> {
-    prepare(state, random, false)
+    prepare(state, random, &GAME_ONE)
 }
 
 pub(crate) fn prepare_game_two(
     state: &mut InitialGameState,
     random: &mut dyn EffectRoller,
 ) -> Result<(), StartGameError> {
-    prepare(state, random, true)
+    prepare(state, random, &GAME_TWO)
+}
+
+struct PreparationInventory {
+    hogwarts: usize,
+    dark_arts: usize,
+    villains: usize,
+    active_villains: u8,
+    locations: &'static [(&'static str, u16, u8)],
+}
+
+const GAME_ONE: PreparationInventory = PreparationInventory {
+    hogwarts: 30,
+    dark_arts: 10,
+    villains: 3,
+    active_villains: 1,
+    locations: &[("location:001", 4, 1), ("location:002", 4, 1)],
+};
+const GAME_TWO: PreparationInventory = PreparationInventory {
+    hogwarts: 44,
+    dark_arts: 15,
+    villains: 6,
+    active_villains: 1,
+    locations: &[
+        ("location:003", 4, 1),
+        ("location:004", 4, 1),
+        ("location:005", 5, 2),
+    ],
+};
+const GAME_THREE: PreparationInventory = PreparationInventory {
+    hogwarts: 60,
+    dark_arts: 19,
+    villains: 8,
+    active_villains: 2,
+    locations: &[
+        ("location:006", 5, 1),
+        ("location:007", 6, 2),
+        ("location:008", 6, 2),
+    ],
+};
+
+pub(crate) fn prepare_game_three(
+    state: &mut InitialGameState,
+    random: &mut dyn EffectRoller,
+) -> Result<(), StartGameError> {
+    if !valid_game_three_entities(&state.effect_world, &state.players)
+        || state.adventure_id != "adventure:003"
+        || state.manifest_version != 6
+        || state.players.iter().any(|player| {
+            !state
+                .effect_world
+                .entities_in(EffectZone::Heroes)
+                .iter()
+                .any(|hero| {
+                    hero.owner_position() == Some(player.position)
+                        && hero.catalog_id() == Some(player.hero.game_three_catalog_id())
+                        && hero.turn_state() == Some(&crate::EffectTurnState::default())
+                })
+        })
+    {
+        return Err(StartGameError::InvalidInitialEntities);
+    }
+    prepare(state, random, &GAME_THREE)
 }
 
 fn prepare(
     state: &mut InitialGameState,
     random: &mut dyn EffectRoller,
-    game_two: bool,
+    inventory: &PreparationInventory,
 ) -> Result<(), StartGameError> {
-    validate_initial_layout(state, game_two)?;
+    validate_initial_layout(state, inventory)?;
     let world = &mut state.effect_world;
     let samples = &mut state.preparation_samples;
     for zone in [
@@ -68,7 +130,11 @@ fn prepare(
     }
     for (from, to, count) in [
         (EffectZone::HogwartsDeck, EffectZone::Market, 6),
-        (EffectZone::VillainDeck, EffectZone::ActiveVillains, 1),
+        (
+            EffectZone::VillainDeck,
+            EffectZone::ActiveVillains,
+            inventory.active_villains,
+        ),
     ] {
         for _ in 0..count {
             let id = world
@@ -82,18 +148,21 @@ fn prepare(
                 .map_err(|_| StartGameError::InvalidInitialEntities)?;
         }
     }
-    state.active_villain_limit = 1;
+    state.active_villain_limit = inventory.active_villains;
     Ok(())
 }
 
-fn validate_initial_layout(state: &InitialGameState, game_two: bool) -> Result<(), StartGameError> {
+fn validate_initial_layout(
+    state: &InitialGameState,
+    inventory: &PreparationInventory,
+) -> Result<(), StartGameError> {
     let world = &state.effect_world;
     let valid_counts = [
-        (EffectZone::HogwartsDeck, if game_two { 44 } else { 30 }),
-        (EffectZone::DarkArtsDeck, if game_two { 15 } else { 10 }),
-        (EffectZone::VillainDeck, if game_two { 6 } else { 3 }),
+        (EffectZone::HogwartsDeck, inventory.hogwarts),
+        (EffectZone::DarkArtsDeck, inventory.dark_arts),
+        (EffectZone::VillainDeck, inventory.villains),
         (EffectZone::ActiveLocation, 1),
-        (EffectZone::LocationDeck, if game_two { 2 } else { 1 }),
+        (EffectZone::LocationDeck, inventory.locations.len() - 1),
         (EffectZone::Heroes, state.players.len()),
     ]
     .into_iter()
@@ -119,17 +188,16 @@ fn validate_initial_layout(state: &InitialGameState, game_two: bool) -> Result<(
             | (EffectZone::VillainDeck, EffectEntityKind::Villain) => true,
             (EffectZone::ActiveLocation | EffectZone::LocationDeck, EffectEntityKind::Location) => {
                 entity.resource(EffectResource::Control) == 0
-                    && entity.resource_limit(EffectResource::Control)
-                        == Some(if game_two && entity.catalog_id() == Some("location:005") {
-                            5
-                        } else {
-                            4
+                    && inventory
+                        .locations
+                        .iter()
+                        .find(|(id, _, _)| entity.catalog_id() == Some(*id))
+                        .or_else(|| {
+                            (inventory.active_villains == 1).then(|| &inventory.locations[0])
                         })
-                    && entity.dark_arts_count()
-                        == Some(if game_two && entity.catalog_id() == Some("location:005") {
-                            2
-                        } else {
-                            1
+                        .is_some_and(|(_, control, dark_arts)| {
+                            entity.resource_limit(EffectResource::Control) == Some(*control)
+                                && entity.dark_arts_count() == Some(*dark_arts)
                         })
             }
             _ => false,
@@ -150,19 +218,15 @@ pub(crate) fn valid_samples(
     if samples.is_empty() {
         return true;
     }
-    let game_two = adventure_id == "adventure:002";
+    let inventory = match adventure_id {
+        "adventure:003" => &GAME_THREE,
+        "adventure:002" => &GAME_TWO,
+        _ => &GAME_ONE,
+    };
     let expected = [
-        (
-            EffectZone::HogwartsDeck,
-            None,
-            if game_two { 44 } else { 30 },
-        ),
-        (
-            EffectZone::DarkArtsDeck,
-            None,
-            if game_two { 15 } else { 10 },
-        ),
-        (EffectZone::VillainDeck, None, if game_two { 6 } else { 3 }),
+        (EffectZone::HogwartsDeck, None, inventory.hogwarts),
+        (EffectZone::DarkArtsDeck, None, inventory.dark_arts),
+        (EffectZone::VillainDeck, None, inventory.villains),
     ]
     .into_iter()
     .chain(
@@ -176,7 +240,11 @@ pub(crate) fn valid_samples(
     samples.len() == expected.len()
         && u64::try_from(samples.len()).is_ok_and(|count| count <= counter)
         && samples.iter().zip(expected).all(|(sample, expected)| {
-            (sample.zone, sample.owner_position, sample.upper_exclusive) == expected
+            (
+                sample.zone,
+                sample.owner_position,
+                usize::try_from(sample.upper_exclusive).unwrap_or(usize::MAX),
+            ) == expected
                 && sample.result < sample.upper_exclusive
         })
 }
@@ -215,4 +283,29 @@ impl EffectRoller for PreparationRecorder<'_> {
         });
         Some(result)
     }
+}
+
+pub(crate) fn valid_game_three_entities(
+    world: &crate::EffectWorld,
+    players: &[crate::InitialPlayer],
+) -> bool {
+    world.entities().all(|(_, entity)| match entity.kind() {
+        EffectEntityKind::Hero => {
+            entity.turn_state().is_some()
+                && players.iter().any(|player| {
+                    entity.owner_position() == Some(player.position())
+                        && entity.catalog_id() == Some(player.hero().game_three_catalog_id())
+                        && entity.effect_rule_id()
+                            == Some(
+                                format!(
+                                    "rule:g3-{}-ability",
+                                    player.hero().game_three_catalog_id().replace(':', "-")
+                                )
+                                .as_str(),
+                            )
+                })
+        }
+        EffectEntityKind::Villain => entity.turn_state().is_some(),
+        _ => entity.turn_state().is_none(),
+    })
 }

@@ -46,6 +46,7 @@ test('expiration clears private data, pending commands and channels in every con
     await guest.getByRole('button', { name: 'Estou pronto' }).click()
     await host.getByRole('button', { name: 'Atualizar estado da sala' }).click()
     await host.getByRole('button', { name: 'Selar sala e iniciar' }).click()
+    await expect(host.getByRole('heading', { name: 'Partida iniciada', exact: true })).toBeVisible()
     await guest.getByRole('button', { name: 'Atualizar estado da sala' }).click()
     const secondTab = await context.newPage()
     await secondTab.goto('/')
