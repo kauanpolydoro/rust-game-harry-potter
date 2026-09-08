@@ -25,6 +25,7 @@ mod game_one;
 mod game_three;
 mod game_two;
 mod lifecycle;
+mod restore;
 
 struct ReadyRoom {
     app: axum::Router,

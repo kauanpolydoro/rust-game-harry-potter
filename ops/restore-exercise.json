@@ -1,0 +1,17 @@
+{
+  "exercised_at": "2026-09-07T20:53:18.310Z",
+  "environment": "isolated-local-docker",
+  "postgres_image": "postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+  "method": "pg_basebackup + archived WAL + named recovery target",
+  "recovered_games": 3,
+  "purged_games": 2,
+  "surviving_games_resumed": 1,
+  "rpo_seconds": 4.221,
+  "rto_seconds": 24.993276304,
+  "targets": {
+    "rpo_seconds": 300,
+    "rto_seconds": 3600,
+    "restorable_window_days": 7
+  },
+  "backup_artifacts_removed": true
+}

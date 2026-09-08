@@ -59,7 +59,7 @@ A migração `0023_game_two.sql` valida a preparação cumulativa, as cópias e 
 O Jogo 1 conserva seu bundle, manifesto, digest, snapshot 5 e evento 6.
 Os codecs anteriores rejeitam campos exclusivos do Jogo 2.
 O Jogo 3 usa snapshot 7 e evento 8, com limites das habilidades, Ataque atribuído e bloqueios de Vilões persistidos explicitamente.
-A migração `0024_game_three.sql` valida esses estados, as revelações do topo e suas transições, preservando os validadores das versões anteriores.
+A migração `0025_game_three.sql` valida esses estados, as revelações do topo e suas transições, preservando os validadores das versões anteriores.
 O transporte conserva o evento público 6 e a forma da projeção aceita pelo cliente anterior.
 Descrições dos Vilões apresentam os bloqueios e a cota de Ataque; a descrição da fonte identifica o Herói e a carta revelada.
 As Escolhas das habilidades usam os campos existentes de origem e instrução, enquanto o estado consumido permanece no snapshot canônico.

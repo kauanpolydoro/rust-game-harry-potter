@@ -2,6 +2,11 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { expect, test } from '@playwright/test'
 
+// These existing scenarios exercise the semantic presentation; table3d covers the visual entry.
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
+})
+
 const executeFile = promisify(execFile)
 
 test('expiration clears private data, pending commands and channels in every connected browser', async ({
@@ -9,7 +14,8 @@ test('expiration clears private data, pending commands and channels in every con
   context,
   page: host,
 }) => {
-  const guestContext = await browser.newContext()
+  const guestContext = await browser.newContext({ ignoreHTTPSErrors: true })
+  await guestContext.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const guest = await guestContext.newPage()
   const sockets = new Set<unknown>()
   host.on('websocket', (socket) => {

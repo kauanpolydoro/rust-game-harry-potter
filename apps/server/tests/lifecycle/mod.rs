@@ -391,7 +391,17 @@ async fn purge_removes_consumed_credentials_security_history_and_open_connection
     let (address, server) = start_network_server(room.app.clone()).await;
     let mut socket = connect_current_game(address, &room.host_cookie).await;
     fixture.expire().await;
-    fixture.worker().tick().await.unwrap();
+    let mut locked = room.database.begin().await.unwrap();
+    sqlx::query("SELECT id FROM games FOR UPDATE")
+        .execute(&mut *locked)
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.worker().tick().await.unwrap(),
+        0,
+        "a locked game is skipped until a later batch"
+    );
+    locked.commit().await.unwrap();
     let close = tokio::time::timeout(Duration::from_secs(5), socket.read_close_code())
         .await
         .unwrap();
@@ -399,6 +409,14 @@ async fn purge_removes_consumed_credentials_security_history_and_open_connection
         matches!(close, 4001 | 1008),
         "expired or already purged sessions must close"
     );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let worker = fixture.worker();
+        while worker.metrics().await.unwrap().completed != 1 {
+            worker.tick().await.unwrap();
+        }
+    })
+    .await
+    .expect("later batches must complete the purge after the root is unlocked");
     for table in tables.into_iter().chain([
         "game_realtime_connections",
         "guest_sessions",

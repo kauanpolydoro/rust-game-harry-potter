@@ -24,7 +24,8 @@ use crate::{
 mod credentials;
 mod postgres;
 
-use credentials::{hash_password, validate_display_name, validate_password, verify_password};
+pub(crate) use credentials::hash_password;
+use credentials::{validate_display_name, validate_password, verify_password};
 
 const ROOM_CODE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const ROOM_CODE_LENGTH: usize = 8;

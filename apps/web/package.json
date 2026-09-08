@@ -12,6 +12,7 @@
     "typecheck": "node ../../scripts/check-vue-a11y.mjs && node ../../node_modules/typescript7/bin/tsc --build --force && vue-tsc --build --force"
   },
   "dependencies": {
+    "@babylonjs/core": "9.25.0",
     "@fontsource-variable/archivo-narrow": "5.3.0",
     "@fontsource-variable/inter": "5.3.0",
     "pinia": "4.0.3",

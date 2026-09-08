@@ -1,5 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 
+// These existing scenarios exercise the semantic presentation; table3d covers the visual entry.
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
+})
+
 function automaticPhaseOutcomes(targetPosition: number) {
   const targetId = `hero:${targetPosition}`
   return [
@@ -433,7 +438,8 @@ test('a guest joins with an available hero and keeps the same position after rel
   const roomCode = await page.locator('output').textContent()
   expect(roomCode).toMatch(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/)
 
-  const guestContext = await browser.newContext()
+  const guestContext = await browser.newContext({ ignoreHTTPSErrors: true })
+  await guestContext.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const guestPage = await guestContext.newPage()
   try {
     await guestPage.goto('/')
@@ -470,7 +476,8 @@ test('a participant explicitly replaces one of two sessions when recovering on a
   expect(recoveryLink).toMatch(/#recovery=[0-9a-f]{64}$/)
 
   let successorRecoveryLink = ''
-  const secondDevice = await browser.newContext()
+  const secondDevice = await browser.newContext({ ignoreHTTPSErrors: true })
+  await secondDevice.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const recoveredPage = await secondDevice.newPage()
   try {
     await recoveredPage.goto(recoveryLink)
@@ -497,7 +504,8 @@ test('a participant explicitly replaces one of two sessions when recovering on a
     await secondDevice.close()
   }
 
-  const replayDevice = await browser.newContext()
+  const replayDevice = await browser.newContext({ ignoreHTTPSErrors: true })
+  await replayDevice.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const replayPage = await replayDevice.newPage()
   try {
     await replayPage.goto(recoveryLink)
@@ -514,7 +522,8 @@ test('a participant explicitly replaces one of two sessions when recovering on a
     await replayDevice.close()
   }
 
-  const thirdDevice = await browser.newContext()
+  const thirdDevice = await browser.newContext({ ignoreHTTPSErrors: true })
+  await thirdDevice.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const replacementPage = await thirdDevice.newPage()
   try {
     await replacementPage.goto(successorRecoveryLink)
@@ -558,7 +567,8 @@ test('recovery rotation preserves sessions and replaces direct and assisted cred
 }) => {
   const currentPassword = 'a long uncommon passphrase'
   const newPassword = 'a different uncommon passphrase'
-  const guestContext = await browser.newContext()
+  const guestContext = await browser.newContext({ ignoreHTTPSErrors: true })
+  await guestContext.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const guestPage = await guestContext.newPage()
 
   try {
@@ -596,7 +606,8 @@ test('recovery rotation preserves sessions and replaces direct and assisted cred
     await expect(hostPage.getByRole('heading', { level: 2, name: 'Sala pronta' })).toBeVisible()
     await expect(guestPage.getByRole('heading', { level: 2, name: 'Sala aberta' })).toBeVisible()
 
-    const obsoleteLinkContext = await browser.newContext()
+    const obsoleteLinkContext = await browser.newContext({ ignoreHTTPSErrors: true })
+  await obsoleteLinkContext.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
     const obsoleteLinkPage = await obsoleteLinkContext.newPage()
     try {
       await obsoleteLinkPage.goto(originalRecoveryLink)
@@ -615,7 +626,8 @@ test('recovery rotation preserves sessions and replaces direct and assisted cred
     const directRecoveryLink = await hostPage.getByLabel('Link de recuperação').inputValue()
     expect(directRecoveryLink).not.toBe(originalRecoveryLink)
 
-    const recoveredContext = await browser.newContext()
+    const recoveredContext = await browser.newContext({ ignoreHTTPSErrors: true })
+  await recoveredContext.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
     const recoveredPage = await recoveredContext.newPage()
     try {
       await recoveredPage.goto(directRecoveryLink)
@@ -650,7 +662,8 @@ test('a player replays a missed event and falls back to Snapshot within recovery
   browser,
   page: hostPage,
 }) => {
-  const guestContext = await browser.newContext()
+  const guestContext = await browser.newContext({ ignoreHTTPSErrors: true })
+  await guestContext.addInitScript("localStorage.setItem('hogwarts.table-mode', 'accessible')")
   const guestPage = await guestContext.newPage()
   await guestPage.addInitScript(() => {
     type BrowserSocket = {

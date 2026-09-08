@@ -1,0 +1,1 @@
+Emulação local: 107 frames · mediana 35.0 ms · p95 87.0 ms · 74 meshes · 17 texturas. Não comprova desempenho físico.

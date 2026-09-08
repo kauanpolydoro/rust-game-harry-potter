@@ -609,6 +609,8 @@ describe('application shell', () => {
   })
 
   beforeEach(() => {
+    // Existing shell journeys exercise semantic controls; table3d.spec.ts covers the visual path.
+    localStorage.setItem('hogwarts.table-mode', 'accessible')
     SynchronizedWebSocket.instances = []
     vi.stubGlobal('WebSocket', SynchronizedWebSocket)
   })

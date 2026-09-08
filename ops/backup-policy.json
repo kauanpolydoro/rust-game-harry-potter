@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "maximum_restorable_days": 7,
+  "rpo_seconds": 300,
+  "rto_seconds": 3600,
+  "rds": {
+    "BackupRetentionPeriod": 7,
+    "DeleteAutomatedBackups": true,
+    "SkipFinalSnapshot": true
+  },
+  "manual_snapshots": "prohibited_until_a_verified_deletion_controller_exists",
+  "prohibit_stopped_instances": true,
+  "prohibit_uninventoried_copies_exports_and_backup_vaults": true
+}
