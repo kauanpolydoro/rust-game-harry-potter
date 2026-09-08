@@ -74,6 +74,8 @@ Perda de resposta após uma gravação durável é segura: o próximo worker pub
 O Tombstone permanece imutável; uma nova verificação de exclusão depois de restore pode avançar o instante do comprovante de conclusão.
 O worker também publica uma prova opaca do deployment para que um ledger incorreto ou vazio não seja confundido com ausência de exclusões.
 A [reconciliação de restore](restore.md) consulta essas evidências antes de liberar readiness.
+O ledger fornece a informação necessária à reconciliação de restore.
+Após reconciliar os dados restaurados, execute `lifecycle-worker --audit-restore` para detectar jogos que ainda constem no ledger, conforme o [runbook de restore](runbooks.md).
 
 ## Inventário de cópias
 
@@ -97,7 +99,7 @@ Se houver um coletor legado identificável, ele precisa ser inventariado e limpo
 
 ## Métricas e resposta operacional
 
-O worker emite JSON `lifecycle metrics` a cada lote, sem labels por Partida.
+O worker emite métricas JSON EMF a cada lote, sem labels por Partida, pelo subscriber sanitizado descrito em [observability.md](observability.md).
 A janela de observações concluídas é de 14 dias, com limpeza automática.
 `pending`, `stages`, `failed_attempts`, `orphan_jobs`, `undetected`, `oldest_pending_seconds` e `overdue` mostram trabalho incompleto.
 Partidas expiradas pela API mas ainda sem trabalho na fila continuam visíveis.

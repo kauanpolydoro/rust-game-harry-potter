@@ -4,12 +4,15 @@ use std::{
 };
 
 #[derive(Clone, Default)]
-pub(crate) struct LogCapture(Arc<Mutex<Vec<u8>>>);
+pub(crate) struct LogCapture {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    start: usize,
+}
 
 impl LogCapture {
     pub(crate) fn start() -> Self {
         static CAPTURE: OnceLock<LogCapture> = OnceLock::new();
-        CAPTURE
+        let capture = CAPTURE
             .get_or_init(|| {
                 let capture = Self::default();
                 let writer = capture.clone();
@@ -20,17 +23,22 @@ impl LogCapture {
                 .unwrap();
                 capture
             })
-            .clone()
+            .clone();
+        let start = capture.bytes.lock().unwrap().len();
+        Self {
+            bytes: capture.bytes,
+            start,
+        }
     }
 
     pub(crate) fn text(&self) -> String {
-        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        String::from_utf8(self.bytes.lock().unwrap()[self.start..].to_vec()).unwrap()
     }
 }
 
 impl Write for LogCapture {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
+        self.bytes.lock().unwrap().extend_from_slice(bytes);
         Ok(bytes.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {

@@ -94,7 +94,9 @@ O trace HTTP usa correlation ID gerado pelo servidor, método de uma lista fecha
 Rotas desconhecidas recebem o identificador fixo `unmatched`.
 Erros de banco, parser e transporte não são formatados nos logs da aplicação.
 Mensagens de fechamento do cliente não são registradas.
-Identificadores de recursos emitidos pelo servidor e nomes estáticos de operações continuam disponíveis para diagnóstico.
+Correlações opacas de requisição e Comando e nomes estáticos de operações ficam disponíveis para diagnóstico.
+Identificadores brutos de recursos e campos fora da allowlist são bloqueados antes da escrita.
+Logs identificáveis seguem a retenção de sete dias descrita em [observabilidade](ops/observability.md).
 
 | Critério da issue | Evidência automatizada |
 | --- | --- |

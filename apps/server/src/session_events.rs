@@ -195,12 +195,7 @@ async fn serve_session_events(
     match session_is_active(&state, session).await {
         Ok(true) => {}
         Ok(false) => {
-            close_socket(
-                &mut socket,
-                crate::session::inactive_session_close_code(&state, session).await,
-                "access ended",
-            )
-            .await;
+            crate::telemetry::close_access(&mut socket, &state, session).await;
             drop(signal);
             drop(revocation_signal);
             state.prune_security_event_channel(room_id);
@@ -295,7 +290,7 @@ async fn session_event_loop(
                     match session_is_active(state, session).await {
                         Ok(true) => true,
                         Ok(false) => {
-                            close_socket(socket, crate::session::inactive_session_close_code(state, session).await, "access ended").await;
+                            crate::telemetry::close_access(socket, state, session).await;
                             return;
                         }
                         Err(_) => {
@@ -311,7 +306,7 @@ async fn session_event_loop(
                 if matches!(notification, Ok(()) | Err(broadcast::error::RecvError::Lagged(_))) {
                     match session_is_active(state, session).await {
                         Ok(false) => {
-                            close_socket(socket, crate::session::inactive_session_close_code(state, session).await, "access ended").await;
+                            crate::telemetry::close_access(socket, state, session).await;
                             return;
                         }
                         Ok(true) => false,
@@ -329,7 +324,7 @@ async fn session_event_loop(
                 if let Ok(true) = session_is_active(state, session).await {
                     false
                 } else {
-                    close_socket(socket, crate::session::inactive_session_close_code(state, session).await, "access ended").await;
+                    crate::telemetry::close_access(socket, state, session).await;
                     return;
                 }
             }
@@ -409,12 +404,7 @@ async fn handle_client_message(
             if let Ok(true) = session_is_active(state, session).await {
                 true
             } else {
-                close_socket(
-                    socket,
-                    crate::session::inactive_session_close_code(state, session).await,
-                    "access ended",
-                )
-                .await;
+                crate::telemetry::close_access(socket, state, session).await;
                 false
             }
         }
@@ -422,6 +412,22 @@ async fn handle_client_message(
 }
 
 async fn synchronize_until_current(
+    socket: &mut WebSocket,
+    state: &AppState,
+    participant_id: Uuid,
+    room_id: Uuid,
+    cursor: &mut i64,
+    initial: bool,
+) -> Result<(), SessionEventsFailure> {
+    let timer = crate::telemetry::Timer::new("realtime_sync_seconds", "security_socket")
+        .with_counter("realtime_syncs");
+    let result =
+        synchronize_security(socket, state, participant_id, room_id, cursor, initial).await;
+    timer.finish(if result.is_ok() { "success" } else { "error" });
+    result
+}
+
+async fn synchronize_security(
     socket: &mut WebSocket,
     state: &AppState,
     participant_id: Uuid,
@@ -502,10 +508,20 @@ async fn send_message(
     socket: &mut WebSocket,
     message: Message,
 ) -> Result<(), SessionEventsFailure> {
-    tokio::time::timeout(SESSION_EVENTS_WRITE_TIMEOUT, socket.send(message))
-        .await
-        .map_err(|_| SessionEventsFailure::WriteTimeout)?
-        .map_err(|error| SessionEventsFailure::Send(error.to_string()))
+    let timer = crate::telemetry::Timer::new("socket_write_seconds", "security_socket")
+        .with_counter("socket_writes");
+    let result =
+        match tokio::time::timeout(SESSION_EVENTS_WRITE_TIMEOUT, socket.send(message)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(SessionEventsFailure::Send(error.to_string())),
+            Err(_) => Err(SessionEventsFailure::WriteTimeout),
+        };
+    timer.finish(match &result {
+        Ok(()) => "success",
+        Err(SessionEventsFailure::WriteTimeout) => "timeout",
+        Err(_) => "error",
+    });
+    result
 }
 
 async fn close_socket(socket: &mut WebSocket, code: u16, reason: &'static str) {

@@ -35,7 +35,7 @@ A apresentação adicional dos dados em 3D pertence à issue #38 conforme a espe
 O bundle funcional, os quatro dados versionados e todos os novos efeitos estão implementados.
 A preparação conserva o inventário com 2, 3 e 4 participantes.
 O snapshot 8 e o evento 9 mantêm o histórico dos lançamentos, incluindo propósito, contador, dado, intervalo e resultado.
-A migração 0026 preserva os validadores anteriores e exige que cada transição acrescente exatamente a auditoria do evento.
+A migração 0027 preserva os validadores anteriores e exige que cada transição acrescente exatamente a auditoria do evento.
 
 Os testes cobrem as 24 faces favoráveis, as seis faces de Heir of Slytherin, escolhas de descarte após restauração, Cemitério, Death Eater, bloqueio de Controle, Pensieve, Fleur e cópia de Fleur.
 As 36 partidas com seeds variadas verificaram inventário, recursos, decisões, restauração e replay.
@@ -67,3 +67,7 @@ A suíte ampla foi interrompida após a adoção da política de validação pro
 Portanto, o `make check` completo não está aprovado; seus resultados parciais e os testes focados anteriores compõem a evidência disponível.
 Uma nova validação ampla deve ocorrer somente quando solicitada, em ambiente com rede estável.
 O CI remoto permanece desativado conforme `AGENTS.md`.
+
+A integração com `e2baa2f` conserva a observabilidade e renumera a migração do Jogo 4 para `0027`, sem alterar seu SQL.
+A validação dessa integração confirmou formatação, compilação com 12 testes de tempo real e aplicação das 27 migrações em banco isolado.
+Não houve repetição das partidas completas.

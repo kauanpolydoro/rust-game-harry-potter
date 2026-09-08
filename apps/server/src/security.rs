@@ -92,7 +92,9 @@ pub(crate) async fn protect_request(
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
             .map_or_else(|| "unknown-peer".to_owned(), |peer| peer.0.ip().to_string());
-        let class = if sensitive {
+        let class = if route.starts_with("/api/telemetry") {
+            "telemetry-peer"
+        } else if sensitive {
             "password-peer"
         } else if discovery {
             "discovery-peer"

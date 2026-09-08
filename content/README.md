@@ -78,7 +78,7 @@ As [regras funcionais do Jogo 4](game-four-rules-v1.md) documentam fontes, adapt
 A preparação conserva as habilidades de Herói do Jogo 3 e revela dois Vilões.
 
 O snapshot 8 e o evento 9 preservam os lançamentos de Casa com propósito, contador, dado versionado, intervalo e resultado.
-A migração `0026_game_four.sql` valida os novos estados, as Escolhas no fim de Turno e o acréscimo exato de cada evento ao histórico de lançamentos.
+A migração `0027_game_four.sql` valida os novos estados, as Escolhas no fim de Turno e o acréscimo exato de cada evento ao histórico de lançamentos.
 A retomada continua a fila persistida sem consumir novamente resultados anteriores.
 O transporte conserva o contrato público de evento 6, representando cada dado como um d6 e mantendo a regra de origem e a face obtida.
 Transições com etapas ou fases incompatíveis com o contrato anterior são transmitidas por Snapshot.
