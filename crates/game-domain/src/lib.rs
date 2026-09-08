@@ -9,6 +9,8 @@ use std::{collections::BTreeSet, str::FromStr};
 
 mod effects;
 mod preparation;
+mod randomness;
+pub use randomness::HouseDieRoll;
 mod shuffling;
 pub use preparation::PreparationSample;
 pub use shuffling::ShuffleSample;
@@ -27,6 +29,7 @@ pub use effects::{
 pub const SNAPSHOT_VERSION: u16 = 5;
 pub const GAME_TWO_SNAPSHOT_VERSION: u16 = 6;
 pub const GAME_THREE_SNAPSHOT_VERSION: u16 = 7;
+pub const GAME_FOUR_SNAPSHOT_VERSION: u16 = 8;
 const TERMINAL_SNAPSHOT_VERSION: u16 = 4;
 const HERO_ACTION_SNAPSHOT_VERSION: u16 = 3;
 const PARTICIPANT_CHOICE_SNAPSHOT_VERSION: u16 = 2;
@@ -158,6 +161,7 @@ pub struct InitialGameState {
     sampling_algorithm: &'static str,
     prng_counter: u64,
     preparation_samples: Vec<PreparationSample>,
+    house_die_rolls: Vec<HouseDieRoll>,
     active_villain_limit: u8,
     players: Vec<InitialPlayer>,
     effect_world: EffectWorld,
@@ -436,6 +440,20 @@ impl<'rules> GameEngine<'rules> {
         settle_initial_turn(state, self.rules.effect_rules(), roller)
     }
 
+    /// Prepares Game 4's cumulative decks and resolves its opening turn.
+    ///
+    /// # Errors
+    /// Returns an error for invalid lobby, inventory, or entropy.
+    pub fn start_game_four(
+        &self,
+        input: StartGameInput<'_>,
+        roller: &mut dyn EffectRoller,
+    ) -> Result<InitialGameState, StartGameError> {
+        let mut state = initialize_game(input)?;
+        preparation::prepare_game_four(&mut state, roller)?;
+        settle_initial_turn(state, self.rules.effect_rules(), roller)
+    }
+
     #[must_use]
     pub fn legal_intent_types(
         &self,
@@ -484,7 +502,7 @@ impl<'rules> GameEngine<'rules> {
             return Err(GameIntentError::StaleStateVersion);
         }
 
-        match input.intent {
+        let mut decision = match input.intent {
             PlayerIntent::EndHeroActions => {
                 if input.state.decision_point
                     != Some(DecisionPoint::PlayerIntent {
@@ -505,7 +523,10 @@ impl<'rules> GameEngine<'rules> {
                 &selected_options,
                 random,
             ),
-        }
+        }?;
+        randomness::record_event(input.state, &mut decision.state, &decision.event)
+            .ok_or(GameIntentError::EffectExecutionFailed)?;
+        Ok(decision)
     }
 
     fn resolve_choice(
@@ -585,7 +606,11 @@ impl<'rules> GameEngine<'rules> {
                 next.decision_point = Some(DecisionPoint::EffectChoice(choice));
             }
             EffectStop::Stable => {
-                advance_after_automatic_phase(&mut next);
+                if phase == GamePhase::EndTurn {
+                    start_next_turn(&mut next).map_err(game_intent_effect_error)?;
+                } else {
+                    advance_after_automatic_phase(&mut next);
+                }
                 steps.extend(
                     settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
                         .map_err(game_intent_effect_error)?,
@@ -666,25 +691,25 @@ impl<'rules> GameEngine<'rules> {
                 .clone_from(&next.last_effects);
             finish_terminal_state(&mut next, EffectGameOutcome::Lost);
         } else {
-            let player_index = next
-                .players
-                .iter()
-                .position(|player| player.position == actor_position)
-                .ok_or(GameIntentError::ActorNotResponsible)?;
-            let next_player_index = (player_index + 1) % next.players.len();
-            next.active_position = next.players[next_player_index].position;
-            next.turn = next
-                .turn
-                .checked_add(1)
-                .ok_or(GameIntentError::VersionOverflow)?;
-            next.phase = GamePhase::DarkArts;
-            next.queued_phases = vec![
-                GamePhase::Villains,
-                GamePhase::HeroActions,
-                GamePhase::EndTurn,
-            ];
-            settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
-                .map_err(|_| GameIntentError::EffectExecutionFailed)?;
+            let stop = resolve_end_turn_revelations(
+                &mut next,
+                &end_turn,
+                self.rules.effect_rules(),
+                random,
+            )?;
+            match stop {
+                EffectStop::Choice(choice) => {
+                    next.queued_effects.clone_from(&choice.continuation.queue);
+                    next.pending_choice = Some(choice.clone());
+                    next.decision_point = Some(DecisionPoint::EffectChoice(choice));
+                }
+                EffectStop::Terminal(outcome) => finish_terminal_state(&mut next, outcome),
+                EffectStop::Stable => {
+                    start_next_turn(&mut next).map_err(game_intent_effect_error)?;
+                    settle_automatic_phases(&mut next, self.rules.effect_rules(), random)
+                        .map_err(game_intent_effect_error)?;
+                }
+            }
         }
         next.sequence = sequence;
         next.state_version = state_version;
@@ -926,6 +951,7 @@ pub struct GameStateRestoreInput<'a> {
     pub sampling_algorithm: &'a str,
     pub prng_counter: u64,
     pub preparation_samples: Vec<PreparationSample>,
+    pub house_die_rolls: Vec<HouseDieRoll>,
     pub active_villain_limit: u8,
     pub players: Vec<InitialPlayer>,
     pub effect_world: EffectWorld,
@@ -965,6 +991,11 @@ impl std::fmt::Display for GameStateRestoreError {
 impl std::error::Error for GameStateRestoreError {}
 
 impl InitialGameState {
+    #[must_use]
+    pub fn house_die_rolls(&self) -> &[HouseDieRoll] {
+        &self.house_die_rolls
+    }
+
     #[must_use]
     pub const fn snapshot_version(&self) -> u16 {
         self.snapshot_version
@@ -1181,7 +1212,9 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
     }
 
     Ok(InitialGameState {
-        snapshot_version: if input.content.manifest_version == 6 {
+        snapshot_version: if input.content.manifest_version == 7 {
+            GAME_FOUR_SNAPSHOT_VERSION
+        } else if input.content.manifest_version == 6 {
             GAME_THREE_SNAPSHOT_VERSION
         } else if input.content.manifest_version >= 5 {
             GAME_TWO_SNAPSHOT_VERSION
@@ -1204,6 +1237,7 @@ pub fn initialize_game(input: StartGameInput<'_>) -> Result<InitialGameState, St
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: 0,
         preparation_samples: vec![],
+        house_die_rolls: vec![],
         active_villain_limit,
         effect_world,
         last_effects: Vec::new(),
@@ -1269,8 +1303,19 @@ fn settle_initial_turn(
     rules: &[EffectRule],
     roller: &mut dyn EffectRoller,
 ) -> Result<InitialGameState, StartGameError> {
-    settle_automatic_phases(&mut state, rules, roller)
+    let starting_counter = state.prng_counter;
+    let revealed = (state.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION).then(|| {
+        state
+            .effect_world
+            .entities_in(EffectZone::ActiveVillains)
+            .iter()
+            .map(|villain| villain.id().to_owned())
+            .collect::<Vec<_>>()
+    });
+    settle_automatic_phases_with_revelations(&mut state, rules, roller, revealed.as_deref())
         .map_err(|_| StartGameError::EffectExecutionFailed)?;
+    randomness::record_initial(&mut state, starting_counter)
+        .ok_or(StartGameError::EffectExecutionFailed)?;
     Ok(state)
 }
 
@@ -1278,6 +1323,15 @@ fn settle_automatic_phases(
     state: &mut InitialGameState,
     rules: &[EffectRule],
     roller: &mut dyn EffectRoller,
+) -> Result<Vec<TurnStep>, EffectExecutionError> {
+    settle_automatic_phases_with_revelations(state, rules, roller, None)
+}
+
+fn settle_automatic_phases_with_revelations(
+    state: &mut InitialGameState,
+    rules: &[EffectRule],
+    roller: &mut dyn EffectRoller,
+    mut revealed: Option<&[String]>,
 ) -> Result<Vec<TurnStep>, EffectExecutionError> {
     let mut all_effects = std::mem::take(&mut state.last_effects);
     let mut history = std::mem::take(&mut state.last_turn_steps);
@@ -1293,13 +1347,25 @@ fn settle_automatic_phases(
                 return Ok(resolved_steps);
             }
         };
-        let mut resolution = effects::execute_effects(
-            &mut state.effect_world,
-            state.active_position,
-            rules,
-            trigger,
-            roller,
-        )?;
+        let mut resolution = if let Some(revealed) = revealed.take() {
+            effects::execute_revelation_effects(
+                &mut state.effect_world,
+                state.active_position,
+                None,
+                revealed,
+                rules,
+                roller,
+                true,
+            )?
+        } else {
+            effects::execute_effects(
+                &mut state.effect_world,
+                state.active_position,
+                rules,
+                trigger,
+                roller,
+            )?
+        };
         settle_structural_outcome(
             &state.effect_world,
             &mut resolution.outcomes,
@@ -1343,6 +1409,72 @@ fn settle_automatic_phases(
             EffectStop::Stable => advance_after_automatic_phase(state),
         }
     }
+}
+
+fn resolve_end_turn_revelations(
+    state: &mut InitialGameState,
+    end_turn: &[EndTurnOutcome],
+    rules: &[EffectRule],
+    random: &mut dyn EffectRoller,
+) -> Result<EffectStop, GameIntentError> {
+    if state.snapshot_version != GAME_FOUR_SNAPSHOT_VERSION {
+        return Ok(EffectStop::Stable);
+    }
+    let location_id = end_turn.iter().find_map(|outcome| match outcome {
+        EndTurnOutcome::LocationAdvanced {
+            next_location_id, ..
+        } => next_location_id.as_deref(),
+        _ => None,
+    });
+    let villains = end_turn
+        .iter()
+        .filter_map(|outcome| match outcome {
+            EndTurnOutcome::VillainRevealed { villain_id } => Some(villain_id.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let resolution = effects::execute_revelation_effects(
+        &mut state.effect_world,
+        state.active_position,
+        location_id,
+        &villains,
+        rules,
+        random,
+        false,
+    )
+    .map_err(game_intent_effect_error)?;
+    state.prng_counter = state
+        .prng_counter
+        .checked_add(resolution.rolls_consumed)
+        .ok_or(GameIntentError::VersionOverflow)?;
+    state.last_effects = resolution.outcomes;
+    state.last_turn_steps[0]
+        .effects
+        .clone_from(&state.last_effects);
+    Ok(resolution.stop)
+}
+
+fn start_next_turn(state: &mut InitialGameState) -> Result<(), EffectExecutionError> {
+    let index = state
+        .players
+        .iter()
+        .position(|player| player.position == state.active_position)
+        .ok_or(EffectExecutionError::InvalidDefinition)?;
+    state.active_position = state.players[(index + 1) % state.players.len()].position;
+    state.turn = state
+        .turn
+        .checked_add(1)
+        .ok_or(EffectExecutionError::InvalidDefinition)?;
+    state.phase = GamePhase::DarkArts;
+    state.queued_phases = vec![
+        GamePhase::Villains,
+        GamePhase::HeroActions,
+        GamePhase::EndTurn,
+    ];
+    state.pending_choice = None;
+    state.queued_effects.clear();
+    state.decision_point = Some(DecisionPoint::Automatic);
+    Ok(())
 }
 
 fn advance_after_automatic_phase(state: &mut InitialGameState) {
@@ -1607,21 +1739,17 @@ pub fn restore_game_state(
             .is_some_and(|choice| !choice.is_valid_for_positions(&participant_positions))
         || (input.pending_choice.is_some()
             && (input.status != GameStatus::InProgress
-                || !matches!(
+                || !(matches!(
                     input.phase,
                     GamePhase::DarkArts | GamePhase::Villains | GamePhase::HeroActions
-                )))
+                ) || (input.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION
+                    && input.phase == GamePhase::EndTurn))))
     {
         return Err(GameStateRestoreError::InvalidPlayers);
     }
-    if input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION
-        && (input.manifest_version != 6
-            || input.adventure_id != "adventure:003"
-            || !preparation::valid_game_three_entities(&input.effect_world, &input.players))
-    {
-        return Err(GameStateRestoreError::InvalidPlayers);
-    }
-    if !restored_control_is_valid(&input)
+    validate_restored_adventure(&input)?;
+    if !randomness::valid_history(&input)
+        || !restored_control_is_valid(&input)
         || !preparation::valid_samples(
             &input.preparation_samples,
             &participant_positions,
@@ -1636,7 +1764,9 @@ pub fn restore_game_state(
     players.sort_by_key(InitialPlayer::position);
 
     Ok(InitialGameState {
-        snapshot_version: if input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION {
+        snapshot_version: if input.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION {
+            GAME_FOUR_SNAPSHOT_VERSION
+        } else if input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION {
             GAME_THREE_SNAPSHOT_VERSION
         } else if input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION {
             GAME_TWO_SNAPSHOT_VERSION
@@ -1659,6 +1789,7 @@ pub fn restore_game_state(
         sampling_algorithm: SAMPLING_ALGORITHM,
         prng_counter: input.prng_counter,
         preparation_samples: input.preparation_samples,
+        house_die_rolls: input.house_die_rolls,
         active_villain_limit: input.active_villain_limit,
         players,
         effect_world: input.effect_world,
@@ -1671,10 +1802,31 @@ pub fn restore_game_state(
     })
 }
 
+fn validate_restored_adventure(
+    input: &GameStateRestoreInput<'_>,
+) -> Result<(), GameStateRestoreError> {
+    if input.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION
+        && (input.manifest_version != 7
+            || input.adventure_id != "adventure:004"
+            || !preparation::valid_game_four_entities(&input.effect_world, &input.players))
+    {
+        return Err(GameStateRestoreError::InvalidPlayers);
+    }
+    if input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION
+        && (input.manifest_version != 6
+            || input.adventure_id != "adventure:003"
+            || !preparation::valid_game_three_entities(&input.effect_world, &input.players))
+    {
+        return Err(GameStateRestoreError::InvalidPlayers);
+    }
+    Ok(())
+}
+
 fn validate_restore_metadata(
     input: &GameStateRestoreInput<'_>,
 ) -> Result<(), GameStateRestoreError> {
-    let supported_snapshot = input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION
+    let supported_snapshot = input.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION
+        || input.snapshot_version == GAME_THREE_SNAPSHOT_VERSION
         || input.snapshot_version == GAME_TWO_SNAPSHOT_VERSION
         || input.snapshot_version == SNAPSHOT_VERSION
         || input.snapshot_version == TERMINAL_SNAPSHOT_VERSION
@@ -1783,9 +1935,13 @@ fn restored_control_is_valid(input: &GameStateRestoreInput<'_>) -> bool {
         }
         GamePhase::EndTurn => {
             input.queued_phases.is_empty()
-                && input.queued_effects.is_empty()
-                && input.pending_choice.is_none()
-                && input.decision_point == Some(DecisionPoint::Automatic)
+                && if input.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION {
+                    automatic_decision_is_valid(input)
+                } else {
+                    input.queued_effects.is_empty()
+                        && input.pending_choice.is_none()
+                        && input.decision_point == Some(DecisionPoint::Automatic)
+                }
         }
     }
 }
@@ -2753,7 +2909,7 @@ pub fn apply_game_event(
     event: &GameEvent,
 ) -> Result<InitialGameState, GameEventError> {
     let metadata = event.metadata();
-    match event {
+    let mut next = match event {
         GameEvent::DarkArtsCompleted { .. } => apply_dark_arts_completed_event(state, event),
         GameEvent::ChoiceResolved { .. } => apply_choice_resolved_event(state, event),
         GameEvent::TurnCompleted { .. } => apply_turn_completed_event(state, event),
@@ -2803,7 +2959,10 @@ pub fn apply_game_event(
             refill_card_id.as_deref(),
             effects,
         ),
-    }
+    }?;
+    randomness::record_event(state, &mut next, event)
+        .ok_or(GameEventError::EffectTransitionInvalid)?;
+    Ok(next)
 }
 
 fn apply_dark_arts_completed_event(
@@ -2977,11 +3136,23 @@ fn validate_choice_steps(
         ),
         GamePhase::Villains => phases.as_slice() == [GamePhase::Villains],
         GamePhase::HeroActions => phases.as_slice() == [GamePhase::HeroActions],
-        GamePhase::EndTurn => false,
+        GamePhase::EndTurn => {
+            state.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION
+                && matches!(
+                    phases.as_slice(),
+                    [GamePhase::EndTurn]
+                        | [GamePhase::EndTurn, GamePhase::DarkArts]
+                        | [GamePhase::EndTurn, GamePhase::DarkArts, GamePhase::Villains]
+                )
+        }
     };
+    let mut expected = state.clone();
+    if state.phase == GamePhase::EndTurn && control.phase != GamePhase::EndTurn {
+        start_next_turn(&mut expected).map_err(|_| GameEventError::EffectTransitionInvalid)?;
+    }
     if !valid_phases
-        || control.turn != state.turn
-        || control.active_position != state.active_position
+        || control.turn != expected.turn
+        || control.active_position != expected.active_position
     {
         return Err(GameEventError::EffectTransitionInvalid);
     }
@@ -3038,13 +3209,17 @@ fn choice_control_matches_steps(
                 && *responsible_position == control.active_position
                 && (phases == [GamePhase::HeroActions]
                     || phases == [GamePhase::Villains]
-                    || phases == [GamePhase::DarkArts, GamePhase::Villains])
+                    || phases == [GamePhase::DarkArts, GamePhase::Villains]
+                    || phases == [GamePhase::EndTurn, GamePhase::DarkArts, GamePhase::Villains])
         }
         (GameStatus::InProgress, Some(DecisionPoint::EffectChoice(choice))) => {
             last_phase == Some(control.phase)
                 && matches!(
                     control.phase,
-                    GamePhase::DarkArts | GamePhase::Villains | GamePhase::HeroActions
+                    GamePhase::DarkArts
+                        | GamePhase::Villains
+                        | GamePhase::HeroActions
+                        | GamePhase::EndTurn
                 )
                 && queued_phases_match_phase(control.phase, &control.queued_phases)
                 && choice.is_valid_for_positions(participant_positions)
@@ -3054,7 +3229,10 @@ fn choice_control_matches_steps(
             last_phase == Some(control.phase)
                 && matches!(
                     control.phase,
-                    GamePhase::DarkArts | GamePhase::Villains | GamePhase::HeroActions
+                    GamePhase::DarkArts
+                        | GamePhase::Villains
+                        | GamePhase::HeroActions
+                        | GamePhase::EndTurn
                 )
                 && control.queued_phases.is_empty()
                 && control.queued_effects.is_empty()
@@ -3143,7 +3321,12 @@ fn apply_turn_completed_event(
         .iter()
         .map(InitialPlayer::position)
         .collect::<Vec<_>>();
-    validate_turn_steps(steps, control, &participant_positions)?;
+    validate_turn_steps(
+        steps,
+        control,
+        &participant_positions,
+        state.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION,
+    )?;
 
     let mut next = state.clone();
     apply_end_turn_outcomes(
@@ -3153,12 +3336,16 @@ fn apply_turn_completed_event(
         end_turn,
     )?;
     if control.phase == GamePhase::EndTurn
+        && !(state.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION
+            && control.status == GameStatus::InProgress)
         && (control.status != GameStatus::Lost
             || next.effect_world.structural_game_outcome() != Some(EffectGameOutcome::Lost))
     {
         return Err(GameEventError::EffectTransitionInvalid);
     }
-    for step in steps.iter().skip(1) {
+    for step in steps.iter().skip(usize::from(
+        state.snapshot_version != GAME_FOUR_SNAPSHOT_VERSION,
+    )) {
         effects::apply_effect_outcomes(&mut next.effect_world, &step.effects)
             .map_err(|_| GameEventError::EffectTransitionInvalid)?;
     }
@@ -3278,16 +3465,19 @@ fn validate_turn_steps(
     steps: &[TurnStep],
     control: &EngineControl,
     participant_positions: &[u8],
+    game_four: bool,
 ) -> Result<(), GameEventError> {
     let phases = steps.iter().map(TurnStep::phase).collect::<Vec<_>>();
     let phase_sequence_is_valid = matches!(
         phases.as_slice(),
         [GamePhase::EndTurn, GamePhase::DarkArts]
             | [GamePhase::EndTurn, GamePhase::DarkArts, GamePhase::Villains]
-    ) || (control.status != GameStatus::InProgress
+    ) || ((game_four || control.status != GameStatus::InProgress)
         && phases.as_slice() == [GamePhase::EndTurn]);
     let end_turn_effects_valid = steps.first().is_some_and(|step| {
-        if steps.len() == 1 {
+        if game_four {
+            true
+        } else if steps.len() == 1 {
             step.effects
                 == [EffectOutcome::Terminal {
                     rule_id: STRUCTURAL_OUTCOME_RULE_ID.to_owned(),
@@ -3300,7 +3490,7 @@ fn validate_turn_steps(
     if !phase_sequence_is_valid || !end_turn_effects_valid {
         return Err(GameEventError::EffectTransitionInvalid);
     }
-    for (index, step) in steps.iter().enumerate().skip(1) {
+    for (index, step) in steps.iter().enumerate().skip(usize::from(!game_four)) {
         let is_last = index + 1 == steps.len();
         let stop = if is_last {
             effect_stop_from_control(control)
@@ -4074,6 +4264,7 @@ mod tests {
             sampling_algorithm: state.sampling_algorithm(),
             prng_counter: state.prng_counter(),
             preparation_samples: state.preparation_samples().to_vec(),
+            house_die_rolls: state.house_die_rolls().to_vec(),
             players: state.players().to_vec(),
             effect_world: state.effect_world().clone(),
             last_effects: state.last_effects().to_vec(),
@@ -4279,6 +4470,7 @@ mod tests {
             sampling_algorithm: state.sampling_algorithm(),
             prng_counter: state.prng_counter(),
             preparation_samples: state.preparation_samples().to_vec(),
+            house_die_rolls: state.house_die_rolls().to_vec(),
             players: state.players().to_vec(),
             effect_world: state.effect_world().clone(),
             last_effects: state.last_effects().to_vec(),
@@ -4342,6 +4534,7 @@ mod tests {
             sampling_algorithm: started.sampling_algorithm(),
             prng_counter: started.prng_counter(),
             preparation_samples: started.preparation_samples().to_vec(),
+            house_die_rolls: started.house_die_rolls().to_vec(),
             players: started.players().to_vec(),
             effect_world: world,
             last_effects: started.last_effects().to_vec(),
@@ -4688,6 +4881,7 @@ mod tests {
             sampling_algorithm: started.sampling_algorithm(),
             prng_counter: started.prng_counter(),
             preparation_samples: started.preparation_samples().to_vec(),
+            house_die_rolls: started.house_die_rolls().to_vec(),
             players: started.players().to_vec(),
             effect_world: started.effect_world().clone(),
             last_effects: started.last_effects().to_vec(),
@@ -4756,6 +4950,7 @@ mod tests {
             sampling_algorithm: started.sampling_algorithm(),
             prng_counter: started.prng_counter(),
             preparation_samples: started.preparation_samples().to_vec(),
+            house_die_rolls: started.house_die_rolls().to_vec(),
             players: shuffled_players,
             effect_world: started.effect_world().clone(),
             last_effects: started.last_effects().to_vec(),
@@ -5337,6 +5532,7 @@ mod tests {
                 sampling_algorithm: SAMPLING_ALGORITHM,
                 prng_counter: 0,
                 preparation_samples: vec![],
+                house_die_rolls: vec![],
                 players: players.clone(),
                 effect_world: EffectWorld::new(
                     players

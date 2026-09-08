@@ -36,7 +36,9 @@ mod session;
 mod session_events;
 mod telemetry;
 
-pub use content_catalog::{game_one_manifest, game_three_manifest, game_two_manifest};
+pub use content_catalog::{
+    game_four_manifest, game_one_manifest, game_three_manifest, game_two_manifest,
+};
 pub use telemetry::tracing_subscriber;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
@@ -131,6 +133,7 @@ impl AppState {
                 game_one_manifest(),
                 game_two_manifest(),
                 game_three_manifest(),
+                game_four_manifest(),
                 manifest,
             ],
         )

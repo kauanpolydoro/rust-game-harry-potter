@@ -74,9 +74,17 @@ pub(super) async fn ready_adventure_room(
     count: usize,
     manifest: game_content::ContentManifest,
 ) -> (ReadyRoom, Vec<String>) {
+    ready_adventure_room_with_seed_source(count, manifest, || Ok([7; 32])).await
+}
+
+pub(super) async fn ready_adventure_room_with_seed_source(
+    count: usize,
+    manifest: game_content::ContentManifest,
+    seed: fn() -> Result<[u8; 32], getrandom::Error>,
+) -> (ReadyRoom, Vec<String>) {
     let database = database().await;
     let state = AppState::with_content_manifests(database.clone(), vec![manifest.clone()])
-        .with_game_seed_source(|| Ok([7; 32]));
+        .with_game_seed_source(seed);
     initialize(&state).await.expect("isolated database");
     let app = build_router(state.clone());
     let (room_code, host_cookie, host_recovery_token) = create_room(&app).await;
@@ -282,10 +290,12 @@ fn game_one_command(projection: &Value, seek_victory: bool) -> Value {
 fn acquisition_priority(catalog: &Value, projection: &Value) -> u8 {
     if matches!(
         projection["snapshot"]["versions"]["content"].as_str(),
-        Some("game-two-en-v1" | "game-three-en-v1")
+        Some("game-two-en-v1" | "game-three-en-v1" | "game-four-en-v1")
     ) {
         let policies: Value = serde_json::from_str(
-            if projection["snapshot"]["versions"]["content"] == "game-three-en-v1" {
+            if projection["snapshot"]["versions"]["content"] == "game-four-en-v1" {
+                include_str!("../fixtures/game-four/purchase-priority.json")
+            } else if projection["snapshot"]["versions"]["content"] == "game-three-en-v1" {
                 include_str!("../fixtures/game-three/purchase-priority.json")
             } else {
                 include_str!("../fixtures/game-two/purchase-priority.json")

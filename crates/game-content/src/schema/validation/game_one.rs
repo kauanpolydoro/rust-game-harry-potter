@@ -6,14 +6,20 @@ pub(super) fn validate_setup(
     bundle: &CandidateBundle,
     inventory: super::super::Inventory,
 ) -> Result<(), ImportFailure> {
-    let game_three = matches!(inventory, super::super::Inventory::GameThree);
+    let game_four = matches!(inventory, super::super::Inventory::GameFour);
+    let game_three = matches!(
+        inventory,
+        super::super::Inventory::GameThree | super::super::Inventory::GameFour
+    );
     let game_two = matches!(inventory, super::super::Inventory::GameTwo);
     let Some(setup) = bundle.game_setups.first() else {
         return Ok(());
     };
     if bundle.game_setups.len() != 1
         || setup.adventure_id.as_str()
-            != if game_three {
+            != if game_four {
+                "adventure:004"
+            } else if game_three {
                 "adventure:003"
             } else if game_two {
                 "adventure:002"
@@ -42,7 +48,9 @@ pub(super) fn validate_setup(
         .map(|entity| entity.catalog_id.as_str())
         .collect::<Vec<_>>();
     if locations
-        != if game_three {
+        != if game_four {
+            vec!["location:010", "location:011"]
+        } else if game_three {
             vec!["location:007", "location:008"]
         } else if game_two {
             vec!["location:004", "location:005"]
@@ -62,6 +70,7 @@ pub(super) fn validate_setup(
             entry.copies,
             game_two,
             game_three,
+            game_four,
         ) else {
             continue;
         };
@@ -93,6 +102,7 @@ fn placement(
     copies: u16,
     game_two: bool,
     game_three: bool,
+    game_four: bool,
 ) -> Option<(Zone, GameSetupOwner, u16)> {
     match kind {
         EntryKind::HogwartsCard => Some((Zone::HogwartsDeck, GameSetupOwner::None, copies)),
@@ -100,7 +110,9 @@ fn placement(
         EntryKind::Villain => Some((Zone::VillainDeck, GameSetupOwner::None, copies)),
         EntryKind::Location => Some((
             if id
-                == if game_three {
+                == if game_four {
+                    "location:009"
+                } else if game_three {
                     "location:006"
                 } else if game_two {
                     "location:003"

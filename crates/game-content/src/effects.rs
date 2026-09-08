@@ -59,6 +59,11 @@ pub struct ResourceCost {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    RevealExtraDarkArts,
+    PreventControlRemoval,
+    OtherAllyBonus {
+        health: u8,
+    },
     HeroAbility {
         strategy: HeroAbilityStrategy,
         effect: Box<Self>,
@@ -130,6 +135,8 @@ pub enum Effect {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReactionTrigger {
+    MorsmordreRevealedV1,
+    VillainRevealed,
     SelfHarmfulDiscard,
     OwnerPlaysAlly,
     ControlAdded,
@@ -160,6 +167,7 @@ pub enum StructuralRule {
     GameOneSetup,
     GameTwoSetup,
     GameThreeSetup,
+    GameFourSetup,
     GameOnePrecedence,
     NoHeroAbility,
     NoLocationEffect,
@@ -259,6 +267,7 @@ pub enum Zone {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    GainInfluenceAndDraw { influence: u8, cards: u8 },
     SuppressVillain,
     GainInfluenceAndHealth { influence: u8, health: u8 },
     DiscardForSpellBonus { influence: u8 },
@@ -284,6 +293,10 @@ pub enum Resource {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Die {
+    GryffindorV1,
+    HufflepuffV1,
+    RavenclawV1,
+    SlytherinV1,
     D4,
     D6,
     D8,
@@ -291,10 +304,22 @@ pub enum Die {
 
 impl Die {
     #[must_use]
+    pub const fn is_house(self) -> bool {
+        matches!(
+            self,
+            Self::GryffindorV1 | Self::HufflepuffV1 | Self::RavenclawV1 | Self::SlytherinV1
+        )
+    }
+
+    #[must_use]
     pub const fn sides(self) -> usize {
         match self {
             Self::D4 => 4,
-            Self::D6 => 6,
+            Self::D6
+            | Self::GryffindorV1
+            | Self::HufflepuffV1
+            | Self::RavenclawV1
+            | Self::SlytherinV1 => 6,
             Self::D8 => 8,
         }
     }

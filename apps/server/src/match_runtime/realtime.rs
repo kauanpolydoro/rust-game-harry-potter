@@ -1086,7 +1086,7 @@ async fn synchronize_socket(
         Err(error) => Err(error),
     };
     let events = events.map_err(|_| RealtimeFailure::InvalidData("decode persisted events"))?;
-    if !events_are_contiguous(&events, from_cursor, current_cursor) {
+    if !events_can_replay(&events, from_cursor, current_cursor) {
         send_realtime_snapshot(
             socket,
             projection,
@@ -1114,6 +1114,19 @@ async fn synchronize_socket(
     position.digest = Some(digest);
     position.synchronized = true;
     Ok(())
+}
+
+fn events_can_replay(events: &[RealtimeGameEvent], from_cursor: i64, current_cursor: i64) -> bool {
+    // Game 4 can pause in EndTurn or resume through both opening phases.
+    events_are_contiguous(events, from_cursor, current_cursor)
+        && events.iter().all(|event| match event {
+            RealtimeGameEvent::TurnCompleted(event) => (2..=3).contains(&event.steps.len()),
+            RealtimeGameEvent::ChoiceResolved(event) => {
+                (1..=2).contains(&event.steps.len())
+                    && event.steps.iter().all(|step| step.phase != "end_turn")
+            }
+            RealtimeGameEvent::Legacy(_) => true,
+        })
 }
 
 fn replay_gap_requires_snapshot(requested_cursor: Option<i64>, current_cursor: i64) -> bool {
@@ -1225,25 +1238,11 @@ fn realtime_event(
     }
     // Copy links belong to canonical persistence. Public v6 already expresses
     // targets, copied effects, choices and the resulting projected table.
-    if matches!(payload.event_version, 7 | 8) {
-        payload.effects.retain(|effect| {
-            !matches!(
-                effect,
-                PersistedEffectOutcome::AllyCopied { .. }
-                    | PersistedEffectOutcome::TurnStateChanged { .. }
-                    | PersistedEffectOutcome::TopCardRevealed { .. }
-            )
-        });
+    if matches!(payload.event_version, 7..=9) {
+        payload.effects.retain_mut(public_effect);
         if let Some(steps) = &mut payload.steps {
             for step in steps {
-                step.effects.retain(|effect| {
-                    !matches!(
-                        effect,
-                        PersistedEffectOutcome::AllyCopied { .. }
-                            | PersistedEffectOutcome::TurnStateChanged { .. }
-                            | PersistedEffectOutcome::TopCardRevealed { .. }
-                    )
-                });
+                step.effects.retain_mut(public_effect);
             }
         }
     }
@@ -1253,17 +1252,38 @@ fn realtime_event(
     match (payload.event_version, payload.event_type.as_str()) {
         (1..=3, "dark_arts_completed")
         | (3, "choice_resolved")
-        | (3..=8, "card_played" | "attack_assigned" | "card_acquired") => {
+        | (3..=9, "card_played" | "attack_assigned" | "card_acquired") => {
             realtime_legacy_event(stored, payload, command_id)
         }
-        (4..=8, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
-        (4..=8, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
+        (4..=9, "turn_completed") => realtime_turn_completed_event(stored, payload, command_id),
+        (4..=9, "choice_resolved") => realtime_choice_resolved_event(stored, payload, command_id),
         _ => Err(ApiError::internal()),
     }
 }
 
+fn public_effect(effect: &mut PersistedEffectOutcome) -> bool {
+    match effect {
+        PersistedEffectOutcome::AllyCopied { .. }
+        | PersistedEffectOutcome::TurnStateChanged { .. }
+        | PersistedEffectOutcome::TopCardRevealed { .. } => return false,
+        PersistedEffectOutcome::DieRolled { die, .. }
+            if matches!(
+                die.as_str(),
+                "gryffindor_v1" | "hufflepuff_v1" | "ravenclaw_v1" | "slytherin_v1"
+            ) =>
+        {
+            "d6".clone_into(die);
+        }
+        PersistedEffectOutcome::NoOp { reason, .. } if reason == "control_removal_blocked" => {
+            "explicit".clone_into(reason);
+        }
+        _ => {}
+    }
+    true
+}
+
 const fn public_event_version(persisted: i16) -> i16 {
-    if matches!(persisted, 7 | 8) {
+    if matches!(persisted, 7..=9) {
         6
     } else {
         persisted
@@ -1522,9 +1542,9 @@ fn realtime_event_type(
     match (payload.event_version, stored_event_type) {
         (1..=3, "dark_arts_completed") => Ok("dark_arts_completed"),
         (3, "choice_resolved") => Ok("choice_resolved"),
-        (3..=8, "card_played") => Ok("card_played"),
-        (3..=8, "attack_assigned") => Ok("attack_assigned"),
-        (3..=8, "card_acquired") => Ok("card_acquired"),
+        (3..=9, "card_played") => Ok("card_played"),
+        (3..=9, "attack_assigned") => Ok("attack_assigned"),
+        (3..=9, "card_acquired") => Ok("card_acquired"),
         _ => Err(ApiError::internal()),
     }
 }
@@ -1639,6 +1659,73 @@ mod tests {
     }
 
     #[test]
+    fn graveyard_choices_use_snapshots_when_end_turn_cannot_fit_the_public_event_contract() {
+        use game_domain::{GameEngine, GameIntentInput, GamePhase, PlayerIntent};
+        let (mut state, _, rules) = super::super::game_four_tests::graveyard_scenario();
+        let mut roller = super::super::ChaChaEffectRoller::new(&[19; 32], state.prng_counter())
+            .ok()
+            .expect("entropy");
+        let actor = Uuid::new_v4();
+        let mut continuations = 0;
+        loop {
+            let position = state
+                .pending_choice()
+                .map_or(state.active_position(), |choice| {
+                    choice.responsible_position
+                });
+            let intent = state
+                .pending_choice()
+                .map_or(PlayerIntent::EndHeroActions, |choice| {
+                    PlayerIntent::ResolveChoice {
+                        choice_id: choice.id.clone(),
+                        selected_options: choice
+                            .options
+                            .iter()
+                            .take(usize::from(choice.min))
+                            .cloned()
+                            .collect(),
+                    }
+                });
+            let decision = GameEngine::new(&rules)
+                .decide(
+                    GameIntentInput {
+                        state: &state,
+                        actor_position: position,
+                        expected_state_version: state.state_version(),
+                        intent,
+                    },
+                    &mut roller,
+                )
+                .expect("real Graveyard decision");
+            let (_, _, payload) = super::super::codec::persisted_game_four_event(decision.event)
+                .ok()
+                .expect("event 9");
+            let payload: Value = serde_json::from_str(&payload).expect("JSON");
+            let event = realtime_event(&stored_event(&payload, actor), actor)
+                .unwrap_or_else(|_| panic!("realtime event"));
+            if state.phase() == GamePhase::EndTurn {
+                continuations += 1;
+            }
+            assert!(
+                !super::events_can_replay(
+                    &[event],
+                    i64::try_from(state.sequence()).expect("cursor"),
+                    i64::try_from(decision.state.sequence()).expect("cursor")
+                ),
+                "the public choice-step contract excludes end_turn, even with one step"
+            );
+            state = decision.state;
+            if state.phase() != GamePhase::EndTurn {
+                break;
+            }
+        }
+        assert!(
+            continuations >= 2,
+            "independent Hero discards exercise a pending continuation"
+        );
+    }
+
+    #[test]
     fn game_two_events_reach_the_websocket_adapter() {
         let actor = Uuid::new_v4();
         let stored = stored_event(
@@ -1669,6 +1756,30 @@ mod tests {
         assert!(stored.payload_json.contains("ally_copied"));
         assert_eq!(forwarded["card_id"], "instance:starter:1");
         assert_eq!(forwarded["command_id"], stored.command_id.to_string());
+    }
+
+    #[test]
+    fn game_four_house_rolls_reach_the_existing_public_websocket_contract() {
+        let actor = Uuid::new_v4();
+        let stored = stored_event(
+            &json!({
+                "event_version":9,"type":"card_played","sequence":1,"state_version":2,
+                "turn":1,"actor_position":1,"card_id":"instance:cedric","targets":[],
+                "effects":[{"type":"die_rolled","rule_id":"rule:g4-die-hufflepuff-v1","die":"hufflepuff_v1","result":6}],
+                "effect_stop":"stable","prng_counter":134,
+                "house_die_rolls":[{"purpose":"rule:g4-die-hufflepuff-v1","counter":133,"die":"hufflepuff_v1","sides":6,"result":6}]
+            }),
+            actor,
+        );
+        let forwarded = serialized_realtime_event(&stored, actor);
+        assert_eq!(forwarded["event_version"], 6);
+        assert_eq!(forwarded["effects"][0]["die"], "d6");
+        assert_eq!(forwarded["effects"][0]["result"], 6);
+        assert_eq!(
+            forwarded["effects"][0]["rule_id"],
+            "rule:g4-die-hufflepuff-v1"
+        );
+        assert!(forwarded.get("house_die_rolls").is_none());
     }
 
     #[test]

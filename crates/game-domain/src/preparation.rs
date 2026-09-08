@@ -55,6 +55,36 @@ const GAME_THREE: PreparationInventory = PreparationInventory {
     ],
 };
 
+const GAME_FOUR: PreparationInventory = PreparationInventory {
+    hogwarts: 81,
+    dark_arts: 27,
+    villains: 10,
+    active_villains: 2,
+    locations: &[
+        ("location:009", 6, 1),
+        ("location:010", 6, 2),
+        ("location:011", 7, 2),
+    ],
+};
+
+pub(crate) fn prepare_game_four(
+    state: &mut InitialGameState,
+    random: &mut dyn EffectRoller,
+) -> Result<(), StartGameError> {
+    if state.adventure_id != "adventure:004"
+        || state.manifest_version != 7
+        || !valid_game_four_entities(&state.effect_world, &state.players)
+        || state.effect_world.entities().any(|(_, entity)| {
+            entity
+                .turn_state()
+                .is_some_and(|value| value != &crate::EffectTurnState::default())
+        })
+    {
+        return Err(StartGameError::InvalidInitialEntities);
+    }
+    prepare(state, random, &GAME_FOUR)
+}
+
 pub(crate) fn prepare_game_three(
     state: &mut InitialGameState,
     random: &mut dyn EffectRoller,
@@ -219,6 +249,7 @@ pub(crate) fn valid_samples(
         return true;
     }
     let inventory = match adventure_id {
+        "adventure:004" => &GAME_FOUR,
         "adventure:003" => &GAME_THREE,
         "adventure:002" => &GAME_TWO,
         _ => &GAME_ONE,
@@ -289,6 +320,21 @@ pub(crate) fn valid_game_three_entities(
     world: &crate::EffectWorld,
     players: &[crate::InitialPlayer],
 ) -> bool {
+    valid_hero_ability_entities(world, players, false)
+}
+
+pub(crate) fn valid_game_four_entities(
+    world: &crate::EffectWorld,
+    players: &[crate::InitialPlayer],
+) -> bool {
+    valid_hero_ability_entities(world, players, true)
+}
+
+fn valid_hero_ability_entities(
+    world: &crate::EffectWorld,
+    players: &[crate::InitialPlayer],
+    game_four: bool,
+) -> bool {
     world.entities().all(|(_, entity)| match entity.kind() {
         EffectEntityKind::Hero => {
             entity.turn_state().is_some()
@@ -306,6 +352,13 @@ pub(crate) fn valid_game_three_entities(
                 })
         }
         EffectEntityKind::Villain => entity.turn_state().is_some(),
+        EffectEntityKind::HogwartsCard if game_four => {
+            entity.turn_state().is_some()
+                == matches!(
+                    entity.catalog_id(),
+                    Some("hogwarts-card:023" | "hogwarts-card:035")
+                )
+        }
         _ => entity.turn_state().is_none(),
     })
 }

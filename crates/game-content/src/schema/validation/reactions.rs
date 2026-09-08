@@ -61,7 +61,9 @@ fn category_count(effect: &Effect) -> usize {
 
 fn contains_reaction(effect: &Effect) -> bool {
     match effect {
-        Effect::PreventExtraDrawing
+        Effect::PreventControlRemoval
+        | Effect::OtherAllyBonus { .. }
+        | Effect::PreventExtraDrawing
         | Effect::Reaction { .. }
         | Effect::HandDamageLimit { .. }
         | Effect::CardType { .. }
@@ -86,7 +88,10 @@ fn contains_reaction(effect: &Effect) -> bool {
 
 fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) -> bool {
     match effect {
-        Effect::PreventExtraDrawing => allowed && phase == EffectTrigger::Villains,
+        Effect::OtherAllyBonus { .. } => allowed && phase == EffectTrigger::Manual,
+        Effect::PreventControlRemoval | Effect::PreventExtraDrawing => {
+            allowed && phase == EffectTrigger::Villains
+        }
         Effect::CardType { .. } | Effect::TopDeckAcquisition { .. } => {
             allowed && phase == EffectTrigger::Manual
         }
@@ -99,7 +104,10 @@ fn declarations_are_valid(effect: &Effect, phase: EffectTrigger, allowed: bool) 
                     (phase, trigger),
                     (
                         EffectTrigger::Villains,
-                        ReactionTrigger::ControlAdded | ReactionTrigger::HeroForcedDiscard
+                        ReactionTrigger::ControlAdded
+                            | ReactionTrigger::HeroForcedDiscard
+                            | ReactionTrigger::MorsmordreRevealedV1
+                            | ReactionTrigger::VillainRevealed
                     ) | (
                         EffectTrigger::Manual,
                         ReactionTrigger::SelfForcedDiscard

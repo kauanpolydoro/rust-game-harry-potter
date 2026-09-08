@@ -163,7 +163,10 @@ fn contains_participant_choice(effect: &Effect) -> bool {
         | Effect::Reaction { effect, .. } => contains_participant_choice(effect),
         Effect::Roll { outcomes, .. } => outcomes.iter().any(contains_participant_choice),
         Effect::Sequence { effects } => effects.iter().any(contains_participant_choice),
-        Effect::LimitVillainAttack { .. }
+        Effect::RevealExtraDarkArts
+        | Effect::PreventControlRemoval
+        | Effect::OtherAllyBonus { .. }
+        | Effect::LimitVillainAttack { .. }
         | Effect::Apply { .. }
         | Effect::PreventExtraDrawing
         | Effect::TopDeckAcquisition { .. }

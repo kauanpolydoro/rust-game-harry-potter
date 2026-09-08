@@ -32,6 +32,8 @@ mod projection;
 mod realtime;
 
 #[cfg(test)]
+mod game_four_tests;
+#[cfg(test)]
 mod game_one_tests;
 #[cfg(test)]
 mod game_three_scenarios;
@@ -540,8 +542,20 @@ struct PersistedSnapshot {
     prng: PersistedPrng,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     preparation_samples: Vec<PersistedPreparationSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    house_die_rolls: Option<Vec<PersistedHouseDieRoll>>,
     #[serde(default, skip_serializing_if = "PersistedEffects::is_empty")]
     effects: PersistedEffects,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedHouseDieRoll {
+    purpose: String,
+    counter: u64,
+    die: String,
+    sides: u8,
+    result: u8,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -913,6 +927,8 @@ struct PersistedGameEvent {
     control: Option<PersistedEngineControl>,
     #[serde(default)]
     prng_counter: Option<u64>,
+    #[serde(default)]
+    house_die_rolls: Option<Vec<PersistedHouseDieRoll>>,
 }
 
 struct ChaChaEffectRoller {
@@ -1182,7 +1198,9 @@ async fn execute_game_command(
     validate_persisted_json_size(&snapshot_json)?;
     let state_digest = format!("blake3:{}", blake3::hash(snapshot_json.as_bytes()).to_hex());
     let (event_version, event_type, event_json) =
-        if decision.state.snapshot_version() == game_domain::GAME_THREE_SNAPSHOT_VERSION {
+        if decision.state.snapshot_version() == game_domain::GAME_FOUR_SNAPSHOT_VERSION {
+            codec::persisted_game_four_event(decision.event)?
+        } else if decision.state.snapshot_version() == game_domain::GAME_THREE_SNAPSHOT_VERSION {
             codec::persisted_game_three_event(decision.event)?
         } else if decision.state.snapshot_version() == game_domain::GAME_TWO_SNAPSHOT_VERSION {
             codec::persisted_game_two_event(decision.event)?

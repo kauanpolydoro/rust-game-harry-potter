@@ -25,11 +25,17 @@ pub(super) fn valid_turn_state(
                 state.attack_limit.is_none() && state.suppressed_by.is_empty()
             }
             EffectEntityKind::Villain => !state.ability_used && state.healed_positions.is_empty(),
+            EffectEntityKind::HogwartsCard => {
+                state.healed_positions.is_empty()
+                    && state.attack_assigned == 0
+                    && state.attack_limit.is_none()
+                    && state.suppressed_by.is_empty()
+            }
             _ => false,
         }
 }
 
-fn change_turn_state(
+pub(super) fn change_turn_state(
     world: &mut EffectWorld,
     id: &str,
     rule_id: &str,

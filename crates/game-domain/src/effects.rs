@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+mod game_four;
 mod game_three;
 mod game_two;
 mod reactions;
@@ -128,6 +129,10 @@ pub enum EffectCondition {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOperation {
+    GainInfluenceAndDraw {
+        influence: u8,
+        cards: u8,
+    },
     SuppressVillain,
     DiscardForSpellBonus {
         influence: u8,
@@ -157,6 +162,10 @@ pub enum EffectOperation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectDie {
+    GryffindorV1,
+    HufflepuffV1,
+    RavenclawV1,
+    SlytherinV1,
     D4,
     D6,
     D8,
@@ -164,10 +173,22 @@ pub enum EffectDie {
 
 impl EffectDie {
     #[must_use]
+    pub const fn is_house(self) -> bool {
+        matches!(
+            self,
+            Self::GryffindorV1 | Self::HufflepuffV1 | Self::RavenclawV1 | Self::SlytherinV1
+        )
+    }
+
+    #[must_use]
     pub const fn sides(self) -> u8 {
         match self {
             Self::D4 => 4,
-            Self::D6 => 6,
+            Self::D6
+            | Self::GryffindorV1
+            | Self::HufflepuffV1
+            | Self::RavenclawV1
+            | Self::SlytherinV1 => 6,
             Self::D8 => 8,
         }
     }
@@ -181,6 +202,9 @@ pub enum EffectGameOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectDefinition {
+    OtherAllyBonus {
+        health: u8,
+    },
     LimitVillainAttack {
         maximum: u8,
     },
@@ -197,6 +221,7 @@ pub enum EffectDefinition {
         effect: Box<Self>,
     },
     PreventExtraDrawing,
+    PreventControlRemoval,
     TopDeckAcquisition {
         card_type: EffectCardType,
     },
@@ -211,6 +236,7 @@ pub enum EffectDefinition {
         effect: Box<Self>,
     },
     RevealDarkArts,
+    RevealExtraDarkArts,
     Apply {
         target: EffectSelector,
         operation: EffectOperation,
@@ -243,6 +269,8 @@ pub enum EffectDefinition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectReactionTrigger {
+    MorsmordreRevealedV1,
+    VillainRevealed,
     SelfHarmfulDiscard,
     OwnerPlaysAlly,
     ControlAdded,
@@ -1261,6 +1289,7 @@ pub enum EffectChangeCause {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectNoOpReason {
+    ControlRemovalBlocked,
     DrawingBlocked,
     Explicit,
     NoEligibleTarget,
@@ -1455,6 +1484,7 @@ impl EffectExecutor<'_> {
     fn run(mut self) -> Result<EffectResolution, EffectExecutionError> {
         self.enqueue_copied_effects(0)?;
         self.enqueue_reactions(0)?;
+        self.enqueue_other_ally_bonuses(0)?;
         self.enqueue_hero_abilities(0)?;
         self.enqueue_defeated_villains(self.actor_position)?;
         while let Some(queued) = self.queue.pop_front() {
@@ -1502,6 +1532,7 @@ impl EffectExecutor<'_> {
             self.enqueue_defeated_villains(actor_position)?;
             self.enqueue_copied_effects(outcome_start)?;
             self.enqueue_reactions(outcome_start)?;
+            self.enqueue_other_ally_bonuses(outcome_start)?;
             self.enqueue_hero_abilities(outcome_start)?;
             self.ensure_outcome_limit()?;
             if let Some(stop) = stop {
@@ -1575,6 +1606,10 @@ impl EffectExecutor<'_> {
         effect: EffectDefinition,
     ) -> Result<Option<EffectStop>, EffectExecutionError> {
         match effect {
+            EffectDefinition::OtherAllyBonus { health } => {
+                self.execute_other_ally_bonus(&cursor.rule_id, actor_position, health)?;
+                Ok(None)
+            }
             EffectDefinition::LimitVillainAttack { maximum } => {
                 self.limit_villain_attack(&cursor, maximum)
             }
@@ -1582,12 +1617,15 @@ impl EffectExecutor<'_> {
                 self.reveal_top_card(&cursor, actor_position, minimum_cost)
             }
             EffectDefinition::HeroAbility { .. }
+            | EffectDefinition::PreventControlRemoval
             | EffectDefinition::PreventExtraDrawing
             | EffectDefinition::Reaction { .. }
             | EffectDefinition::HandDamageLimit { .. }
             | EffectDefinition::TopDeckAcquisition { .. }
             | EffectDefinition::CardType { .. } => Ok(None),
-            EffectDefinition::RevealDarkArts => self.reveal_dark_arts(&cursor, actor_position),
+            EffectDefinition::RevealDarkArts | EffectDefinition::RevealExtraDarkArts => {
+                self.reveal_dark_arts(&cursor, actor_position)
+            }
             EffectDefinition::Apply { target, operation } => {
                 self.execute_apply(&cursor, actor_position, &target, &operation)
             }
@@ -2282,6 +2320,7 @@ pub(crate) fn execute_effects(
             target_bindings: &[],
             require_named_target_bindings: false,
             initial_outcomes: vec![],
+            initial_queue: VecDeque::new(),
         },
     )
 }
@@ -2318,6 +2357,7 @@ pub(crate) fn execute_effect_rule(
                 from: EffectZone::HeroHand,
                 to: EffectZone::HeroPlayArea,
             }],
+            initial_queue: VecDeque::new(),
         },
     )
 }
@@ -2340,6 +2380,52 @@ pub(crate) fn execute_committed_effects(
             target_bindings: &[],
             require_named_target_bindings: false,
             initial_outcomes,
+            initial_queue: VecDeque::new(),
+        },
+    )
+}
+
+pub(crate) fn execute_revelation_effects(
+    world: &mut EffectWorld,
+    actor_position: u8,
+    location_id: Option<&str>,
+    revealed_villains: &[String],
+    rules: &[EffectRule],
+    roller: &mut dyn EffectRoller,
+    opening: bool,
+) -> Result<EffectResolution, EffectExecutionError> {
+    let mut queue = VecDeque::new();
+    if let Some(id) = location_id {
+        let rule_id = world
+            .entity(id)
+            .and_then(|(_, entity)| entity.effect_rule_id())
+            .ok_or(EffectExecutionError::InvalidDefinition)?;
+        queue.push_back(QueuedEffect::Definition {
+            cursor: EffectCursor::root(rule_id),
+            actor_position,
+        });
+    }
+    queue.extend(reactions::villain_revelation_queue(
+        world,
+        rules,
+        revealed_villains,
+        actor_position,
+    )?);
+    execute_effects_with_targets(
+        world,
+        rules,
+        roller,
+        EffectExecutionPlan {
+            actor_position,
+            selection: if opening {
+                RuleSelection::Trigger(EffectTrigger::DarkArts)
+            } else {
+                RuleSelection::None
+            },
+            target_bindings: &[],
+            require_named_target_bindings: false,
+            initial_outcomes: vec![],
+            initial_queue: queue,
         },
     )
 }
@@ -2371,6 +2457,7 @@ struct EffectExecutionPlan<'a> {
     target_bindings: &'a [EffectTargetBinding],
     require_named_target_bindings: bool,
     initial_outcomes: Vec<EffectOutcome>,
+    initial_queue: VecDeque<QueuedEffect>,
 }
 
 fn execute_effects_with_targets(
@@ -2385,6 +2472,7 @@ fn execute_effects_with_targets(
         target_bindings,
         require_named_target_bindings,
         initial_outcomes,
+        initial_queue,
     } = plan;
     if !effect_rules_are_valid(rules)
         || target_bindings.iter().any(|binding| {
@@ -2407,27 +2495,29 @@ fn execute_effects_with_targets(
         return Err(EffectExecutionError::UnaffordableCost);
     }
 
-    let mut queue = rules
-        .iter()
-        .filter(|rule| selection.matches(rule))
-        .flat_map(|rule| {
-            let count = if rule.trigger == EffectTrigger::DarkArts
-                && rule.effect == EffectDefinition::RevealDarkArts
-            {
-                world
-                    .entities_in(EffectZone::ActiveLocation)
-                    .first()
-                    .and_then(EffectEntity::dark_arts_count)
-                    .unwrap_or(1)
-            } else {
-                1
-            };
-            (0..count).map(move |_| QueuedEffect::Definition {
-                cursor: EffectCursor::root(&rule.id),
-                actor_position,
-            })
-        })
-        .collect::<VecDeque<_>>();
+    let mut queue = initial_queue;
+    queue.extend(
+        rules
+            .iter()
+            .filter(|rule| selection.matches(rule))
+            .flat_map(|rule| {
+                let count = if rule.trigger == EffectTrigger::DarkArts
+                    && rule.effect == EffectDefinition::RevealDarkArts
+                {
+                    world
+                        .entities_in(EffectZone::ActiveLocation)
+                        .first()
+                        .and_then(EffectEntity::dark_arts_count)
+                        .unwrap_or(1)
+                } else {
+                    1
+                };
+                (0..count).map(move |_| QueuedEffect::Definition {
+                    cursor: EffectCursor::root(&rule.id),
+                    actor_position,
+                })
+            }),
+    );
     let mut next_world = world.clone();
     let mut costs = pay_costs(&mut next_world, actor_position, rules, selection)?;
     resolve_cost_stun(&mut next_world, actor_position, &mut costs, &mut queue)?;
@@ -2932,6 +3022,9 @@ fn operation_is_valid_for_zone(operation: &EffectOperation, zone: EffectZone) ->
         EffectOperation::DiscardForSpellBonus { influence } => {
             zone == EffectZone::HeroHand && (1..=16).contains(influence)
         }
+        EffectOperation::GainInfluenceAndDraw { influence, cards } => {
+            zone == EffectZone::Heroes && (1..=16).contains(influence) && (1..=16).contains(cards)
+        }
         EffectOperation::GainInfluenceAndHealth { influence, health } => {
             zone == EffectZone::Heroes && (1..=16).contains(influence) && (1..=10).contains(health)
         }
@@ -3067,7 +3160,9 @@ fn collect_atomic_target_slots(
                 Some(true)
             }
         }
-        EffectDefinition::RevealTopCard { .. }
+        EffectDefinition::OtherAllyBonus { health } => (1..=10).contains(health).then_some(true),
+        EffectDefinition::RevealExtraDarkArts
+        | EffectDefinition::RevealTopCard { .. }
         | EffectDefinition::ForEachTarget { .. }
         | EffectDefinition::Choice { .. }
         | EffectDefinition::Terminal { .. } => Some(false),
@@ -3088,6 +3183,7 @@ fn collect_atomic_target_slots(
         }
         EffectDefinition::LimitVillainAttack { .. }
         | EffectDefinition::HeroAbility { .. }
+        | EffectDefinition::PreventControlRemoval
         | EffectDefinition::PreventExtraDrawing
         | EffectDefinition::NoOp
         | EffectDefinition::TopDeckAcquisition { .. }
@@ -3270,6 +3366,25 @@ fn apply_operation(
 ) -> Result<Option<u8>, EffectExecutionError> {
     let rule_id = source.rule_id;
     match operation {
+        EffectOperation::GainInfluenceAndDraw { influence, cards } => {
+            modify_entity_resource(
+                world,
+                entity_id,
+                rule_id,
+                EffectResource::Influence,
+                i16::from(*influence),
+                outcomes,
+            )?;
+            draw_cards(
+                world,
+                entity_id,
+                source,
+                *cards,
+                outcomes,
+                roller,
+                rolls_consumed,
+            )
+        }
         EffectOperation::SuppressVillain => {
             game_three::suppress_villain(world, entity_id, source, outcomes)
         }
@@ -3320,20 +3435,7 @@ fn apply_operation(
             )
         }
         EffectOperation::PreventDrawing => {
-            let (_, hero) = world
-                .entity_mut(entity_id)
-                .ok_or(EffectExecutionError::InvalidDefinition)?;
-            let target_position = hero
-                .owner_position
-                .filter(|_| hero.kind == EffectEntityKind::Hero)
-                .ok_or(EffectExecutionError::InvalidDefinition)?;
-            hero.drawing_blocked = true;
-            outcomes.push(EffectOutcome::DrawingBlocked {
-                rule_id: rule_id.to_owned(),
-                target_id: entity_id.to_owned(),
-                target_position,
-            });
-            Ok(None)
+            game_two::prevent_drawing(world, entity_id, rule_id, outcomes)
         }
         EffectOperation::Draw { amount } => draw_cards(
             world,
@@ -3352,12 +3454,7 @@ fn apply_operation(
             outcomes,
         ),
         EffectOperation::ModifyResource { resource, amount } => {
-            let amount = if *resource == EffectResource::Health && *amount < 0 {
-                reactions::protected_health_loss(world, entity_id, source, *amount)
-            } else {
-                *amount
-            };
-            modify_entity_resource(world, entity_id, rule_id, *resource, amount, outcomes)
+            reactions::modify_resource(world, entity_id, source, *resource, *amount, outcomes)
         }
         EffectOperation::Move { to } => move_entity(world, entity_id, rule_id, *to, outcomes),
     }

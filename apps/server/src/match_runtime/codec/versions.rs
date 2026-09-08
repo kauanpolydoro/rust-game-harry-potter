@@ -103,3 +103,33 @@ pub(super) fn reject_game_three_fields(serialized: &str) -> Result<(), ApiError>
         Ok(())
     }
 }
+
+pub(super) fn reject_game_four_fields(serialized: &str) -> Result<(), ApiError> {
+    fn contains(value: &Value) -> bool {
+        match value {
+            Value::Array(items) => items.iter().any(contains),
+            Value::Object(fields) => {
+                fields.contains_key("house_die_rolls")
+                    || matches!(
+                        fields.get("die").and_then(Value::as_str),
+                        Some("gryffindor_v1" | "hufflepuff_v1" | "ravenclaw_v1" | "slytherin_v1")
+                    )
+                    || fields
+                        .get("reason")
+                        .is_some_and(|value| value == "control_removal_blocked")
+                    || (fields
+                        .get("kind")
+                        .is_some_and(|value| value == "hogwarts_card")
+                        && fields.contains_key("turn_state"))
+                    || fields.values().any(contains)
+            }
+            _ => false,
+        }
+    }
+    let value: Value = serde_json::from_str(serialized).map_err(|_| ApiError::internal())?;
+    if contains(&value) {
+        Err(ApiError::internal())
+    } else {
+        Ok(())
+    }
+}
