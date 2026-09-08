@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import gameTwoPurchasePriority from '../../server/tests/fixtures/game-two/purchase-priority.json' with { type: 'json' }
+import gameFourSeeds from '../../server/tests/fixtures/game-four/scenario-seeds.json' with { type: 'json' }
+import gameFourPurchasePriority from '../../server/tests/fixtures/game-four/purchase-priority.json' with { type: 'json' }
 import gameThreePurchasePriority from '../../server/tests/fixtures/game-three/purchase-priority.json' with { type: 'json' }
 
 import { type GameProjectionResponse } from '../src/contracts/identity-access.generated'
@@ -11,13 +13,18 @@ test.use({ actionTimeout: 10_000 })
 const purchasePriority = ['001', '005', '010', '008', '002', '007', '004', '006', '011', '009', '013', '003']
 
 function scenarioTargets(projection: GameProjectionResponse, options: string[], min: number, cause: string): string[] {
+  if (projection.snapshot.versions.content === 'game-four-en-v1' && projection.participants.length === 4
+    && ['rule:g1-starter-004', 'rule:g1-starter-007', 'rule:g1-starter-010', 'rule:g1-starter-013'].includes(cause)
+    && (projection.participants.find((hero) => hero.position === projection.turn.active_position)?.resources.health ?? 10) <= 7) return [options[1]]
+  if (projection.snapshot.versions.content === 'game-four-en-v1' && cause === 'rule:g4-hogwarts-card-036-effect') return [options[projection.participants.length === 2 ? 3 : 1]]
   const targets = [...options]
-  if (projection.snapshot.versions.content === 'game-three-en-v1' && targets.every((id) => id.startsWith('hero:'))) {
+  if (['game-three-en-v1', 'game-four-en-v1'].includes(projection.snapshot.versions.content) && targets.every((id) => id.startsWith('hero:'))) {
     const priority = (id: string) => {
       const position = Number(id.slice('hero:'.length))
+      const health = projection.participants.find((hero) => hero.position === position)?.resources.health ?? 10
       return ['rule:g3-hero-002-ability', 'rule:g3-hero-005-ability'].includes(cause)
         ? Number(position !== projection.turn.active_position)
-        : projection.participants.find((hero) => hero.position === position)?.resources.health ?? 10
+        : cause === 'rule:g4-dark-arts-015-effect' ? 10 - health : health
     }
     targets.sort((a, b) => priority(a) - priority(b))
   }
@@ -65,7 +72,9 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
     })).sort((a, b) => {
       const priority = (index: number) => {
         const catalog = projection.table.market[index].catalog_id
-        const order = projection.snapshot.versions.content === 'game-three-en-v1'
+        const order = projection.snapshot.versions.content === 'game-four-en-v1'
+          ? gameFourPurchasePriority[String(projection.participants.length) as keyof typeof gameFourPurchasePriority]
+          : projection.snapshot.versions.content === 'game-three-en-v1'
           ? gameThreePurchasePriority[String(projection.participants.length) as keyof typeof gameThreePurchasePriority]
           : projection.snapshot.versions.content === 'game-two-en-v1'
           ? gameTwoPurchasePriority[String(projection.participants.length) as keyof typeof gameTwoPurchasePriority]
@@ -84,12 +93,14 @@ async function playThroughInterface(player: ObservedPlayer, seekVictory: boolean
   }
 }
 
-for (const game of ['one', 'two', 'three'] as const) {
+for (const game of ['one', 'two', 'three', 'four'] as const) {
   for (const count of [2, 3, 4]) {
     for (const outcome of ['lost', 'won'] as const) {
-      test(`Game ${game === 'one' ? 1 : game === 'two' ? 2 : 3} with ${count} players reaches ${outcome} through the browser and WebSocket`, async ({ browser, page }, testInfo) => {
+      test(`Game ${game === 'one' ? 1 : game === 'two' ? 2 : game === 'three' ? 3 : 4} with ${count} players reaches ${outcome} through the browser and WebSocket`, async ({ browser, page }, testInfo) => {
         // Later adventures replay hundreds of commands and close traces for every participant.
-        test.setTimeout(game === 'one' ? 240_000 : 600_000)
+        test.setTimeout(game === 'one' ? 240_000 : game === 'four' ? 900_000 : 600_000)
+        const seed = game === 'four' && outcome === 'won' ? gameFourSeeds[String(count) as keyof typeof gameFourSeeds] : 7
+        await page.setExtraHTTPHeaders({ 'x-e2e-seed': String(seed) })
         const host = new ObservedPlayer(page)
         const players = await startTable(browser, host, count, game)
         const commands: unknown[] = []
@@ -125,7 +136,7 @@ for (const game of ['one', 'two', 'three'] as const) {
             await expect(player.page.locator('.action-dock')).toContainText('Partida encerrada')
           }
           const transcriptPath = testInfo.outputPath(`game-${game}-commands.json`)
-          await writeFile(transcriptPath, JSON.stringify({ players: count, seed_byte: 7, outcome, commands }, null, 2))
+          await writeFile(transcriptPath, JSON.stringify({ players: count, seed_byte: seed, outcome, commands }, null, 2))
           await testInfo.attach(`game-${game}-commands`, { path: transcriptPath, contentType: 'application/json' })
         } finally {
           await Promise.all(players.slice(1).map((player) => player.page.context().close()))

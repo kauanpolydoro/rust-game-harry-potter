@@ -8,6 +8,24 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 
+tokio::task_local! {
+    // Fixture entropy belongs to one request, including concurrent browser scenarios.
+    static E2E_SEED: u8;
+}
+
+async fn fixture_seed(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let seed = request
+        .headers()
+        .get("x-e2e-seed")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(7);
+    E2E_SEED.scope(seed, next.run(request)).await
+}
+
 fn executable_fixture_manifest() -> ContentManifest {
     let entries = (0..171).map(fixture_entry).collect::<Vec<_>>();
     let bundle = serde_json::to_vec(&json!({
@@ -222,9 +240,10 @@ async fn main() {
             harry_potter_server::game_one_manifest(),
             harry_potter_server::game_two_manifest(),
             harry_potter_server::game_three_manifest(),
+            harry_potter_server::game_four_manifest(),
         ],
     )
-    .with_game_seed_source(|| Ok([7; 32]))
+    .with_game_seed_source(|| Ok([E2E_SEED.try_with(|seed| *seed).unwrap_or(7); 32]))
     .with_application_origin(application_origin);
     initialize(&state)
         .await
@@ -240,7 +259,9 @@ async fn main() {
 
     axum::serve(
         listener,
-        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+        build_router(state)
+            .layer(axum::middleware::from_fn(fixture_seed))
+            .into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await
     .expect("the E2E server must run");

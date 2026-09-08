@@ -21,6 +21,7 @@ use tokio::{
 };
 use tower::ServiceExt;
 
+mod game_four;
 mod game_one;
 mod game_three;
 mod game_two;

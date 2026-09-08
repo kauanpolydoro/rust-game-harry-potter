@@ -10,7 +10,7 @@ use sqlx::PgPool;
 
 mod descriptions;
 mod game_one;
-pub use game_one::{game_one_manifest, game_three_manifest, game_two_manifest};
+pub use game_one::{game_four_manifest, game_one_manifest, game_three_manifest, game_two_manifest};
 
 #[derive(Clone)]
 pub(crate) struct ContentCatalog {
@@ -318,6 +318,9 @@ fn preparation(manifest: &ContentManifest, adventure: &ManifestEntry) -> Option<
             Effect::Structural {
                 rule: game_content::StructuralRule::GameThreeSetup,
             } => Some(GamePreparation::Three),
+            Effect::Structural {
+                rule: game_content::StructuralRule::GameFourSetup,
+            } => Some(GamePreparation::Four),
             _ => None,
         })
 }
@@ -327,6 +330,7 @@ enum GamePreparation {
     One,
     Two,
     Three,
+    Four,
 }
 
 #[derive(Clone)]
@@ -450,6 +454,7 @@ impl SelectedContent {
             Some(GamePreparation::One) => engine.start_game_one(input, random),
             Some(GamePreparation::Two) => engine.start_game_two(input, random),
             Some(GamePreparation::Three) => engine.start_game_three(input, random),
+            Some(GamePreparation::Four) => engine.start_game_four(input, random),
             None => engine.start(input, random),
         }
     }
@@ -492,14 +497,26 @@ impl SelectedContent {
                     if template.kind == EntryKind::Villain
                         && matches!(
                             self.preparation,
-                            Some(GamePreparation::Two | GamePreparation::Three)
+                            Some(
+                                GamePreparation::Two
+                                    | GamePreparation::Three
+                                    | GamePreparation::Four
+                            )
                         )
                     {
                         entity = entity
                             .with_max_health(template.health.expect("validated villain health"));
                     }
-                    if template.kind == EntryKind::Villain
-                        && matches!(self.preparation, Some(GamePreparation::Three))
+                    if (template.kind == EntryKind::Villain
+                        && matches!(
+                            self.preparation,
+                            Some(GamePreparation::Three | GamePreparation::Four)
+                        ))
+                        || (matches!(self.preparation, Some(GamePreparation::Four))
+                            && matches!(
+                                template.catalog_id.as_str(),
+                                "hogwarts-card:023" | "hogwarts-card:035"
+                            ))
                     {
                         entity =
                             entity.with_turn_state(Some(game_domain::EffectTurnState::default()));
@@ -627,21 +644,13 @@ fn compile_effect(
     rules: &BTreeMap<&game_content::RuleId, &EffectRule>,
 ) -> Option<game_domain::EffectDefinition> {
     Some(match effect {
+        Effect::RevealExtraDarkArts => game_domain::EffectDefinition::RevealExtraDarkArts,
+        Effect::PreventControlRemoval => game_domain::EffectDefinition::PreventControlRemoval,
+        Effect::OtherAllyBonus { health } => {
+            game_domain::EffectDefinition::OtherAllyBonus { health: *health }
+        }
         Effect::HeroAbility { strategy, effect } => game_domain::EffectDefinition::HeroAbility {
-            strategy: match strategy {
-                game_content::HeroAbilityStrategy::HarryGameThreeV1 => {
-                    game_domain::HeroAbilityStrategy::HarryGameThreeV1
-                }
-                game_content::HeroAbilityStrategy::HermioneGameThreeV1 => {
-                    game_domain::HeroAbilityStrategy::HermioneGameThreeV1
-                }
-                game_content::HeroAbilityStrategy::NevilleGameThreeV1 => {
-                    game_domain::HeroAbilityStrategy::NevilleGameThreeV1
-                }
-                game_content::HeroAbilityStrategy::RonGameThreeV1 => {
-                    game_domain::HeroAbilityStrategy::RonGameThreeV1
-                }
-            },
+            strategy: effect_hero_ability(*strategy),
             effect: Box::new(compile_effect(effect, rules)?),
         },
         Effect::RevealTopCard {
@@ -728,10 +737,35 @@ fn compile_effect(
     })
 }
 
+const fn effect_hero_ability(
+    strategy: game_content::HeroAbilityStrategy,
+) -> game_domain::HeroAbilityStrategy {
+    match strategy {
+        game_content::HeroAbilityStrategy::HarryGameThreeV1 => {
+            game_domain::HeroAbilityStrategy::HarryGameThreeV1
+        }
+        game_content::HeroAbilityStrategy::HermioneGameThreeV1 => {
+            game_domain::HeroAbilityStrategy::HermioneGameThreeV1
+        }
+        game_content::HeroAbilityStrategy::NevilleGameThreeV1 => {
+            game_domain::HeroAbilityStrategy::NevilleGameThreeV1
+        }
+        game_content::HeroAbilityStrategy::RonGameThreeV1 => {
+            game_domain::HeroAbilityStrategy::RonGameThreeV1
+        }
+    }
+}
+
 const fn effect_reaction_trigger(
     trigger: game_content::ReactionTrigger,
 ) -> game_domain::EffectReactionTrigger {
     match trigger {
+        game_content::ReactionTrigger::MorsmordreRevealedV1 => {
+            game_domain::EffectReactionTrigger::MorsmordreRevealedV1
+        }
+        game_content::ReactionTrigger::VillainRevealed => {
+            game_domain::EffectReactionTrigger::VillainRevealed
+        }
         game_content::ReactionTrigger::OwnerPlaysAlly => {
             game_domain::EffectReactionTrigger::OwnerPlaysAlly
         }
@@ -812,6 +846,12 @@ fn effect_card_type(card_type: game_content::CardType) -> game_domain::EffectCar
 
 fn effect_operation(operation: &Operation) -> game_domain::EffectOperation {
     match operation {
+        Operation::GainInfluenceAndDraw { influence, cards } => {
+            game_domain::EffectOperation::GainInfluenceAndDraw {
+                influence: *influence,
+                cards: *cards,
+            }
+        }
         Operation::SuppressVillain => game_domain::EffectOperation::SuppressVillain,
         Operation::GainInfluenceAndHealth { influence, health } => {
             game_domain::EffectOperation::GainInfluenceAndHealth {
@@ -884,6 +924,10 @@ const fn effect_zone(zone: Zone) -> game_domain::EffectZone {
 
 const fn effect_die(die: Die) -> game_domain::EffectDie {
     match die {
+        Die::GryffindorV1 => game_domain::EffectDie::GryffindorV1,
+        Die::HufflepuffV1 => game_domain::EffectDie::HufflepuffV1,
+        Die::RavenclawV1 => game_domain::EffectDie::RavenclawV1,
+        Die::SlytherinV1 => game_domain::EffectDie::SlytherinV1,
         Die::D4 => game_domain::EffectDie::D4,
         Die::D6 => game_domain::EffectDie::D6,
         Die::D8 => game_domain::EffectDie::D8,

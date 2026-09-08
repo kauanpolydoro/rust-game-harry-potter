@@ -66,8 +66,25 @@ As Escolhas das habilidades usam os campos existentes de origem e instrução, e
 O início do Turno renova os limites e expira os bloqueios correspondentes antes das Artes das Trevas.
 Os Jogos 1 e 2 conservam seus bundles, manifestos, digests e codecs.
 
-Os cenários de navegador dos três Jogos exercitam vitória e derrota com 2, 3 e 4 participantes, e suas transcrições possuem goldens de eventos e Snapshots.
-O Jogo 3 também percorre 36 partidas com seeds variadas, verificando conservação do inventário, limites de recursos, unicidade das Escolhas e equivalência de execução, restauração e replay a cada Comando.
+Os cenários de navegador dos quatro Jogos exercitam vitória e derrota com 2, 3 e 4 participantes, e suas transcrições possuem goldens de eventos e Snapshots.
+Os Jogos 3 e 4 também percorrem, cada um, 36 partidas com seeds variadas, verificando conservação do inventário, limites de recursos, unicidade das Escolhas e equivalência de execução, restauração e replay a cada Comando.
 
 Aplicações de teste podem substituir a fonte de seed na construção de `AppState` para reproduzir uma Partida pelo caminho HTTP real.
 A aplicação de produção usa a entropia do sistema operacional e não recebe uma seed em requisições.
+
+O Jogo 4 publica `game-four-en-v1` com schema 6, manifesto 7 e ruleset `game-four-v1`.
+Seu inventário cumulativo contém 98 registros e 169 cartas, incluindo 21 novas cartas de Hogwarts, oito Artes das Trevas, dois Vilões e três Locais substitutos.
+As [regras funcionais do Jogo 4](game-four-rules-v1.md) documentam fontes, adaptações e as seis faces ordenadas de cada dado de Casa.
+A preparação conserva as habilidades de Herói do Jogo 3 e revela dois Vilões.
+
+O snapshot 8 e o evento 9 preservam os lançamentos de Casa com propósito, contador, dado versionado, intervalo e resultado.
+A migração `0027_game_four.sql` valida os novos estados, as Escolhas no fim de Turno e o acréscimo exato de cada evento ao histórico de lançamentos.
+A retomada continua a fila persistida sem consumir novamente resultados anteriores.
+O transporte conserva o contrato público de evento 6, representando cada dado como um d6 e mantendo a regra de origem e a face obtida.
+Transições com etapas ou fases incompatíveis com o contrato anterior são transmitidas por Snapshot.
+A apresentação 3D adicional dos dados está prevista na issue #38.
+Os Jogos 1, 2 e 3 conservam seus bundles, digests e codecs.
+
+Os cenários do Jogo 4 fixam as seeds de vitória por tamanho de equipe em `apps/server/tests/fixtures/game-four/scenario-seeds.json`.
+O executável `e2e_harness` permite escolher essa seed por requisição, sem compartilhar estado entre cenários concorrentes.
+Esse controle existe somente no harness de testes; a aplicação de produção continua sem aceitar seeds do cliente.

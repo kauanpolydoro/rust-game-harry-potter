@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::super::{ChaChaEffectRoller, ExecuteGameCommandRequest, codec};
-use super::{prepared_adventure, prepared_game};
+use super::{prepared_adventure, prepared_adventure_with_seed, prepared_game};
 
 #[derive(Deserialize, Serialize)]
 struct Scenario {
@@ -46,6 +46,11 @@ fn game_three_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
     replay_adventure("three");
 }
 
+#[test]
+fn game_four_browser_transcripts_replay_exact_events_and_snapshot_goldens() {
+    replay_adventure("four");
+}
+
 fn replay_adventure(game: &str) {
     let update = std::env::var_os(format!("UPDATE_GAME_{}_GOLDENS", game.to_uppercase())).is_some();
     for count in [2, 3, 4] {
@@ -58,7 +63,15 @@ fn replay_adventure(game: &str) {
                 (scenario.players, scenario.outcome.as_str()),
                 (count, outcome)
             );
-            assert_eq!(scenario.seed_byte, 7);
+            if game == "four" && outcome == "won" {
+                let seeds: BTreeMap<String, u8> = serde_json::from_str(include_str!(
+                    "../../../tests/fixtures/game-four/scenario-seeds.json"
+                ))
+                .expect("seeds");
+                assert_eq!(scenario.seed_byte, seeds[&count.to_string()]);
+            } else {
+                assert_eq!(scenario.seed_byte, 7);
+            }
             replay_scenario(&mut scenario, update, game);
             if update {
                 std::fs::write(
@@ -80,6 +93,7 @@ type EventEncoder = fn(
 
 fn event_encoder(game: &str) -> EventEncoder {
     match game {
+        "four" => codec::persisted_game_four_event,
         "three" => codec::persisted_game_three_event,
         "two" => codec::persisted_game_two_event,
         _ => codec::persisted_event,
@@ -89,6 +103,7 @@ fn event_encoder(game: &str) -> EventEncoder {
 fn prepare_scenario(
     count: usize,
     game: &str,
+    seed: u8,
 ) -> (
     InitialGameState,
     Vec<super::super::StoredRoomParticipant>,
@@ -98,12 +113,16 @@ fn prepare_scenario(
         "one" => prepared_game(count),
         "two" => prepared_adventure(count, crate::game_two_manifest(), "adventure:002"),
         "three" => prepared_adventure(count, crate::game_three_manifest(), "adventure:003"),
+        "four" => {
+            prepared_adventure_with_seed(count, crate::game_four_manifest(), "adventure:004", seed)
+        }
         _ => panic!("unknown adventure"),
     }
 }
 
 fn replay_scenario(scenario: &mut Scenario, update: bool, game: &str) {
-    let (mut state, participants, rules) = prepare_scenario(scenario.players, game);
+    let (mut state, participants, rules) =
+        prepare_scenario(scenario.players, game, scenario.seed_byte);
     let mut persisted = codec::persisted_snapshot(&state, &participants);
     let opening = serde_json::to_string(&persisted).expect("opening");
     check_digest(
@@ -301,6 +320,9 @@ fn checkpoint(state: &InitialGameState, snapshot: &str) -> Value {
         result["prepared_piles"] = json!(value["effects"]["entities"].as_array().expect("entities").iter().map(|entity| {
             json!({"id":entity["id"], "zone":entity["zone"], "owner_position":entity["owner_position"]})
         }).collect::<Vec<_>>());
+    }
+    if state.snapshot_version() == game_domain::GAME_FOUR_SNAPSHOT_VERSION {
+        result["house_die_rolls"] = value["house_die_rolls"].clone();
     }
     result
 }

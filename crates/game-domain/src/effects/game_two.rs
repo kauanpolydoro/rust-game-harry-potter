@@ -128,3 +128,25 @@ impl EffectExecutor<'_> {
         Ok(None)
     }
 }
+
+pub(super) fn prevent_drawing(
+    world: &mut super::EffectWorld,
+    entity_id: &str,
+    rule_id: &str,
+    outcomes: &mut Vec<super::EffectOutcome>,
+) -> Result<Option<u8>, super::EffectExecutionError> {
+    let (_, hero) = world
+        .entity_mut(entity_id)
+        .ok_or(super::EffectExecutionError::InvalidDefinition)?;
+    let target_position = hero
+        .owner_position
+        .filter(|_| hero.kind == super::EffectEntityKind::Hero)
+        .ok_or(super::EffectExecutionError::InvalidDefinition)?;
+    hero.drawing_blocked = true;
+    outcomes.push(super::EffectOutcome::DrawingBlocked {
+        rule_id: rule_id.to_owned(),
+        target_id: entity_id.to_owned(),
+        target_position,
+    });
+    Ok(None)
+}

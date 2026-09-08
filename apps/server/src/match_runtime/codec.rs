@@ -1,3 +1,4 @@
+mod game_four;
 mod game_three;
 mod versions;
 
@@ -5,16 +6,17 @@ use game_domain::{
     DecisionPoint, EffectChangeCause, EffectContinuation, EffectCursor, EffectDie, EffectEntity,
     EffectEntityKind, EffectEntityPlacement, EffectGameOutcome, EffectNoOpReason, EffectOutcome,
     EffectPathSegment, EffectResource, EffectStop, EffectTargetBinding, EffectWorld, EffectZone,
-    EndTurnOutcome, EngineControl, GAME_THREE_SNAPSHOT_VERSION, GAME_TWO_SNAPSHOT_VERSION,
-    GameEvent, GamePhase, GameStateRestoreInput, GameStatus, HERO_MAX_HEALTH, InitialGameState,
-    InitialPlayer, MAX_EFFECT_BRANCH_INDEX, MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX,
-    MAX_TURN_STEPS, PendingEffectChoice, PendingEffectChoiceKind, QueuedEffect, SNAPSHOT_VERSION,
-    TurnStep, restore_game_state,
+    EndTurnOutcome, EngineControl, GAME_FOUR_SNAPSHOT_VERSION, GAME_THREE_SNAPSHOT_VERSION,
+    GAME_TWO_SNAPSHOT_VERSION, GameEvent, GamePhase, GameStateRestoreInput, GameStatus,
+    HERO_MAX_HEALTH, InitialGameState, InitialPlayer, MAX_EFFECT_BRANCH_INDEX,
+    MAX_EFFECT_PATH_DEPTH, MAX_EFFECT_ROLL_INDEX, MAX_TURN_STEPS, PendingEffectChoice,
+    PendingEffectChoiceKind, QueuedEffect, SNAPSHOT_VERSION, TurnStep, restore_game_state,
 };
 use serde::Deserialize;
 
 const GAME_TWO_EVENT_VERSION: u16 = 7;
 const GAME_THREE_EVENT_VERSION: u16 = 8;
+const GAME_FOUR_EVENT_VERSION: u16 = 9;
 
 use super::{
     GAME_EVENT_VERSION, HERO_ACTION_EVENT_VERSION, PersistedDecisionPoint, PersistedEffectChoice,
@@ -191,6 +193,13 @@ pub(super) fn command_domain_state(
         shuffle_algorithm: &persisted.versions.shuffle,
         sampling_algorithm: &persisted.versions.sampling,
         prng_counter: persisted.prng.counter,
+        house_die_rolls: persisted
+            .house_die_rolls
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(game_four::domain_roll)
+            .collect::<Result<Vec<_>, _>>()?,
         preparation_samples: persisted
             .preparation_samples
             .iter()
@@ -227,10 +236,19 @@ fn decode_snapshot_record(serialized: &str) -> Result<PersistedSnapshot, ApiErro
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     if !matches!(
         snapshot.snapshot_version,
-        1 | 2 | 3 | 4 | SNAPSHOT_VERSION | GAME_TWO_SNAPSHOT_VERSION | GAME_THREE_SNAPSHOT_VERSION
+        1 | 2
+            | 3
+            | 4
+            | SNAPSHOT_VERSION
+            | GAME_TWO_SNAPSHOT_VERSION
+            | GAME_THREE_SNAPSHOT_VERSION
+            | GAME_FOUR_SNAPSHOT_VERSION
     ) || (snapshot.snapshot_version == 1 && snapshot.effects.choice.is_some())
     {
         return Err(ApiError::internal());
+    }
+    if snapshot.snapshot_version < GAME_FOUR_SNAPSHOT_VERSION {
+        versions::reject_game_four_fields(serialized)?;
     }
     if snapshot.snapshot_version < GAME_THREE_SNAPSHOT_VERSION {
         versions::reject_game_three_fields(serialized)?;
@@ -255,7 +273,16 @@ fn decode_event_record(serialized: &str) -> Result<PersistedGameEvent, ApiError>
     validate_persisted_json_size(serialized)?;
     let header: PersistedEventHeader = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
-    let event = match (header.event_version, header.event_type.as_str()) {
+    let mut event = match (header.event_version, header.event_type.as_str()) {
+        (
+            GAME_FOUR_EVENT_VERSION,
+            "dark_arts_completed"
+            | "choice_resolved"
+            | "turn_completed"
+            | "card_played"
+            | "attack_assigned"
+            | "card_acquired",
+        ) => serde_json::from_str(serialized).map_err(|_| ApiError::internal())?,
         (1, "dark_arts_completed") => decode_v1_event(serialized)?,
         (CLOSED_EFFECT_EVENT_VERSION, "dark_arts_completed") => decode_v2_event(serialized)?,
         (CHOICE_EVENT_VERSION, "dark_arts_completed") => decode_v3_dark_arts_event(serialized)?,
@@ -296,6 +323,18 @@ fn decode_event_record(serialized: &str) -> Result<PersistedGameEvent, ApiError>
             .map_err(|error| ApiError::internal_with("match application operation", error))?,
         _ => return Err(ApiError::internal()),
     };
+    if header.event_version == GAME_FOUR_EVENT_VERSION
+        && matches!(
+            header.event_type.as_str(),
+            "choice_resolved" | "turn_completed"
+        )
+        && event.effect_stop.is_none()
+    {
+        event.effect_stop = Some("stable".to_owned());
+    }
+    if header.event_version < GAME_FOUR_EVENT_VERSION {
+        versions::reject_game_four_fields(serialized)?;
+    }
     if header.event_version < GAME_THREE_EVENT_VERSION {
         versions::reject_game_three_fields(serialized)?;
     }
@@ -306,6 +345,7 @@ fn decode_event_record(serialized: &str) -> Result<PersistedGameEvent, ApiError>
         versions::reject_game_one_fields(serialized)?;
     }
     validate_persisted_event(&event)?;
+    game_four::validate_event_rolls(&event)?;
     Ok(event)
 }
 
@@ -478,6 +518,7 @@ fn decode_v1_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
     let event: PersistedV1GameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(PersistedGameEvent {
+        house_die_rolls: None,
         event_version: event.event_version,
         event_type: event.event_type,
         sequence: event.sequence,
@@ -507,6 +548,7 @@ fn decode_v2_event(serialized: &str) -> Result<PersistedGameEvent, ApiError> {
     let event: PersistedV2GameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(PersistedGameEvent {
+        house_die_rolls: None,
         event_version: event.event_version,
         event_type: event.event_type,
         sequence: event.sequence,
@@ -536,6 +578,7 @@ fn decode_v3_dark_arts_event(serialized: &str) -> Result<PersistedGameEvent, Api
     let event: PersistedV3DarkArtsGameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(PersistedGameEvent {
+        house_die_rolls: None,
         event_version: event.event_version,
         event_type: event.event_type,
         sequence: event.sequence,
@@ -565,6 +608,7 @@ fn decode_v3_choice_event(serialized: &str) -> Result<PersistedGameEvent, ApiErr
     let event: PersistedV3ChoiceGameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(PersistedGameEvent {
+        house_die_rolls: None,
         event_version: event.event_version,
         event_type: event.event_type,
         sequence: event.sequence,
@@ -594,6 +638,7 @@ fn decode_v4_turn_event(serialized: &str) -> Result<PersistedGameEvent, ApiError
     let event: PersistedV4TurnGameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(PersistedGameEvent {
+        house_die_rolls: None,
         event_version: event.event_version,
         event_type: event.event_type,
         sequence: event.sequence,
@@ -623,6 +668,7 @@ fn decode_v4_choice_event(serialized: &str) -> Result<PersistedGameEvent, ApiErr
     let event: PersistedV4ChoiceGameEvent = serde_json::from_str(serialized)
         .map_err(|error| ApiError::internal_with("match application operation", error))?;
     Ok(PersistedGameEvent {
+        house_die_rolls: None,
         event_version: event.event_version,
         event_type: event.event_type,
         sequence: event.sequence,
@@ -674,16 +720,25 @@ fn validate_persisted_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiEr
         }
         2 => !has_structured_control && snapshot.active_villain_limit.is_none(),
         3 => has_structured_control && snapshot.active_villain_limit.is_none(),
-        4 | SNAPSHOT_VERSION | GAME_TWO_SNAPSHOT_VERSION | GAME_THREE_SNAPSHOT_VERSION => {
+        4
+        | SNAPSHOT_VERSION
+        | GAME_TWO_SNAPSHOT_VERSION
+        | GAME_THREE_SNAPSHOT_VERSION
+        | GAME_FOUR_SNAPSHOT_VERSION => {
             has_structured_control && snapshot.active_villain_limit.is_some()
         }
         _ => false,
     };
+    let game_four_manifest = snapshot.versions.manifest == 7;
+    let game_four_codec = snapshot.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION;
     let game_three_manifest = snapshot.versions.manifest == 6;
     let game_three_codec = snapshot.snapshot_version == GAME_THREE_SNAPSHOT_VERSION;
     let game_two_manifest = snapshot.versions.manifest == 5;
     let game_two_codec = snapshot.snapshot_version == GAME_TWO_SNAPSHOT_VERSION;
     if !version_shape_is_valid
+        || snapshot.house_die_rolls.is_some() != game_four_codec
+        || game_four_manifest != game_four_codec
+        || (game_four_codec && snapshot.adventure_id != "adventure:004")
         || game_three_manifest != game_three_codec
         || (game_three_codec && snapshot.adventure_id != "adventure:003")
         || game_two_manifest != game_two_codec
@@ -789,8 +844,10 @@ fn validate_structured_snapshot(snapshot: &PersistedSnapshot) -> Result<(), ApiE
         (PersistedDecisionPoint::EffectChoice { .. }, None) | (_, Some(_)) => false,
         (_, None) => true,
     };
-    if !valid_engine_control(&control)
-        || !queue_belongs_to_game
+    if !valid_engine_control(
+        &control,
+        snapshot.snapshot_version == GAME_FOUR_SNAPSHOT_VERSION,
+    ) || !queue_belongs_to_game
         || !choice_state_is_coherent
         || flattened_effects != snapshot.effects.outcomes
         || last_turn_steps.len()
@@ -1059,7 +1116,11 @@ fn valid_effect_outcome(outcome: &PersistedEffectOutcome, bounded_identifiers: b
             valid_identifier_for_version(rule_id, bounded_identifiers)
                 && matches!(
                     reason.as_str(),
-                    "explicit" | "no_eligible_target" | "zero_cardinality" | "drawing_blocked"
+                    "explicit"
+                        | "no_eligible_target"
+                        | "zero_cardinality"
+                        | "drawing_blocked"
+                        | "control_removal_blocked"
                 )
         }
         PersistedEffectOutcome::ResourceChanged {
@@ -1149,7 +1210,8 @@ fn validate_persisted_event(event: &PersistedGameEvent) -> Result<(), ApiError> 
         TERMINAL_EVENT_VERSION
         | GAME_EVENT_VERSION
         | GAME_TWO_EVENT_VERSION
-        | GAME_THREE_EVENT_VERSION => match event.event_type.as_str() {
+        | GAME_THREE_EVENT_VERSION
+        | GAME_FOUR_EVENT_VERSION => match event.event_type.as_str() {
             "dark_arts_completed" => valid_closed_effect_event(event, true),
             "card_played" | "attack_assigned" | "card_acquired" => {
                 valid_hero_action_event(event, true)
@@ -1329,6 +1391,7 @@ fn valid_effect_progress(event: &PersistedGameEvent, bounded_identifiers: bool) 
 }
 
 fn valid_v4_event(event: &PersistedGameEvent) -> bool {
+    let game_four = event.event_version == GAME_FOUR_EVENT_VERSION;
     if !event.effects.is_empty()
         || event.effect_stop.as_deref() != Some("stable")
         || event.choice.is_some()
@@ -1356,8 +1419,8 @@ fn valid_v4_event(event: &PersistedGameEvent) -> bool {
                 return false;
             };
             valid_end_turn_sequence(end_turn, event.actor_position)
-                && valid_turn_steps(steps)
-                && valid_engine_control(control)
+                && valid_turn_steps(steps, game_four)
+                && valid_engine_control(control, game_four)
                 && control.turn
                     == if control.phase == "end_turn" {
                         event.turn
@@ -1384,9 +1447,17 @@ fn valid_v4_event(event: &PersistedGameEvent) -> bool {
             let (Some(steps), Some(control)) = (&event.steps, &event.control) else {
                 return false;
             };
-            valid_choice_steps(steps)
-                && valid_engine_control(control)
-                && control.turn == event.turn
+            valid_choice_steps(steps, game_four)
+                && valid_engine_control(control, game_four)
+                && control.turn
+                    == if game_four
+                        && steps.first().is_some_and(|step| step.phase == "end_turn")
+                        && control.phase != "end_turn"
+                    {
+                        event.turn.checked_add(1).unwrap_or(0)
+                    } else {
+                        event.turn
+                    }
                 && event_control_matches_steps(steps, control)
                 && terminal_effects_match_control(steps, control)
         }
@@ -1525,7 +1596,7 @@ fn event_control_matches_steps(
     }
 }
 
-fn valid_turn_steps(steps: &[PersistedTurnStep]) -> bool {
+fn valid_turn_steps(steps: &[PersistedTurnStep], game_four: bool) -> bool {
     let phases = steps
         .iter()
         .map(|step| step.phase.as_str())
@@ -1534,7 +1605,7 @@ fn valid_turn_steps(steps: &[PersistedTurnStep]) -> bool {
         phases.as_slice(),
         ["end_turn"] | ["end_turn", "dark_arts"] | ["end_turn", "dark_arts", "villains"]
     ) && steps.first().is_some_and(|step| {
-        if steps.len() == 1 {
+        if game_four { true } else if steps.len() == 1 {
             matches!(step.effects.as_slice(), [PersistedEffectOutcome::Terminal { rule_id, outcome }]
                 if rule_id == "system:game-outcome" && outcome == "lost")
         } else {
@@ -1552,15 +1623,20 @@ fn valid_turn_steps(steps: &[PersistedTurnStep]) -> bool {
         })
 }
 
-fn valid_choice_steps(steps: &[PersistedTurnStep]) -> bool {
+fn valid_choice_steps(steps: &[PersistedTurnStep], game_four: bool) -> bool {
     let phases = steps
         .iter()
         .map(|step| step.phase.as_str())
         .collect::<Vec<_>>();
-    matches!(
+    (matches!(
         phases.as_slice(),
         ["dark_arts" | "villains" | "hero_actions"] | ["dark_arts", "villains"]
-    ) && total_step_effects_are_bounded(steps)
+    ) || (game_four
+        && matches!(
+            phases.as_slice(),
+            ["end_turn"] | ["end_turn", "dark_arts"] | ["end_turn", "dark_arts", "villains"]
+        )))
+        && total_step_effects_are_bounded(steps)
         && steps.iter().all(|step| {
             step.effects.len() <= MAX_EFFECT_OUTCOMES
                 && step
@@ -1577,7 +1653,7 @@ fn total_step_effects_are_bounded(steps: &[PersistedTurnStep]) -> bool {
         .is_some_and(|total| total <= MAX_EFFECT_OUTCOMES)
 }
 
-fn valid_engine_control(control: &PersistedEngineControl) -> bool {
+fn valid_engine_control(control: &PersistedEngineControl, game_four: bool) -> bool {
     if control.turn == 0
         || !valid_position(control.active_position)
         || domain_game_status(&control.status).is_err()
@@ -1626,8 +1702,12 @@ fn valid_engine_control(control: &PersistedEngineControl) -> bool {
         }
         ("in_progress", "end_turn") => {
             control.queued_phases.is_empty()
-                && control.queued_effects.is_empty()
-                && matches!(control.decision_point, PersistedDecisionPoint::Automatic)
+                && if game_four {
+                    valid_automatic_control(control)
+                } else {
+                    control.queued_effects.is_empty()
+                        && matches!(control.decision_point, PersistedDecisionPoint::Automatic)
+                }
         }
         _ => false,
     }
@@ -1791,6 +1871,13 @@ pub(super) fn persisted_after_decision(
     );
     next.prng.counter = state.prng_counter();
     next.effects = persisted_effects(state);
+    next.house_die_rolls = (state.snapshot_version() == GAME_FOUR_SNAPSHOT_VERSION).then(|| {
+        state
+            .house_die_rolls()
+            .iter()
+            .map(game_four::persisted_roll)
+            .collect()
+    });
     next
 }
 
@@ -1810,7 +1897,25 @@ pub(super) fn persisted_game_three_event(
     encode_event(event, GAME_THREE_EVENT_VERSION)
 }
 
+pub(super) fn persisted_game_four_event(
+    event: GameEvent,
+) -> Result<(u16, &'static str, String), ApiError> {
+    encode_event(event, GAME_FOUR_EVENT_VERSION)
+}
+
 fn encode_event(event: GameEvent, version: u16) -> Result<(u16, &'static str, String), ApiError> {
+    let audit = if version == GAME_FOUR_EVENT_VERSION {
+        Some(
+            event
+                .house_die_rolls()
+                .ok_or_else(ApiError::internal)?
+                .iter()
+                .map(game_four::persisted_roll)
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
     let mut persisted = if matches!(
         &event,
         GameEvent::DarkArtsCompleted { .. }
@@ -1825,6 +1930,10 @@ fn encode_event(event: GameEvent, version: u16) -> Result<(u16, &'static str, St
         let mut value: serde_json::Value =
             serde_json::from_str(&persisted.2).map_err(|_| ApiError::internal())?;
         value["event_version"] = serde_json::json!(version);
+        if let Some(rolls) = audit {
+            value["house_die_rolls"] =
+                serde_json::to_value(rolls).map_err(|_| ApiError::internal())?;
+        }
         persisted.0 = version;
         persisted.2 = serde_json::to_string(&value).map_err(|_| ApiError::internal())?;
     }
@@ -2077,6 +2186,13 @@ pub(super) fn persisted_snapshot(
             algorithm: state.prng_algorithm().to_owned(),
             counter: state.prng_counter(),
         },
+        house_die_rolls: (state.snapshot_version() == GAME_FOUR_SNAPSHOT_VERSION).then(|| {
+            state
+                .house_die_rolls()
+                .iter()
+                .map(game_four::persisted_roll)
+                .collect()
+        }),
         preparation_samples: state
             .preparation_samples()
             .iter()
@@ -2534,6 +2650,7 @@ fn domain_effect_outcome(outcome: &PersistedEffectOutcome) -> Result<EffectOutco
             rule_id: rule_id.clone(),
             reason: match reason.as_str() {
                 "explicit" => EffectNoOpReason::Explicit,
+                "control_removal_blocked" => EffectNoOpReason::ControlRemovalBlocked,
                 "drawing_blocked" => EffectNoOpReason::DrawingBlocked,
                 "no_eligible_target" => EffectNoOpReason::NoEligibleTarget,
                 "zero_cardinality" => EffectNoOpReason::ZeroCardinality,
@@ -2779,6 +2896,7 @@ pub(super) fn persisted_effect_outcome(outcome: &EffectOutcome) -> PersistedEffe
             rule_id: rule_id.clone(),
             reason: match reason {
                 EffectNoOpReason::Explicit => "explicit",
+                EffectNoOpReason::ControlRemovalBlocked => "control_removal_blocked",
                 EffectNoOpReason::DrawingBlocked => "drawing_blocked",
                 EffectNoOpReason::NoEligibleTarget => "no_eligible_target",
                 EffectNoOpReason::ZeroCardinality => "zero_cardinality",
@@ -3039,6 +3157,10 @@ fn effect_zone_name(zone: EffectZone) -> &'static str {
 
 fn domain_effect_die(die: &str) -> Result<EffectDie, ApiError> {
     match die {
+        "gryffindor_v1" => Ok(EffectDie::GryffindorV1),
+        "hufflepuff_v1" => Ok(EffectDie::HufflepuffV1),
+        "ravenclaw_v1" => Ok(EffectDie::RavenclawV1),
+        "slytherin_v1" => Ok(EffectDie::SlytherinV1),
         "d4" => Ok(EffectDie::D4),
         "d6" => Ok(EffectDie::D6),
         "d8" => Ok(EffectDie::D8),
@@ -3048,6 +3170,10 @@ fn domain_effect_die(die: &str) -> Result<EffectDie, ApiError> {
 
 fn effect_die_name(die: EffectDie) -> &'static str {
     match die {
+        EffectDie::GryffindorV1 => "gryffindor_v1",
+        EffectDie::HufflepuffV1 => "hufflepuff_v1",
+        EffectDie::RavenclawV1 => "ravenclaw_v1",
+        EffectDie::SlytherinV1 => "slytherin_v1",
         EffectDie::D4 => "d4",
         EffectDie::D6 => "d6",
         EffectDie::D8 => "d8",
@@ -3697,6 +3823,7 @@ mod tests {
                 counter: 0,
             },
             preparation_samples: vec![],
+            house_die_rolls: None,
             effects: PersistedEffects {
                 entities: vec![
                     legacy_entity("hero:1", Some(1), "heroes"),

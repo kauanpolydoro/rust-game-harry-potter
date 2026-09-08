@@ -145,6 +145,46 @@ fn collect_reactions(
     Ok(())
 }
 
+pub(super) fn villain_revelation_queue(
+    world: &EffectWorld,
+    rules: &[EffectRule],
+    revealed: &[String],
+    actor_position: u8,
+) -> Result<Vec<QueuedEffect>, EffectExecutionError> {
+    let mut queue = Vec::new();
+    for (index, revealed_id) in revealed.iter().enumerate() {
+        for source in world.entities_in(EffectZone::ActiveVillains) {
+            if source.id() == revealed_id
+                || source.villain_ability_suppressed()
+                || revealed[index + 1..].iter().any(|id| id == source.id())
+            {
+                continue;
+            }
+            let Some(rule) = rules
+                .iter()
+                .find(|rule| Some(rule.id.as_str()) == source.effect_rule_id())
+            else {
+                return Err(EffectExecutionError::InvalidDefinition);
+            };
+            let mut declarations = Vec::new();
+            collect_reactions(
+                &rule.effect,
+                &EffectCursor::root(&rule.id),
+                &mut declarations,
+            )?;
+            queue.extend(declarations.into_iter().filter_map(|(trigger, cursor)| {
+                (trigger == EffectReactionTrigger::VillainRevealed).then_some(
+                    QueuedEffect::Definition {
+                        cursor,
+                        actor_position,
+                    },
+                )
+            }));
+        }
+    }
+    Ok(queue)
+}
+
 fn reaction_context(
     trigger: EffectReactionTrigger,
     zone: EffectZone,
@@ -154,6 +194,12 @@ fn reaction_context(
     world: &EffectWorld,
     rules: &[EffectRule],
 ) -> Option<(u8, u16)> {
+    if matches!(
+        trigger,
+        EffectReactionTrigger::MorsmordreRevealedV1 | EffectReactionTrigger::VillainRevealed
+    ) {
+        return revelation_context(trigger, zone, source, outcome, active_position, world);
+    }
     match (trigger, outcome) {
         (
             EffectReactionTrigger::OwnerPlaysAlly,
@@ -298,4 +344,93 @@ fn prevents_drawing(effect: &EffectDefinition) -> bool {
         EffectDefinition::Sequence { effects } => effects.iter().any(prevents_drawing),
         _ => false,
     }
+}
+
+pub(super) fn control_removal_prevented(world: &EffectWorld, rules: &[EffectRule]) -> bool {
+    fn prevents(effect: &EffectDefinition) -> bool {
+        match effect {
+            EffectDefinition::PreventControlRemoval => true,
+            EffectDefinition::Sequence { effects } => effects.iter().any(prevents),
+            _ => false,
+        }
+    }
+    world
+        .entities_in(EffectZone::ActiveVillains)
+        .iter()
+        .filter(|villain| !villain.villain_ability_suppressed())
+        .any(|villain| {
+            rules
+                .iter()
+                .find(|rule| Some(rule.id.as_str()) == villain.effect_rule_id())
+                .is_some_and(|rule| prevents(&rule.effect))
+        })
+}
+
+fn revelation_context(
+    trigger: EffectReactionTrigger,
+    zone: EffectZone,
+    source: &EffectEntity,
+    outcome: &EffectOutcome,
+    active_position: u8,
+    world: &EffectWorld,
+) -> Option<(u8, u16)> {
+    match (trigger, outcome) {
+        (
+            EffectReactionTrigger::MorsmordreRevealedV1,
+            EffectOutcome::Moved {
+                target_id,
+                from: EffectZone::DarkArtsDeck,
+                to: EffectZone::DarkArtsDiscard,
+                ..
+            },
+        ) if zone == EffectZone::ActiveVillains
+            && source.kind() == EffectEntityKind::Villain
+            && world
+                .entity(target_id)
+                .is_some_and(|(_, card)| card.catalog_id() == Some("dark-arts:016")) =>
+        {
+            Some((active_position, 1))
+        }
+        (
+            EffectReactionTrigger::VillainRevealed,
+            EffectOutcome::Moved {
+                target_id,
+                from: EffectZone::VillainDeck,
+                to: EffectZone::ActiveVillains,
+                ..
+            },
+        ) if zone == EffectZone::ActiveVillains
+            && source.kind() == EffectEntityKind::Villain
+            && source.id() != target_id =>
+        {
+            Some((active_position, 1))
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn modify_resource(
+    world: &mut EffectWorld,
+    entity_id: &str,
+    source: EffectSource<'_>,
+    resource: EffectResource,
+    amount: i16,
+    outcomes: &mut Vec<EffectOutcome>,
+) -> Result<Option<u8>, EffectExecutionError> {
+    if resource == EffectResource::Control
+        && amount < 0
+        && control_removal_prevented(world, source.rules)
+    {
+        outcomes.push(EffectOutcome::NoOp {
+            rule_id: source.rule_id.to_owned(),
+            reason: super::EffectNoOpReason::ControlRemovalBlocked,
+        });
+        return Ok(None);
+    }
+    let amount = if resource == EffectResource::Health && amount < 0 {
+        protected_health_loss(world, entity_id, source, amount)
+    } else {
+        amount
+    };
+    super::modify_entity_resource(world, entity_id, source.rule_id, resource, amount, outcomes)
 }

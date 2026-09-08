@@ -23,11 +23,12 @@ pub use manifest::{
 };
 pub use schema::{
     import_base_bundle, import_base_bundle_with_runtime_rules,
-    import_base_bundle_with_trusted_sources, import_game_one_bundle,
+    import_base_bundle_with_trusted_sources, import_game_four_bundle,
+    import_game_four_bundle_with_runtime_rules, import_game_one_bundle,
     import_game_one_bundle_with_runtime_rules, import_game_three_bundle,
     import_game_three_bundle_with_runtime_rules, import_game_two_bundle,
-    import_game_two_bundle_with_runtime_rules, inspect_game_one_rules, inspect_game_three_rules,
-    inspect_game_two_rules,
+    import_game_two_bundle_with_runtime_rules, inspect_game_four_rules, inspect_game_one_rules,
+    inspect_game_three_rules, inspect_game_two_rules,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -5,6 +5,9 @@ use game_domain::{
 
 pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String> {
     Some(match effect {
+        EffectDefinition::OtherAllyBonus { health } => format!("Uma vez neste turno, se você jogar outro Aliado antes ou depois desta carta, recupera {health} de Vida."),
+        EffectDefinition::PreventControlRemoval => "Enquanto este Vilão estiver ativo, os Heróis não podem remover Controle do Local.".to_owned(),
+        EffectDefinition::RevealExtraDarkArts => "Revele mais uma Arte das Trevas depois de resolver esta carta.".to_owned(),
         EffectDefinition::HeroAbility { strategy, effect } => {
             let condition = match strategy {
                 game_domain::HeroAbilityStrategy::HarryGameThreeV1 => "Uma vez por turno, quando Controle for removido de um Local",
@@ -36,6 +39,9 @@ pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String>
             .collect::<Vec<_>>()
             .join(" "),
         EffectDefinition::Choice { options, .. } => {
+            if let Some(dice) = options.iter().map(house_benefit_summary).collect::<Option<Vec<_>>>() {
+                return Some(format!("Escolha uma Casa. Cada Herói recebe 1 do benefício sorteado ou compra 1 carta. Chances por dado: {}.", dice.join("; ")));
+            }
             let options = options
                 .iter()
                 .map(|option| describe(option, actor).map(|text| if text.is_empty() { "Não realizar esta ação.".to_owned() } else { text }))
@@ -55,6 +61,8 @@ pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String>
         ),
         EffectDefinition::Reaction { trigger, effect } => {
             let (condition, subject) = match trigger {
+                EffectReactionTrigger::MorsmordreRevealedV1 => ("Quando Morsmordre for revelada", "Cada Herói"),
+                EffectReactionTrigger::VillainRevealed => ("Quando outro Vilão for revelado", "Cada Herói"),
                 EffectReactionTrigger::ControlAdded => {
                     ("A cada Controle adicionado ao Local", "O Herói ativo")
                 }
@@ -90,6 +98,7 @@ pub(super) fn describe(effect: &EffectDefinition, actor: &str) -> Option<String>
             };
             format!("{requirement}: {}{fallback}", describe(then, actor)?)
         }
+        EffectDefinition::Roll { die, outcomes } if die.is_house() => describe_house_die(*die, outcomes, actor)?,
         EffectDefinition::Roll { .. }
         | EffectDefinition::Terminal { .. } => return None,
     })
@@ -156,6 +165,7 @@ fn describe_operation(
         _ => return None,
     };
     Some(match operation {
+        EffectOperation::GainInfluenceAndDraw { influence, cards } => format!("{subject} recebe {influence} de Influência e compra {cards} carta(s)."),
         EffectOperation::SuppressVillain => "Escolha um Vilão ativo. Ignore sua habilidade até o início do seu próximo turno; a recompensa de derrota continua valendo.".to_owned(),
         EffectOperation::GainInfluenceAndHealth { influence, health } => format!("{subject} recebe {influence} de Influência e {health} de Vida."),
         EffectOperation::DiscardForSpellBonus { influence } => format!("{subject} descarta uma carta da mão. Se for um Feitiço, recebe {influence} de Influência."),
@@ -219,4 +229,75 @@ fn category_name(target: &EffectSelector) -> &'static str {
             game_domain::EffectEligibility::ResourceAtLeast { .. } => None,
         })
         .unwrap_or("carta")
+}
+
+fn describe_house_die(
+    die: game_domain::EffectDie,
+    outcomes: &[EffectDefinition],
+    actor: &str,
+) -> Option<String> {
+    let house = house_name(die)?;
+    let mut faces: Vec<(String, usize)> = Vec::new();
+    for effect in outcomes {
+        let description = describe(effect, actor)?;
+        if let Some((_, count)) = faces.iter_mut().find(|(text, _)| *text == description) {
+            *count += 1;
+        } else {
+            faces.push((description, 1));
+        }
+    }
+    let effects = faces
+        .into_iter()
+        .map(|(text, count)| format!("{count} de 6: {text}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!("Lance o dado de {house}. {effects}"))
+}
+
+fn house_name(die: game_domain::EffectDie) -> Option<&'static str> {
+    Some(match die {
+        game_domain::EffectDie::GryffindorV1 => "Grifinória",
+        game_domain::EffectDie::HufflepuffV1 => "Lufa-Lufa",
+        game_domain::EffectDie::RavenclawV1 => "Corvinal",
+        game_domain::EffectDie::SlytherinV1 => "Sonserina",
+        _ => return None,
+    })
+}
+
+fn house_benefit_summary(effect: &EffectDefinition) -> Option<String> {
+    let EffectDefinition::Roll { die, outcomes } = effect else {
+        return None;
+    };
+    let house = house_name(*die)?;
+    let mut faces = Vec::<(&str, usize)>::new();
+    for effect in outcomes {
+        let EffectDefinition::Apply { target, operation } = effect else {
+            return None;
+        };
+        if target.zone != EffectZone::Heroes
+            || target.owner != EffectTargetOwner::Any
+            || target.max != 4
+        {
+            return None;
+        }
+        let benefit = match operation {
+            EffectOperation::ModifyResource {
+                resource,
+                amount: 1,
+            } => resource_name(*resource),
+            EffectOperation::Draw { amount: 1 } => "compra",
+            _ => return None,
+        };
+        if let Some((_, count)) = faces.iter_mut().find(|(text, _)| *text == benefit) {
+            *count += 1;
+        } else {
+            faces.push((benefit, 1));
+        }
+    }
+    let chances = faces
+        .into_iter()
+        .map(|(benefit, count)| format!("{benefit} {count}/6"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!("{house} ({chances})"))
 }

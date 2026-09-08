@@ -7,6 +7,7 @@ use crate::{
 
 use super::CandidateBundle;
 
+mod game_four;
 mod game_one;
 mod game_three;
 mod reactions;
@@ -43,6 +44,7 @@ pub(super) fn validate(
     revelation::validate(bundle)?;
     validate_structural_definitions(bundle)?;
     game_three::validate(bundle)?;
+    game_four::validate(bundle)?;
     validate_references(bundle)
 }
 
@@ -77,6 +79,7 @@ fn validate_structural_definitions(bundle: &CandidateBundle) -> Result<(), Impor
                     StructuralRule::GameOneSetup
                         | StructuralRule::GameTwoSetup
                         | StructuralRule::GameThreeSetup
+                        | StructuralRule::GameFourSetup
                 ) | (
                     EntryKind::Adventure | EntryKind::Ruleset,
                     FunctionalField::Precedence,
@@ -272,10 +275,14 @@ fn validate_adventure_inventory(
     bundle: &CandidateBundle,
     inventory: super::Inventory,
 ) -> Result<(), ImportFailure> {
-    let game_three = matches!(inventory, super::Inventory::GameThree);
+    let game_four = matches!(inventory, super::Inventory::GameFour);
+    let game_three = matches!(
+        inventory,
+        super::Inventory::GameThree | super::Inventory::GameFour
+    );
     let game_two = matches!(
         inventory,
-        super::Inventory::GameTwo | super::Inventory::GameThree
+        super::Inventory::GameTwo | super::Inventory::GameThree | super::Inventory::GameFour
     );
     let mut expected = BTreeMap::new();
     for (prefix, kind, copies) in [
@@ -310,46 +317,22 @@ fn validate_adventure_inventory(
     }
     let inherited_ids = expected.keys().cloned().collect::<BTreeSet<_>>();
     if game_two {
-        for id in [
-            "location:001",
-            "location:002",
-            "adventure:001",
-            "catalog:game-one-v1",
-            "ruleset:game-one-v1",
-        ] {
-            expected.remove(id);
-        }
-        for (prefix, kind, start, copies) in [
-            (
-                "hogwarts-card",
-                EntryKind::HogwartsCard,
-                14,
-                &[1, 1, 2, 1, 2, 1, 1, 1, 2, 2][..],
-            ),
-            ("dark-arts", EntryKind::DarkArts, 5, &[2, 1, 1, 1][..]),
-            ("villain", EntryKind::Villain, 4, &[1, 1, 1][..]),
-            ("location", EntryKind::Location, 3, &[1, 1, 1][..]),
-        ] {
-            for (index, copies) in copies.iter().enumerate() {
-                expected.insert(format!("{prefix}:{:03}", start + index), (kind, *copies));
-            }
-        }
-        for (id, kind) in [
-            ("adventure:002", EntryKind::Adventure),
-            ("catalog:game-two-v1", EntryKind::Catalog),
-            ("ruleset:game-two-v1", EntryKind::Ruleset),
-        ] {
-            expected.insert(id.to_owned(), (kind, 0));
-        }
+        apply_game_two_inventory(&mut expected);
     }
     let game_two_ids = expected.keys().cloned().collect::<BTreeSet<_>>();
     if game_three {
         apply_game_three_inventory(&mut expected);
     }
+    let game_three_ids = expected.keys().cloned().collect::<BTreeSet<_>>();
+    if game_four {
+        apply_game_four_inventory(&mut expected);
+    }
     for entry in &bundle.entries {
         if entry.introduced_in
             != if inherited_ids.contains(entry.id.as_str()) {
                 1
+            } else if game_four && !game_three_ids.contains(entry.id.as_str()) {
+                4
             } else if game_three && !game_two_ids.contains(entry.id.as_str()) {
                 3
             } else {
@@ -368,6 +351,80 @@ fn validate_adventure_inventory(
         });
     }
     Ok(())
+}
+
+fn apply_game_two_inventory(expected: &mut BTreeMap<String, (EntryKind, u16)>) {
+    for id in [
+        "location:001",
+        "location:002",
+        "adventure:001",
+        "catalog:game-one-v1",
+        "ruleset:game-one-v1",
+    ] {
+        expected.remove(id);
+    }
+    for (prefix, kind, start, copies) in [
+        (
+            "hogwarts-card",
+            EntryKind::HogwartsCard,
+            14,
+            &[1, 1, 2, 1, 2, 1, 1, 1, 2, 2][..],
+        ),
+        ("dark-arts", EntryKind::DarkArts, 5, &[2, 1, 1, 1][..]),
+        ("villain", EntryKind::Villain, 4, &[1, 1, 1][..]),
+        ("location", EntryKind::Location, 3, &[1, 1, 1][..]),
+    ] {
+        for (index, copies) in copies.iter().enumerate() {
+            expected.insert(format!("{prefix}:{:03}", start + index), (kind, *copies));
+        }
+    }
+    for (id, kind) in [
+        ("adventure:002", EntryKind::Adventure),
+        ("catalog:game-two-v1", EntryKind::Catalog),
+        ("ruleset:game-two-v1", EntryKind::Ruleset),
+    ] {
+        expected.insert(id.to_owned(), (kind, 0));
+    }
+}
+
+fn apply_game_four_inventory(expected: &mut BTreeMap<String, (EntryKind, u16)>) {
+    for id in [
+        "location:006",
+        "location:007",
+        "location:008",
+        "adventure:003",
+        "catalog:game-three-v1",
+        "ruleset:game-three-v1",
+    ] {
+        expected.remove(id);
+    }
+    for (prefix, kind, start, copies) in [
+        (
+            "hogwarts-card",
+            EntryKind::HogwartsCard,
+            32,
+            &[2, 1, 1, 1, 6, 1, 1, 1, 1, 3, 1, 1, 1][..],
+        ),
+        (
+            "dark-arts",
+            EntryKind::DarkArts,
+            12,
+            &[1, 1, 2, 1, 2, 1][..],
+        ),
+        ("villain", EntryKind::Villain, 9, &[1, 1][..]),
+        ("location", EntryKind::Location, 9, &[1, 1, 1][..]),
+    ] {
+        for (index, copies) in copies.iter().enumerate() {
+            expected.insert(format!("{prefix}:{:03}", start + index), (kind, *copies));
+        }
+    }
+    for (id, kind) in [
+        ("adventure:004", EntryKind::Adventure),
+        ("catalog:game-four-v1", EntryKind::Catalog),
+        ("ruleset:game-four-v1", EntryKind::Ruleset),
+    ] {
+        expected.insert(id.to_owned(), (kind, 0));
+    }
 }
 
 fn apply_game_three_inventory(expected: &mut BTreeMap<String, (EntryKind, u16)>) {
@@ -997,6 +1054,7 @@ struct EffectRuleStats<'a> {
     shared_draw_inventory: bool,
     dark_arts_card_count: usize,
     dark_arts_reveals: usize,
+    extra_dark_arts_rules: Vec<(&'a RuleId, usize)>,
     dark_arts_rules: Vec<&'a RuleId>,
 }
 
@@ -1025,6 +1083,25 @@ impl<'a> EffectRuleStats<'a> {
                 .map(usize::from)
                 .max()
                 .unwrap_or(1),
+            extra_dark_arts_rules: bundle
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == EntryKind::DarkArts)
+                .filter_map(|entry| {
+                    let id = entry
+                        .functional
+                        .get(&FunctionalField::Effect)?
+                        .rule
+                        .as_ref()?;
+                    bundle
+                        .rules
+                        .iter()
+                        .any(|rule| {
+                            &rule.id == id && game_four::extra_revelations(&rule.effect) > 0
+                        })
+                        .then_some((id, usize::from(entry.copies)))
+                })
+                .collect(),
             dark_arts_card_count: bundle
                 .entries
                 .iter()
@@ -1073,6 +1150,20 @@ fn revelation_stats(
         0,
         stats.runtime_nodes.saturating_mul(rules.dark_arts_reveals),
     )?;
+    // Chaining cards are a known multiset. They can occur at most once in
+    // the initial tail and once after reshuffling. Non-chaining cards consume
+    // the location's base quota, so do not multiply their maximum by every link.
+    for (rule, copies) in &rules.extra_dark_arts_rules {
+        let extra = rule_stats(rule, rules, memo)?;
+        stats.runtime_nodes = checked_total(
+            stats.runtime_nodes,
+            extra.runtime_nodes.saturating_mul(2 * copies),
+        )?;
+        stats.runtime_outcomes = outcome_total(
+            stats.runtime_outcomes,
+            repeated_outcomes(extra.runtime_outcomes, 2 * copies),
+        );
+    }
     Some(stats)
 }
 
@@ -1124,7 +1215,9 @@ fn application_stats(
     operation: &Operation,
     rules: &EffectRuleStats<'_>,
 ) -> EffectStats {
-    let runtime_outcomes = if let Operation::Draw { amount } = operation {
+    let runtime_outcomes = if let Operation::Draw { amount }
+    | Operation::GainInfluenceAndDraw { cards: amount, .. } = operation
+    {
         // All recipients share the inventory bound: a card can belong to only one
         // hero, so shuffling every recipient cannot shuffle the inventory four times.
         let targets = usize::from(target.cardinality.max).clamp(1, MAX_PARTICIPANT_HEROES);
@@ -1157,7 +1250,14 @@ fn application_stats(
         compiled_nodes: 1,
         reference_depth: 0,
         runtime_nodes: 1,
-        runtime_outcomes,
+        runtime_outcomes: outcome_total(
+            runtime_outcomes,
+            if matches!(operation, Operation::GainInfluenceAndDraw { .. }) {
+                usize::from(target.cardinality.max)
+            } else {
+                0
+            },
+        ),
     }
 }
 
@@ -1203,7 +1303,8 @@ fn effect_stats(
     memo: &mut BTreeMap<RuleId, EffectStats>,
 ) -> Option<EffectStats> {
     match effect {
-        Effect::PreventExtraDrawing
+        Effect::PreventControlRemoval
+        | Effect::PreventExtraDrawing
         | Effect::CardType { .. }
         | Effect::TopDeckAcquisition { .. } => Some(EffectStats {
             compiled_nodes: 1,
@@ -1240,7 +1341,14 @@ fn effect_stats(
             }
             Some(stats)
         }
-        Effect::LimitVillainAttack { .. }
+        Effect::OtherAllyBonus { .. } => Some(EffectStats {
+            compiled_nodes: 1,
+            reference_depth: 0,
+            runtime_nodes: 1,
+            runtime_outcomes: 2,
+        }),
+        Effect::RevealExtraDarkArts
+        | Effect::LimitVillainAttack { .. }
         | Effect::NoOp
         | Effect::Structural { .. }
         | Effect::Terminal { .. }
@@ -1252,34 +1360,7 @@ fn effect_stats(
         }),
         Effect::Condition {
             then, otherwise, ..
-        } => {
-            let then_stats = effect_stats(then, rules, memo)?;
-            let otherwise_stats = match otherwise.as_deref() {
-                Some(effect) => effect_stats(effect, rules, memo)?,
-                None => EffectStats {
-                    compiled_nodes: 0,
-                    reference_depth: 0,
-                    runtime_nodes: 0,
-                    runtime_outcomes: 0,
-                },
-            };
-            Some(EffectStats {
-                compiled_nodes: checked_total(
-                    checked_total(1, then_stats.compiled_nodes)?,
-                    otherwise_stats.compiled_nodes,
-                )?,
-                reference_depth: then_stats
-                    .reference_depth
-                    .max(otherwise_stats.reference_depth),
-                runtime_nodes: checked_total(
-                    1,
-                    then_stats.runtime_nodes.max(otherwise_stats.runtime_nodes),
-                )?,
-                runtime_outcomes: then_stats
-                    .runtime_outcomes
-                    .max(otherwise_stats.runtime_outcomes),
-            })
-        }
+        } => condition_stats(then, otherwise.as_deref(), rules, memo),
         Effect::Reference { rule } => {
             let mut stats = rule_stats(rule, rules, memo)?;
             stats.reference_depth = stats.reference_depth.checked_add(1)?;
@@ -1301,6 +1382,40 @@ fn effect_stats(
         Effect::Roll { outcomes, .. } => branch_stats(outcomes, 1, 1, true, rules, memo),
         Effect::Sequence { effects } => branch_stats(effects, 1, 0, false, rules, memo),
     }
+}
+
+fn condition_stats(
+    then: &Effect,
+    otherwise: Option<&Effect>,
+    rules: &EffectRuleStats<'_>,
+    memo: &mut BTreeMap<RuleId, EffectStats>,
+) -> Option<EffectStats> {
+    let then_stats = effect_stats(then, rules, memo)?;
+    let otherwise_stats = match otherwise {
+        Some(effect) => effect_stats(effect, rules, memo)?,
+        None => EffectStats {
+            compiled_nodes: 0,
+            reference_depth: 0,
+            runtime_nodes: 0,
+            runtime_outcomes: 0,
+        },
+    };
+    Some(EffectStats {
+        compiled_nodes: checked_total(
+            checked_total(1, then_stats.compiled_nodes)?,
+            otherwise_stats.compiled_nodes,
+        )?,
+        reference_depth: then_stats
+            .reference_depth
+            .max(otherwise_stats.reference_depth),
+        runtime_nodes: checked_total(
+            1,
+            then_stats.runtime_nodes.max(otherwise_stats.runtime_nodes),
+        )?,
+        runtime_outcomes: then_stats
+            .runtime_outcomes
+            .max(otherwise_stats.runtime_outcomes),
+    })
 }
 
 fn iteration_stats(
@@ -1473,6 +1588,30 @@ fn find_rule_cycle<'a>(
 }
 
 impl Effect {
+    fn validate_declaration(&self, rule_id: &RuleId, depth: usize) -> Result<(), ImportFailure> {
+        match self {
+            Self::Structural { .. } if depth != 0 => {
+                return Err(ImportFailure {
+                    message: format!(
+                        "structural definition in {rule_id} must be a standalone declaration"
+                    ),
+                });
+            }
+            Self::OtherAllyBonus { health } if !(1..=10).contains(health) => {
+                return Err(ImportFailure {
+                    message: format!("rule {rule_id} ally bonus health must be between 1 and 10"),
+                });
+            }
+            Self::LimitVillainAttack { maximum } if !(1..=16).contains(maximum) => {
+                return Err(ImportFailure {
+                    message: format!("rule {rule_id} attack limit must be between 1 and 16"),
+                });
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn validate(
         &self,
         rule_id: &RuleId,
@@ -1487,6 +1626,7 @@ impl Effect {
             });
         }
 
+        self.validate_declaration(rule_id, depth)?;
         match self {
             Self::ForEachTarget { target, effect } => {
                 target.validate(rule_id, selectors)?;
@@ -1557,18 +1697,6 @@ impl Effect {
             Self::Sequence { effects } => {
                 validate_effect_sequence(effects, rule_id, depth, nodes, selectors)?;
             }
-            Self::Structural { .. } if depth != 0 => {
-                return Err(ImportFailure {
-                    message: format!(
-                        "structural definition in {rule_id} must be a standalone declaration"
-                    ),
-                });
-            }
-            Self::LimitVillainAttack { maximum } if !(1..=16).contains(maximum) => {
-                return Err(ImportFailure {
-                    message: format!("rule {rule_id} attack limit must be between 1 and 16"),
-                });
-            }
             Self::LimitVillainAttack { .. }
             | Self::PreventExtraDrawing
             | Self::NoOp
@@ -1576,6 +1704,9 @@ impl Effect {
             | Self::CardType { .. }
             | Self::HandDamageLimit { .. }
             | Self::Structural { .. }
+            | Self::RevealExtraDarkArts
+            | Self::PreventControlRemoval
+            | Self::OtherAllyBonus { .. }
             | Self::RevealDarkArts
             | Self::Reference { .. }
             | Self::Terminal { .. } => {}
@@ -1715,6 +1846,9 @@ impl Selector {
 impl Operation {
     fn validate_zone(&self, zone: Zone, rule_id: &RuleId) -> Result<(), ImportFailure> {
         let compatible = match self {
+            Self::GainInfluenceAndDraw { influence, cards } => {
+                zone == Zone::Heroes && (1..=16).contains(influence) && (1..=16).contains(cards)
+            }
             Self::SuppressVillain => zone == Zone::ActiveVillains,
             Self::GainInfluenceAndHealth { influence, health } => {
                 zone == Zone::Heroes && (1..=16).contains(influence) && (1..=10).contains(health)
@@ -1747,6 +1881,7 @@ impl Operation {
 
     fn as_str(&self) -> &'static str {
         match self {
+            Self::GainInfluenceAndDraw { .. } => "gain_influence_and_draw",
             Self::SuppressVillain => "suppress_villain",
             Self::GainInfluenceAndHealth { .. } => "gain_influence_and_health",
             Self::DiscardForSpellBonus { .. } => "discard_for_spell_bonus",

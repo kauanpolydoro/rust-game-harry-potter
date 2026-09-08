@@ -3,6 +3,16 @@ use crate::{Effect, GameSetupOwner, ImportFailure, Operation, Zone};
 use super::CandidateBundle;
 
 pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
+    if bundle.schema_version < 6
+        && bundle
+            .rules
+            .iter()
+            .any(|rule| requires_game_four(&rule.effect))
+    {
+        return Err(ImportFailure {
+            message: "Game 4 definitions require bundle schema version 6".to_owned(),
+        });
+    }
     if bundle.schema_version < 5
         && bundle
             .rules
@@ -51,7 +61,10 @@ pub(super) fn validate(bundle: &CandidateBundle) -> Result<(), ImportFailure> {
 
 fn requires_game_one(effect: &Effect) -> bool {
     match effect {
-        Effect::HeroAbility { .. }
+        Effect::RevealExtraDarkArts
+        | Effect::PreventControlRemoval
+        | Effect::OtherAllyBonus { .. }
+        | Effect::HeroAbility { .. }
         | Effect::RevealTopCard { .. }
         | Effect::LimitVillainAttack { .. }
         | Effect::PreventExtraDrawing
@@ -89,7 +102,10 @@ fn requires_game_two(effect: &Effect) -> bool {
             .any(|entry| matches!(entry, crate::Eligibility::CardType { .. }))
     };
     match effect {
-        Effect::HeroAbility { .. }
+        Effect::RevealExtraDarkArts
+        | Effect::PreventControlRemoval
+        | Effect::OtherAllyBonus { .. }
+        | Effect::HeroAbility { .. }
         | Effect::RevealTopCard { .. }
         | Effect::LimitVillainAttack { .. }
         | Effect::PreventExtraDrawing
@@ -154,7 +170,10 @@ fn new_reaction_effect(effect: &Effect) -> bool {
 fn requires_game_three(effect: &Effect) -> bool {
     let other = |target: &crate::Selector| target.owner == crate::TargetOwner::Other;
     match effect {
-        Effect::HeroAbility { .. }
+        Effect::RevealExtraDarkArts
+        | Effect::PreventControlRemoval
+        | Effect::OtherAllyBonus { .. }
+        | Effect::HeroAbility { .. }
         | Effect::RevealTopCard { .. }
         | Effect::LimitVillainAttack { .. }
         | Effect::Structural {
@@ -193,6 +212,40 @@ fn requires_game_three(effect: &Effect) -> bool {
                 || otherwise.as_deref().is_some_and(requires_game_three)
         }
         Effect::Repeat { effect, .. } => requires_game_three(effect),
+        _ => false,
+    }
+}
+
+fn requires_game_four(effect: &Effect) -> bool {
+    match effect {
+        Effect::RevealExtraDarkArts
+        | Effect::PreventControlRemoval
+        | Effect::OtherAllyBonus { .. }
+        | Effect::Structural {
+            rule: crate::StructuralRule::GameFourSetup,
+        }
+        | Effect::Apply {
+            operation: Operation::GainInfluenceAndDraw { .. },
+            ..
+        }
+        | Effect::Reaction {
+            trigger:
+                crate::ReactionTrigger::MorsmordreRevealedV1 | crate::ReactionTrigger::VillainRevealed,
+            ..
+        } => true,
+        Effect::Roll { die, outcomes } => die.is_house() || outcomes.iter().any(requires_game_four),
+        Effect::Sequence { effects }
+        | Effect::Choice {
+            options: effects, ..
+        } => effects.iter().any(requires_game_four),
+        Effect::Condition {
+            then, otherwise, ..
+        } => requires_game_four(then) || otherwise.as_deref().is_some_and(requires_game_four),
+        Effect::HeroAbility { effect, .. }
+        | Effect::RevealTopCard { effect, .. }
+        | Effect::ForEachTarget { effect, .. }
+        | Effect::Repeat { effect, .. }
+        | Effect::Reaction { effect, .. } => requires_game_four(effect),
         _ => false,
     }
 }

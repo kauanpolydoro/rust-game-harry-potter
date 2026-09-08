@@ -67,6 +67,29 @@ fn select_targets(
     min: u16,
     cause: &str,
 ) -> Vec<String> {
+    if state.adventure_id() == "adventure:004"
+        && state.players().len() == 4
+        && [
+            "rule:g1-starter-004",
+            "rule:g1-starter-007",
+            "rule:g1-starter-010",
+            "rule:g1-starter-013",
+        ]
+        .contains(&cause)
+        && state
+            .effect_world()
+            .hero_resource(state.active_position(), EffectResource::Health)
+            .is_some_and(|health| health <= 7)
+    {
+        return options.get(1).cloned().into_iter().collect();
+    }
+    if state.adventure_id() == "adventure:004" && cause == "rule:g4-hogwarts-card-036-effect" {
+        return options
+            .get(if state.players().len() == 2 { 3 } else { 1 })
+            .cloned()
+            .into_iter()
+            .collect();
+    }
     let mut targets = options.to_vec();
     if options.iter().all(|id| id.starts_with("hero:")) {
         targets.sort_by_key(|id| {
@@ -78,6 +101,8 @@ fn select_targets(
                 .unwrap();
             if ["rule:g3-hero-002-ability", "rule:g3-hero-005-ability"].contains(&cause) {
                 u16::from(hero.owner_position() != Some(state.active_position()))
+            } else if cause == "rule:g4-dark-arts-015-effect" {
+                10 - hero.resource(EffectResource::Health)
             } else {
                 hero.resource(EffectResource::Health)
             }
@@ -86,7 +111,7 @@ fn select_targets(
     targets.into_iter().take(usize::from(min)).collect()
 }
 
-fn next_decision(
+pub(super) fn next_decision(
     state: &InitialGameState,
     rules: &ValidatedGameRules,
     order: &[String],
@@ -196,19 +221,34 @@ fn assert_invariants(
 
 #[test]
 fn game_three_seeded_command_sequences_preserve_inventory_resources_choices_and_replay() {
-    let policies: BTreeMap<String, Vec<String>> = serde_json::from_str(include_str!(
-        "../../tests/fixtures/game-three/purchase-priority.json"
-    ))
-    .expect("reviewed policies");
+    assert_seeded_scenarios(
+        crate::game_three_manifest,
+        "adventure:003",
+        include_str!("../../tests/fixtures/game-three/purchase-priority.json"),
+    );
+}
+
+#[test]
+fn game_four_seeded_command_sequences_preserve_inventory_resources_choices_and_replay() {
+    assert_seeded_scenarios(
+        crate::game_four_manifest,
+        "adventure:004",
+        include_str!("../../tests/fixtures/game-four/purchase-priority.json"),
+    );
+}
+
+fn assert_seeded_scenarios(
+    manifest: fn() -> game_content::ContentManifest,
+    adventure: &str,
+    policies: &str,
+) {
+    let policies: BTreeMap<String, Vec<String>> =
+        serde_json::from_str(policies).expect("reviewed policies");
     let mut transitions = 0;
     for count in [2, 3, 4] {
         for seed in 0..12 {
-            let (mut state, participants, rules) = prepared_adventure_with_seed(
-                count,
-                crate::game_three_manifest(),
-                "adventure:003",
-                seed,
-            );
+            let (mut state, participants, rules) =
+                prepared_adventure_with_seed(count, manifest(), adventure, seed);
             let expected = inventory(&state);
             let mut persisted = codec::persisted_snapshot(&state, &participants);
             for _ in 0..600 {
@@ -232,9 +272,9 @@ fn game_three_seeded_command_sequences_preserve_inventory_resources_choices_and_
                 if state.pending_choice().is_some() || transitions % 17 == 0 {
                     persisted = codec::persisted_after_decision(&persisted, &state);
                     let bytes = serde_json::to_string(&persisted).expect("canonical snapshot");
-                    let decoded = codec::decode_persisted_snapshot(&bytes)
-                        .ok()
-                        .expect("current codec");
+                    let decoded = codec::decode_persisted_snapshot(&bytes).ok().unwrap_or_else(|| {
+                        panic!("current codec: {adventure}, {count} Heroes, seed {seed}, turn {}, sequence {}", state.turn(), state.sequence());
+                    });
                     let restored = codec::command_domain_state(&decoded).ok().expect("restore");
                     assert_eq!(
                         serde_json::to_string(&codec::persisted_after_decision(

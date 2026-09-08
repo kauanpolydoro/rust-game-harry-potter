@@ -837,7 +837,11 @@ fn effect_outcome_summary(outcome: &EffectOutcome) -> Option<EffectOutcomeSummar
             rule_id: rule_id.clone(),
             die: match die {
                 EffectDie::D4 => "d4",
-                EffectDie::D6 => "d6",
+                EffectDie::D6
+                | EffectDie::GryffindorV1
+                | EffectDie::HufflepuffV1
+                | EffectDie::RavenclawV1
+                | EffectDie::SlytherinV1 => "d6",
                 EffectDie::D8 => "d8",
             },
             result: *result,
@@ -859,7 +863,7 @@ fn effect_outcome_summary(outcome: &EffectOutcome) -> Option<EffectOutcomeSummar
             rule_id: rule_id.clone(),
             reason: match reason {
                 EffectNoOpReason::DrawingBlocked => "drawing_blocked",
-                EffectNoOpReason::Explicit => "explicit",
+                EffectNoOpReason::ControlRemovalBlocked | EffectNoOpReason::Explicit => "explicit",
                 EffectNoOpReason::NoEligibleTarget => "no_eligible_target",
                 EffectNoOpReason::ZeroCardinality => "zero_cardinality",
             },

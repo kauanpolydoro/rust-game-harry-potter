@@ -115,12 +115,49 @@ pub fn import_game_three_bundle_with_runtime_rules(
     )
 }
 
+/// Inspects Game 4 without granting source trust or runtime support.
+///
+/// # Errors
+/// Returns a validation failure for an invalid cumulative bundle.
+pub fn inspect_game_four_rules(bytes: &[u8]) -> Result<Vec<EffectRule>, ImportFailure> {
+    let mut bundle = parse_bundle(bytes, Inventory::GameFour)?;
+    bundle.canonicalize();
+    validation::validate(&bundle, Inventory::GameFour)?;
+    Ok(bundle.rules)
+}
+
+/// Imports Game 4 without granting functional trust.
+///
+/// # Errors
+/// Returns a validation failure for an invalid cumulative bundle.
+pub fn import_game_four_bundle(bytes: &[u8]) -> Result<ContentManifest, ImportFailure> {
+    import_bundle(bytes, &[], &BTreeSet::new(), Inventory::GameFour)
+}
+
+/// Imports Game 4 with externally granted provenance and runtime capabilities.
+///
+/// # Errors
+/// Returns a validation failure for invalid inventory, provenance, or rules.
+pub fn import_game_four_bundle_with_runtime_rules(
+    bytes: &[u8],
+    trusted_sources: &[ProvenanceSource],
+    executable_rules: &BTreeSet<RuleId>,
+) -> Result<ContentManifest, ImportFailure> {
+    import_bundle(
+        bytes,
+        trusted_sources,
+        executable_rules,
+        Inventory::GameFour,
+    )
+}
+
 #[derive(Clone, Copy)]
 enum Inventory {
     Base,
     GameOne,
     GameTwo,
     GameThree,
+    GameFour,
 }
 
 impl Inventory {
@@ -130,6 +167,7 @@ impl Inventory {
             Self::GameOne => 3,
             Self::GameTwo => 4,
             Self::GameThree => 5,
+            Self::GameFour => 6,
         }
     }
 
@@ -139,6 +177,7 @@ impl Inventory {
             Self::GameOne => 4,
             Self::GameTwo => 5,
             Self::GameThree => 6,
+            Self::GameFour => 7,
         }
     }
 
@@ -148,6 +187,7 @@ impl Inventory {
             Self::GameOne => (45, 93),
             Self::GameTwo => (63, 116),
             Self::GameThree => (77, 138),
+            Self::GameFour => (98, 169),
         }
     }
 }
@@ -666,6 +706,9 @@ impl Effect {
             | Self::HandDamageLimit { .. }
             | Self::NoOp
             | Self::Structural { .. }
+            | Self::RevealExtraDarkArts
+            | Self::PreventControlRemoval
+            | Self::OtherAllyBonus { .. }
             | Self::RevealDarkArts
             | Self::Terminal { .. } => Vec::new(),
         }
@@ -683,6 +726,9 @@ impl Effect {
             | Self::TopDeckAcquisition { .. }
             | Self::HandDamageLimit { .. }
             | Self::Structural { .. }
+            | Self::RevealExtraDarkArts
+            | Self::PreventControlRemoval
+            | Self::OtherAllyBonus { .. }
             | Self::RevealDarkArts
             | Self::Terminal { .. } => true,
             Self::Choice { options, .. } => options

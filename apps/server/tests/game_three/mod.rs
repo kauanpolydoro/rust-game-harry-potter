@@ -155,11 +155,49 @@ pub(super) fn scenario_targets(
     count: usize,
     cause: &str,
 ) -> Vec<Value> {
-    let mut options = options.to_vec();
-    if projection["snapshot"]["versions"]["content"] == "game-three-en-v1"
-        && options
+    if projection["snapshot"]["versions"]["content"] == "game-four-en-v1"
+        && projection["participants"].as_array().expect("Heroes").len() == 4
+        && [
+            "rule:g1-starter-004",
+            "rule:g1-starter-007",
+            "rule:g1-starter-010",
+            "rule:g1-starter-013",
+        ]
+        .contains(&cause)
+        && projection["participants"]
+            .as_array()
+            .expect("Heroes")
             .iter()
-            .all(|option| option.as_str().is_some_and(|id| id.starts_with("hero:")))
+            .find(|hero| hero["position"] == projection["turn"]["active_position"])
+            .expect("active Hero")["resources"]["health"]
+            .as_u64()
+            .expect("health")
+            <= 7
+    {
+        return options.get(1).cloned().into_iter().collect();
+    }
+    if projection["snapshot"]["versions"]["content"] == "game-four-en-v1"
+        && cause == "rule:g4-hogwarts-card-036-effect"
+    {
+        return options
+            .get(
+                if projection["participants"].as_array().expect("Heroes").len() == 2 {
+                    3
+                } else {
+                    1
+                },
+            )
+            .cloned()
+            .into_iter()
+            .collect();
+    }
+    let mut options = options.to_vec();
+    if matches!(
+        projection["snapshot"]["versions"]["content"].as_str(),
+        Some("game-three-en-v1" | "game-four-en-v1")
+    ) && options
+        .iter()
+        .all(|option| option.as_str().is_some_and(|id| id.starts_with("hero:")))
     {
         options.sort_by_key(|option| {
             let position = option
@@ -171,14 +209,19 @@ pub(super) fn scenario_targets(
             if ["rule:g3-hero-002-ability", "rule:g3-hero-005-ability"].contains(&cause) {
                 u64::from(projection["turn"]["active_position"] != position)
             } else {
-                projection["participants"]
+                let health = projection["participants"]
                     .as_array()
                     .expect("participants")
                     .iter()
                     .find(|hero| hero["position"] == position)
                     .expect("Hero")["resources"]["health"]
                     .as_u64()
-                    .expect("health")
+                    .expect("health");
+                if cause == "rule:g4-dark-arts-015-effect" {
+                    10 - health
+                } else {
+                    health
+                }
             }
         });
     }
