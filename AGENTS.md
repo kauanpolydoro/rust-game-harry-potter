@@ -20,5 +20,28 @@
 - A definição preservada fica em `.github/workflows-disabled/ci.yml`, fora do diretório reconhecido pelo GitHub Actions.
 - Mantenha `.github/workflows` sem workflows executáveis enquanto esta regra estiver vigente.
 - Reative o CI somente após uma instrução explícita de Kauan.
-- Continue executando `make check` localmente antes de commits, pull requests e merges.
-- Não interprete a ausência de checks remotos como permissão para ignorar os gates locais.
+- Antes de commits, pull requests e merges, execute a validação local proporcional descrita abaixo.
+
+## Validação proporcional nesta fase inicial
+
+- Priorize entregar incrementos pequenos e funcionais com testes focados no comportamento alterado.
+  Esta política prevalece sobre checklists de skills que exijam suítes completas ou matrizes extensas por tarefa.
+- Antes de testar, escolha o menor conjunto capaz de detectar uma regressão relevante e estime seu tempo.
+  Execute formatação, lint e checagem de tipos aplicáveis, além dos testes do código afetado.
+  Mudanças apenas em documentação dispensam testes de aplicação.
+- Cubra regras do jogo, combinações, faces de dados e replay com testes determinísticos no domínio.
+  Use testes de integração para persistência e contratos, e navegador para o fluxo de interface afetado.
+  Cada camada deve verificar um risco distinto, sem repetir a mesma matriz de partidas completas em todas elas.
+- Prefira fixtures pequenas que preparem diretamente o estado necessário.
+  Use poucas seeds fixas e justificadas; buscas extensas de seeds, simulações de equilíbrio e matrizes de vitória/derrota por número de jogadores exigem solicitação explícita.
+- O orçamento padrão de validação por tarefa é de dez minutos de tempo decorrido, incluindo preparação e reexecuções.
+  Se a estimativa exceder esse orçamento, reduza o escopo antes de começar.
+  Ao atingir o limite, interrompa a rodada ampla, informe resultados e pendências e proponha o próximo teste focado.
+  Rodadas acima do orçamento exigem solicitação explícita de Kauan.
+- `make check` permanece disponível como suíte completa, mas sua execução exige solicitação explícita nesta fase.
+  Não o execute automaticamente antes de cada commit, PR ou merge.
+- Quando os testes selecionados passarem, encerre a validação.
+  Após uma falha ou correção, reexecute somente o caso afetado e regressões diretamente relacionadas.
+  Amplie a execução apenas quando houver evidência de impacto fora desse escopo.
+- Preserve testes existentes e registre o que foi executado, o resultado e o que ficou fora do escopo.
+  Diferencie falhas do produto de falhas do ambiente; uma rodada interrompida ou com falhas nunca deve ser descrita como aprovada.
